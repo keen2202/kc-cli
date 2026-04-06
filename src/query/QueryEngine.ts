@@ -28,6 +28,7 @@ export interface QueryEngineConfig {
   maxBudgetUsd: number | null;
   systemPrompt?: string;
   contextWindow?: number; // For auto-compaction
+  maxMessages?: number; // Max messages to keep in history (prevents unbounded growth)
 }
 
 /**
@@ -48,6 +49,13 @@ export class QueryEngine {
   private messages: ChatMessage[] = [];
   private config: QueryEngineConfig;
   private abortController: AbortController;
+
+  // Performance: cached token estimate
+  private cachedTokenEstimate: number | null = null;
+
+  // Constants
+  private static readonly DEFAULT_MAX_MESSAGES = 1000; // Hard limit to prevent memory exhaustion
+  private static readonly MESSAGE_TRIM_COUNT = 100; // Messages to remove when limit hit
 
   constructor(config: QueryEngineConfig, tools: ToolDefinition[]) {
     this.config = config;
@@ -80,6 +88,12 @@ export class QueryEngine {
       timestamp: Date.now(),
     };
     this.messages.push(userMsg);
+
+    // Performance: invalidate token cache
+    this.cachedTokenEstimate = null;
+
+    // Enforce message limit to prevent unbounded memory growth
+    this.trimMessages();
 
     // State machine loop
     try {
@@ -136,6 +150,7 @@ export class QueryEngine {
 
   /**
    * Phase 1: Auto-compaction check
+   * Optimization: Uses cached token estimate to avoid redundant calculations.
    */
   private async *compactingPhase(): AsyncGenerator<StreamEvent | AgentEvent> {
     const config: CompactConfig = {
@@ -143,7 +158,12 @@ export class QueryEngine {
       model: this.config.model,
     };
 
-    if (!shouldCompact(this.messages, config, this.compactFailureCount)) {
+    // Use cached estimate or calculate
+    const tokenCount = this.cachedTokenEstimate ?? estimateMessageTokensArray(this.messages);
+    this.cachedTokenEstimate = tokenCount;
+
+    const threshold = config.contextWindow - 20_000 - 13_000;
+    if (tokenCount < threshold || this.compactFailureCount >= MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES) {
       return;
     }
 
@@ -155,10 +175,11 @@ export class QueryEngine {
         this.messages = result.messages;
         yield this.createCompactMicroEvent(result.tokensSaved);
 
+        // Update cached estimate
+        this.cachedTokenEstimate = estimateMessageTokensArray(this.messages);
+
         // Check if microcompact was sufficient
-        const remainingTokens = estimateMessageTokensArray(this.messages);
-        const threshold = config.contextWindow - 20_000 - 13_000;
-        if (remainingTokens < threshold) {
+        if (this.cachedTokenEstimate < threshold) {
           return;
         }
       }
@@ -506,5 +527,24 @@ export class QueryEngine {
    */
   getStateMachine(): AgentStateMachine {
     return this.stateMachine;
+  }
+
+  /**
+   * Enforce message history limit to prevent unbounded memory growth.
+   * Removes oldest messages when limit is exceeded.
+   */
+  private trimMessages(): void {
+    const maxMessages = this.config.maxMessages ?? QueryEngine.DEFAULT_MAX_MESSAGES;
+
+    if (this.messages.length > maxMessages) {
+      // Remove oldest messages, keep most recent
+      const excess = this.messages.length - maxMessages + QueryEngine.MESSAGE_TRIM_COUNT;
+      this.messages = this.messages.slice(excess);
+
+      // Invalidate cached estimate after trim
+      this.cachedTokenEstimate = null;
+
+      console.warn(`[QueryEngine] Message history exceeded ${maxMessages} limit, trimmed ${excess} messages`);
+    }
   }
 }

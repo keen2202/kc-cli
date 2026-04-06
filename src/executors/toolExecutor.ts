@@ -8,10 +8,12 @@ import { hasPermissionsToUseTool } from '../permissions/engine';
 
 /**
  * Tool executor that supports both sequential and parallel tool execution
+ * with timeout protection to prevent infinite hangs.
  */
 export class ToolExecutor {
   private tools: Map<string, ToolDefinition>;
   private cwd: string;
+  private readonly DEFAULT_TIMEOUT_MS = 30_000; // 30 seconds
 
   constructor(tools: ToolDefinition[], cwd: string) {
     this.tools = new Map(tools.map(tool => [tool.name, tool]));
@@ -19,7 +21,7 @@ export class ToolExecutor {
   }
 
   /**
-   * Execute a single tool call sequentially
+   * Execute a single tool call with timeout protection
    */
   async executeSingle(
     toolCall: ToolCall,
@@ -48,14 +50,11 @@ export class ToolExecutor {
         };
       }
 
-      // 3. Execute tool
-      const result = await tool.call(toolCall.input, context);
+      // 3. Execute tool with timeout
+      const timeoutMs = this.getToolTimeout(tool);
+      const result = await this.executeWithTimeout(tool, toolCall.input, context, timeoutMs, toolCall.toolName);
 
-      return {
-        toolCallId: toolCall.id,
-        output: result.output || '',
-        isError: result.isError || false,
-      };
+      return result;
     } catch (error) {
       return {
         toolCallId: toolCall.id,
@@ -63,6 +62,54 @@ export class ToolExecutor {
         isError: true,
       };
     }
+  }
+
+  /**
+   * Execute tool with timeout protection using AbortSignal
+   */
+  private async executeWithTimeout(
+    tool: ToolDefinition,
+    input: Record<string, unknown>,
+    context: ToolUseContext,
+    timeoutMs: number,
+    toolName: string
+  ): Promise<ToolResult> {
+    const timeoutError = new Error(`Tool '${toolName}' timed out after ${timeoutMs / 1000}s`);
+
+    // Create timeout promise
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(timeoutError), timeoutMs);
+    });
+
+    // Create tool execution promise
+    const execPromise = tool.call(input, context);
+
+    // Race between timeout and execution
+    try {
+      const result = await Promise.race([execPromise, timeoutPromise]);
+      return {
+        toolCallId: '', // Will be set by caller
+        output: (result as any).output || '',
+        isError: (result as any).isError || false,
+      };
+    } catch (error) {
+      if (error === timeoutError) {
+        throw error;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Get timeout for a specific tool (uses tool's metadata or default)
+   */
+  private getToolTimeout(tool: ToolDefinition): number {
+    // Check if tool has a custom timeout in its metadata
+    const timeout = (tool as any).timeout;
+    if (typeof timeout === 'number' && timeout > 0) {
+      return timeout * 1000; // Convert seconds to ms
+    }
+    return this.DEFAULT_TIMEOUT_MS;
   }
 
   /**

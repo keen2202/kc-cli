@@ -67,6 +67,9 @@ export interface ConfigLayer {
  * 3. Project config (.cc-cli/settings.json)
  * 4. Environment variables (CC_*)
  * 5. CLI arguments (passed separately)
+ *
+ * Optimization: User and project config files are read in parallel
+ * to reduce startup latency.
  */
 export async function loadConfig(cwd: string): Promise<{ config: Config; layers: ConfigLayer[] }> {
   const layers: ConfigLayer[] = [];
@@ -77,9 +80,15 @@ export async function loadConfig(cwd: string): Promise<{ config: Config; layers:
     config: ConfigSchema.parse({}),
   });
 
-  // Layer 2: User config
+  // Layer 2 & 3: Read user and project config in parallel
   const userConfigPath = path.join(os.homedir(), '.cc-cli', 'settings.json');
-  const userConfig = await loadConfigFile(userConfigPath);
+  const projectConfigPath = path.join(cwd, '.cc-cli', 'settings.json');
+
+  const [userConfig, projectConfig] = await Promise.all([
+    loadConfigFile(userConfigPath),
+    loadConfigFile(projectConfigPath),
+  ]);
+
   if (userConfig) {
     layers.push({
       source: 'user',
@@ -87,9 +96,6 @@ export async function loadConfig(cwd: string): Promise<{ config: Config; layers:
     });
   }
 
-  // Layer 3: Project config
-  const projectConfigPath = path.join(cwd, '.cc-cli', 'settings.json');
-  const projectConfig = await loadConfigFile(projectConfigPath);
   if (projectConfig) {
     layers.push({
       source: 'project',

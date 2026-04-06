@@ -1,30 +1,61 @@
 // Idle detection service - detects when user is idle and triggers consolidation
+// Optimization: Registers cleanup handler to prevent interval leaks on process exit.
 
 let lastActivityTime: number = Date.now();
 let idleDetectionInterval: NodeJS.Timeout | null = null;
 let idleCallback: (() => void) | null = null;
 let idleThresholdMs: number = 5 * 60 * 1000; // 5 minutes default
+let isStopped = false;
+
+// Register cleanup handler to prevent interval leaks
+process.on('exit', () => {
+  stopIdleDetection();
+});
+
+process.on('SIGINT', () => {
+  stopIdleDetection();
+});
+
+process.on('SIGTERM', () => {
+  stopIdleDetection();
+});
 
 /**
  * Start idle detection monitoring
+ * Optimization: Prevents multiple intervals from being created and uses unref()
+ * to avoid keeping the process alive.
  */
 export function startIdleDetection(
   thresholdMinutes: number = 5,
   onIdle: () => void
 ): void {
+  // If already running and not stopped, just update
+  if (idleDetectionInterval && !isStopped) {
+    idleThresholdMs = thresholdMinutes * 60 * 1000;
+    idleCallback = onIdle;
+    lastActivityTime = Date.now();
+    return;
+  }
+
+  isStopped = false;
   idleThresholdMs = thresholdMinutes * 60 * 1000;
   idleCallback = onIdle;
 
   // Reset activity time
   lastActivityTime = Date.now();
 
-  // Clear existing interval
+  // Clear existing interval if any
   if (idleDetectionInterval) {
     clearInterval(idleDetectionInterval);
   }
 
   // Start polling
   idleDetectionInterval = setInterval(checkIdleState, 30000); // Check every 30 seconds
+
+  // Unref the interval so it doesn't keep the process alive
+  if (idleDetectionInterval && typeof (idleDetectionInterval as any).unref === 'function') {
+    (idleDetectionInterval as any).unref();
+  }
 }
 
 /**

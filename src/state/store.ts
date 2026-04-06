@@ -7,10 +7,17 @@ type StateListener = (state: AgentState) => void;
 /**
  * Observable state store that provides immutable updates with listener notifications.
  * Follows the OpenHarness AppStateStore pattern.
+ *
+ * Optimization: Tool execution tracking has a maximum size limit to prevent
+ * unbounded memory growth in long-running sessions.
  */
 export class ObservableStateStore {
   private state: AgentState;
   private listeners: Set<StateListener> = new Set();
+
+  // Constants
+  private static readonly MAX_TRACKED_TOOLS = 500; // Max tool executions to track
+  private static readonly TOOL_CLEANUP_AGE_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(initialState: AgentState) {
     this.state = initialState;
@@ -85,6 +92,7 @@ export class ObservableStateStore {
 
   /**
    * Update tool execution state
+   * Optimization: Automatically cleans up old completed executions when limit is reached.
    */
   updateToolExecution(id: string, executionState: Partial<ToolExecutionState>): AgentState {
     const activeTools = new Map(this.state.activeToolExecutions);
@@ -96,7 +104,48 @@ export class ObservableStateStore {
       activeTools.set(id, executionState as ToolExecutionState);
     }
 
+    // Cleanup: remove old completed executions if limit exceeded
+    if (activeTools.size > ObservableStateStore.MAX_TRACKED_TOOLS) {
+      this.cleanupOldToolExecutions(activeTools);
+    }
+
     return this.set({ activeToolExecutions: activeTools });
+  }
+
+  /**
+   * Remove old completed tool executions to prevent memory accumulation
+   */
+  private cleanupOldToolExecutions(activeTools: Map<string, ToolExecutionState>): void {
+    const now = Date.now();
+    const toRemove: string[] = [];
+
+    // Find completed/failed executions older than threshold
+    for (const [id, exec] of activeTools.entries()) {
+      if (
+        (exec.status === 'completed' || exec.status === 'failed' || exec.status === 'killed') &&
+        exec.completedAt &&
+        (now - exec.completedAt) > ObservableStateStore.TOOL_CLEANUP_AGE_MS
+      ) {
+        toRemove.push(id);
+      }
+    }
+
+    // Remove oldest entries first
+    for (const id of toRemove.slice(0, Math.min(toRemove.length, 100))) {
+      activeTools.delete(id);
+    }
+
+    // If still over limit, remove any completed entries regardless of age
+    if (activeTools.size > ObservableStateStore.MAX_TRACKED_TOOLS) {
+      let removed = 0;
+      for (const [id, exec] of activeTools.entries()) {
+        if (exec.status === 'completed' || exec.status === 'failed' || exec.status === 'killed') {
+          activeTools.delete(id);
+          removed++;
+          if (activeTools.size <= ObservableStateStore.MAX_TRACKED_TOOLS) break;
+        }
+      }
+    }
   }
 
   /**
