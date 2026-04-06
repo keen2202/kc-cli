@@ -1,0 +1,81 @@
+// Tool base type and factory
+
+import { z } from 'zod';
+import type {
+  ToolDefinition,
+  ToolUseContext,
+  ToolResult,
+  ToolCallProgress,
+} from './types/tools';
+import type { PermissionResult } from './types/permissions';
+
+/**
+ * Build a tool with sensible defaults
+ */
+export function buildTool<Input, Output, Progress = unknown>(
+  definition: ToolDefinition<Input, Output, Progress>
+): ToolDefinition<Input, Output, Progress> {
+  return {
+    ...definition,
+    isReadOnly: definition.isReadOnly ?? (() => false),
+    isConcurrencySafe: definition.isConcurrencySafe ?? (() => true),
+    isDestructive: definition.isDestructive ?? (() => false),
+    isEnabled: definition.isEnabled ?? (() => true),
+    checkPermissions: definition.checkPermissions ?? (() => ({
+      behavior: 'passthrough' as const,
+      message: 'No permission check defined',
+    })),
+  };
+}
+
+/**
+ * Default permission check - allows read-only tools, asks for others
+ */
+export function defaultPermissionCheck(
+  input: Record<string, unknown>,
+  context: ToolUseContext,
+  isReadOnly: boolean
+): PermissionResult {
+  if (isReadOnly) {
+    return {
+      behavior: 'allow',
+      updatedInput: input,
+      decisionReason: {
+        type: 'readonly',
+        reason: 'Read-only operation is safe',
+      },
+    };
+  }
+
+  return {
+    behavior: 'ask',
+    message: 'This operation requires permission',
+  };
+}
+
+/**
+ * Create a simple tool result
+ */
+export function toolResult<T>(
+  output: T,
+  options: { isError?: boolean; message?: string; metadata?: Record<string, unknown> } = {}
+): ToolResult<T> {
+  return {
+    output,
+    isError: options.isError ?? false,
+    message: options.message,
+    metadata: options.metadata,
+  };
+}
+
+/**
+ * Create an error tool result
+ */
+export function toolError(message: string, metadata?: Record<string, unknown>): ToolResult<never> {
+  return {
+    output: null as never,
+    isError: true,
+    message,
+    metadata,
+  };
+}

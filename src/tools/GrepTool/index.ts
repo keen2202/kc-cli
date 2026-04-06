@@ -1,0 +1,135 @@
+// Grep Tool - Search file contents with regex patterns
+
+import { z } from 'zod';
+import { buildTool, toolResult, toolError } from '../../Tool';
+import type { ToolResult as ToolResultType } from '../../types/tools';
+import type { PermissionResult } from '../../types/permissions';
+import * as path from 'path';
+import * as fs from 'fs';
+
+const GrepInputSchema = z.object({
+  pattern: z.string().describe('Regex pattern to search for'),
+  path: z.string().default('.').describe('Directory or file to search'),
+  case_sensitive: z.boolean().default(false).describe('Case sensitive search'),
+  max_results: z.number().default(100).describe('Maximum number of results'),
+  file_pattern: z.string().optional().describe('Glob pattern to filter files (e.g., "*.ts")'),
+  context_lines: z.number().default(0).describe('Number of context lines around match'),
+});
+
+type GrepInput = z.infer<typeof GrepInputSchema>;
+
+export const tool = buildTool<GrepInput, string>({
+  name: 'Grep',
+  description: 'Search file contents with regex patterns',
+
+  inputSchema: GrepInputSchema,
+
+  call: async (input, context): Promise<ToolResultType<string>> => {
+    try {
+      const searchPath = path.resolve(context.cwd, input.path);
+      const flags = input.case_sensitive ? 'g' : 'gi';
+      const regex = new RegExp(input.pattern, flags);
+      const results: Array<{ file: string; line: number; match: string; context?: string }> = [];
+
+      // Recursively search files
+      async function searchDir(dir: string) {
+        if (results.length >= input.max_results) return;
+
+        const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+
+        for (const entry of entries) {
+          if (results.length >= input.max_results) break;
+
+          const fullPath = path.join(dir, entry.name);
+
+          if (entry.isDirectory()) {
+            // Skip hidden directories and node_modules
+            if (!entry.name.startsWith('.') && entry.name !== 'node_modules') {
+              await searchDir(fullPath);
+            }
+          } else if (entry.isFile()) {
+            // Check file pattern filter
+            if (input.file_pattern) {
+              const globPattern = new RegExp(input.file_pattern.replace(/\*/g, '.*').replace(/\?/g, '.'));
+              if (!globPattern.test(entry.name)) continue;
+            }
+
+            try {
+              const content = await fs.promises.readFile(fullPath, 'utf-8');
+              const lines = content.split('\n');
+
+              for (let i = 0; i < lines.length; i++) {
+                if (regex.test(lines[i])) {
+                  const matchLine = lines[i].trim();
+
+                  // Get context lines if requested
+                  let context: string | undefined;
+                  if (input.context_lines > 0) {
+                    const start = Math.max(0, i - input.context_lines);
+                    const end = Math.min(lines.length, i + input.context_lines + 1);
+                    context = lines.slice(start, end).map((l, idx) => {
+                      const lineNum = start + idx + 1;
+                      return lineNum === i + 1 ? `> ${lineNum}: ${l}` : `  ${lineNum}: ${l}`;
+                    }).join('\n');
+                  }
+
+                  results.push({
+                    file: path.relative(context.cwd, fullPath),
+                    line: i + 1,
+                    match: matchLine,
+                    context,
+                  });
+
+                  if (results.length >= input.max_results) break;
+                }
+              }
+            } catch {
+              // Skip files that can't be read
+            }
+          }
+        }
+      }
+
+      await searchDir(searchPath);
+
+      if (results.length === 0) {
+        return toolResult(`No matches found for pattern: ${input.pattern}`);
+      }
+
+      // Format results
+      const formatted = results.map(r => {
+        if (r.context) {
+          return `${r.file}:${r.line}\n${r.context}`;
+        }
+        return `${r.file}:${r.line}: ${r.match}`;
+      }).join('\n\n');
+
+      return toolResult(
+        `Found ${results.length} match(es) for "${input.pattern}":\n\n${formatted}`,
+        {
+          metadata: {
+            pattern: input.pattern,
+            matches: results.length,
+            search_path: input.path,
+          },
+        }
+      );
+    } catch (error) {
+      return toolError(`Grep failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  },
+
+  checkPermissions: (): PermissionResult => ({
+    behavior: 'allow',
+    updatedInput: {},
+    decisionReason: { type: 'readonly', reason: 'File search is read-only' },
+  }),
+
+  isReadOnly: () => true,
+  isConcurrencySafe: () => true,
+
+  prompt: () => 'Search file contents with regex. Supports context lines.',
+
+  getToolUseSummary: (input) => `Searching: "${input.pattern}" in ${input.path}`,
+  getActivityDescription: (input) => `Grepping for "${input.pattern}"`,
+});
