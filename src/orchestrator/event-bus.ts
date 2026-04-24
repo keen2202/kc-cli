@@ -42,7 +42,7 @@ export class EventBus {
         try {
           handler(event);
         } catch (error) {
-          globalThis.console?.error(`EventBus handler error for agent ${agentId}:`, error);
+          console.error(`EventBus handler error for agent ${agentId}:`, error);
         }
       }
     }
@@ -52,7 +52,7 @@ export class EventBus {
       try {
         handler(agentId, event);
       } catch (error) {
-        globalThis.console?.error(`EventBus any-handler error:`, error);
+        console.error(`EventBus any-handler error:`, error);
       }
     }
   }
@@ -213,7 +213,7 @@ export function eventsForAgent(
         resolveNext = resolve;
       });
     },
-    return(): IteratorResult<AgentEvent | MultiAgentEvent> {
+    async return(): Promise<IteratorResult<AgentEvent | MultiAgentEvent>> {
       closed = true;
       unsubscribe();
       return { value: undefined as any, done: true };
