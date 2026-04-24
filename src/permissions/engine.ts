@@ -40,12 +40,24 @@ export async function hasPermissionsToUseTool(
   } = {}
 ): Promise<PermissionResult> {
   const state = getState();
-  
+
   // Parse rules from config or use empty arrays
   const config = options.config || {};
-  const alwaysDenyRules = (config.alwaysDenyRules || []).map(rule => parseRuleString(rule));
-  const alwaysAllowRules = (config.alwaysAllowRules || []).map(rule => parseRuleString(rule));
-  const alwaysAskRules = (config.alwaysAskRules || []).map(rule => parseRuleString(rule));
+  const alwaysDenyRules: PermissionRule[] = (config.alwaysDenyRules || []).map(ruleString => ({
+    source: 'cliArg' as const,
+    ruleBehavior: 'deny' as const,
+    ruleValue: parseRuleString(ruleString),
+  }));
+  const alwaysAllowRules: PermissionRule[] = (config.alwaysAllowRules || []).map(ruleString => ({
+    source: 'cliArg' as const,
+    ruleBehavior: 'allow' as const,
+    ruleValue: parseRuleString(ruleString),
+  }));
+  const alwaysAskRules: PermissionRule[] = (config.alwaysAskRules || []).map(ruleString => ({
+    source: 'cliArg' as const,
+    ruleBehavior: 'ask' as const,
+    ruleValue: parseRuleString(ruleString),
+  }));
   
   const context: PermissionContext = {
     mode: state.permissionMode,

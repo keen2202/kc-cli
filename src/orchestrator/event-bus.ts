@@ -1,6 +1,7 @@
 // In-memory event bus for multi-agent communication
 
-import type { AgentEvent, MultiAgentEvent } from '../state/types';
+import type { AgentEvent } from '../state/types';
+import type { MultiAgentEvent } from '../types/orchestrator';
 
 type EventHandler = (event: AgentEvent | MultiAgentEvent) => void;
 type AnyHandler = (agentId: string, event: AgentEvent | MultiAgentEvent) => void;
@@ -41,7 +42,7 @@ export class EventBus {
         try {
           handler(event);
         } catch (error) {
-          console.error(`EventBus handler error for agent ${agentId}:`, error);
+          globalThis.console?.error(`EventBus handler error for agent ${agentId}:`, error);
         }
       }
     }
@@ -51,7 +52,7 @@ export class EventBus {
       try {
         handler(agentId, event);
       } catch (error) {
-        console.error(`EventBus any-handler error:`, error);
+        globalThis.console?.error(`EventBus any-handler error:`, error);
       }
     }
   }
