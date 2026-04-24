@@ -28,13 +28,15 @@ export const tool = buildTool<FileReadInput, string>({
     try {
       const filePath = path.resolve(context.cwd, input.path);
 
-      // Check file exists
-      if (!fs.existsSync(filePath)) {
+      // Check file exists (async)
+      try {
+        await fs.promises.access(filePath);
+      } catch {
         return toolError(`File not found: ${filePath}`);
       }
 
-      // Check file size
-      const stat = fs.statSync(filePath);
+      // Check file size (async)
+      const stat = await fs.promises.stat(filePath);
       if (stat.size > input.maxSize) {
         return toolError(
           `File too large (${stat.size} bytes). Max: ${input.maxSize} bytes`

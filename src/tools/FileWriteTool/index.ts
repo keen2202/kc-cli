@@ -25,11 +25,9 @@ export const tool = buildTool<FileWriteInput, string>({
     try {
       const filePath = path.resolve(context.cwd, input.path);
 
-      // Ensure directory exists
+      // Ensure directory exists (async)
       const dir = path.dirname(filePath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
+      await fs.promises.mkdir(dir, { recursive: true });
 
       // Write file
       if (input.append) {

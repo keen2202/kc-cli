@@ -110,7 +110,7 @@ function getDefaultDeployCommand(target: string): string {
     case 'netlify':
       return 'netlify deploy --prod';
     case 'ssh':
-      return 'ssh user@server "cd /app && git pull && npm install && npm run build && pm2 restart app"';
+      return 'echo "No SSH target configured. Set CC_DEPLOY_SSH_TARGET or provide a custom command."';
     case 'custom':
       return 'echo "No custom command specified"';
     default:

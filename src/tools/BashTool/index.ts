@@ -5,6 +5,7 @@ import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolUseContext, ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
 import { hasPermissionsToUseTool } from '../../permissions/engine';
+import { DANGEROUS_BASH_PATTERNS, isReadOnlyBashCommand } from '../../permissions/readonlyCommands';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -66,15 +67,7 @@ export const tool = buildTool<BashInput, string>({
     const command = input.command.trim();
 
     // Check for dangerous commands
-    const dangerousPatterns = [
-      /\brm\s+-rf\s+\/\b/,
-      /\bmkfs\b/,
-      /\bdd\s+if=.*of=\/dev\//,
-      /\bFormat\b.*\/Q/,  // Windows
-      /\bshutdown\b.*\/r/,
-    ];
-
-    for (const pattern of dangerousPatterns) {
+    for (const pattern of DANGEROUS_BASH_PATTERNS) {
       if (pattern.test(command)) {
         return {
           behavior: 'deny',
@@ -88,31 +81,15 @@ export const tool = buildTool<BashInput, string>({
     }
 
     // Check for read-only commands
-    const readOnlyPatterns = [
-      /^ls\b/,
-      /^cat\b/,
-      /^head\b/,
-      /^tail\b/,
-      /^grep\b/,
-      /^find\b/,
-      /^git\s+(status|log|diff|branch|remote)\b/,
-      /^pwd\b/,
-      /^whoami\b/,
-      /^date\b/,
-      /^echo\b/,
-    ];
-
-    for (const pattern of readOnlyPatterns) {
-      if (pattern.test(command)) {
-        return {
-          behavior: 'allow',
-          updatedInput: input,
-          decisionReason: {
-            type: 'readonly',
-            reason: 'Read-only command',
-          },
-        };
-      }
+    if (isReadOnlyBashCommand(command)) {
+      return {
+        behavior: 'allow',
+        updatedInput: input,
+        decisionReason: {
+          type: 'readonly',
+          reason: 'Read-only command',
+        },
+      };
     }
 
     // Default: ask for permission
@@ -123,11 +100,7 @@ export const tool = buildTool<BashInput, string>({
   },
 
   isReadOnly: (input) => {
-    const readOnlyPatterns = [
-      /^ls\b/, /^cat\b/, /^head\b/, /^tail\b/, /^grep\b/,
-      /^find\b/, /^git\s+(status|log|diff)\b/, /^pwd\b/,
-    ];
-    return readOnlyPatterns.some(p => p.test(input.command));
+    return isReadOnlyBashCommand(input.command);
   },
 
   prompt: () => 'Execute bash commands. Supports pipes, redirects, and background processes.',

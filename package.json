@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "npx tsx src/main.ts",
     "cc": "npx tsx src/main.ts",
-    "typecheck": "tsc --noEmit"
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "npx tsx test/run-tests.ts"
   },
   "keywords": [
     "cli",

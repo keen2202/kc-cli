@@ -1,6 +1,8 @@
 // Auto classifier for permission decisions
 
 import type { PermissionResult, PermissionContext } from '../types/permissions';
+import { LOW_RISK_BASH_PATTERNS, MEDIUM_RISK_BASH_PATTERNS } from './readonlyCommands';
+import { containsProtectedPath } from './protectedPaths';
 
 export interface ClassifierDecision {
   behavior: 'allow' | 'deny' | 'ask';
@@ -55,7 +57,7 @@ export class PermissionClassifier {
     // Always deny known dangerous patterns
     const command = (input.command as string) || '';
 
-    if (command.match(/\b(rm\s+-rf\s+/)) {
+    if (command.match(/\b(rm\s+-rf\s+)\b/)) {
       return {
         behavior: 'deny',
         confidence: 0.99,
@@ -91,15 +93,7 @@ export class PermissionClassifier {
     const command = (input.command as string) || '';
 
     // Low-risk commands
-    const lowRiskPatterns = [
-      /^ls\b/,
-      /^cat\b/,
-      /^git\s+(status|log|diff|branch)\b/,
-      /^find\s+\.\s+-name\b/,
-      /^grep\b/,
-    ];
-
-    for (const pattern of lowRiskPatterns) {
+    for (const pattern of LOW_RISK_BASH_PATTERNS) {
       if (pattern.test(command)) {
         return {
           behavior: 'allow',
@@ -110,14 +104,7 @@ export class PermissionClassifier {
     }
 
     // Medium-risk commands
-    const mediumRiskPatterns = [
-      /^git\s+(commit|push|pull)\b/,
-      /^npm\s+(install|run)\b/,
-      /^docker\s+(ps|images|logs)\b/,
-      /^(mkdir|touch|cp|mv)\b/,
-    ];
-
-    for (const pattern of mediumRiskPatterns) {
+    for (const pattern of MEDIUM_RISK_BASH_PATTERNS) {
       if (pattern.test(command)) {
         return {
           behavior: 'ask',

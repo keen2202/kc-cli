@@ -96,9 +96,12 @@ export function microcompact(
 
     if (msg.role === 'tool' && msg.toolResults) {
       // Check if this is a compactable tool
+      // Try to infer tool name from the associated assistant message's toolCalls
+      // Since we can't reliably determine the tool from the result alone,
+      // we consider all tool results with output as compactable candidates
       const hasCompactableTool = msg.toolResults.some(result => {
-        // Try to infer tool name from result metadata or content
-        return true; // For now, clear all old tool results
+        // Results with substantial output are good compaction candidates
+        return result.output && String(result.output).length > 50;
       });
 
       if (hasCompactableTool) {
@@ -176,7 +179,14 @@ export async function fullCompact(
     const summaryPrompt = buildCompactPrompt(oldMessages, systemPrompt);
 
     // Call LLM to generate summary (no tools)
-    const summaryResponse = await apiClient.generateSummary(summaryPrompt);
+    // TODO: Integrate with real LLM API client once implemented
+    let summaryResponse: string;
+    try {
+      summaryResponse = await apiClient.generateSummary(summaryPrompt);
+    } catch {
+      // If API client fails, fall back to a simple truncation summary
+      summaryResponse = buildFallbackSummary(oldMessages);
+    }
 
     // Build compacted messages
     const summaryMessage: ChatMessage = {
@@ -251,4 +261,24 @@ export function formatCompactSummary(rawSummary: string): string {
 
   // Otherwise return as-is
   return rawSummary.trim();
+}
+
+/**
+ * Build a fallback summary when LLM API is unavailable
+ * Simple truncation-based summary
+ */
+function buildFallbackSummary(messages: ChatMessage[]): string {
+  const parts: string[] = ['[Auto-generated summary - LLM unavailable]'];
+
+  for (const msg of messages) {
+    if (msg.role === 'user' && msg.content) {
+      const preview = msg.content.slice(0, 100);
+      parts.push(`User: ${preview}${msg.content.length > 100 ? '...' : ''}`);
+    } else if (msg.role === 'assistant' && msg.content) {
+      const preview = msg.content.slice(0, 100);
+      parts.push(`Assistant: ${preview}${msg.content.length > 100 ? '...' : ''}`);
+    }
+  }
+
+  return parts.join('\n');
 }

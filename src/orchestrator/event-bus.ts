@@ -16,15 +16,23 @@ export class EventBus {
   private anyHandlers: Set<AnyHandler> = new Set();
   private eventBuffers: Map<string, Array<AgentEvent | MultiAgentEvent>> = new Map();
 
+  // Constants
+  private static readonly MAX_BUFFER_SIZE = 1000; // Max events per agent buffer
+
   /**
    * Emit an event for a specific agent
    */
   emit(agentId: string, event: AgentEvent | MultiAgentEvent): void {
-    // Buffer the event
+    // Buffer the event with size limit
     if (!this.eventBuffers.has(agentId)) {
       this.eventBuffers.set(agentId, []);
     }
-    this.eventBuffers.get(agentId)!.push(event);
+    const buffer = this.eventBuffers.get(agentId)!;
+    if (buffer.length >= EventBus.MAX_BUFFER_SIZE) {
+      // Drop oldest event to prevent unbounded growth
+      buffer.shift();
+    }
+    buffer.push(event);
 
     // Notify agent-specific handlers
     const agentHandlers = this.handlers.get(agentId);

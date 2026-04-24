@@ -2,6 +2,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs';
+import { isProtectedPath, SYSTEM_WRITE_DIRECTORIES } from '../permissions/protectedPaths';
 
 /**
  * Check if path is allowed based on security rules
@@ -35,35 +36,7 @@ export function isPathAllowed(filePath: string, options: {
  * Check if path matches dangerous patterns
  */
 function matchesDenyPattern(normalizedPath: string): boolean {
-  const denyPatterns = [
-    // System files
-    /^\/etc\/(passwd|shadow|shadow-|sudoers)$/,
-    /^\/etc\/ssh\//,
-    /^\/(proc|sys|dev)\//,
-
-    // SSH and GPG
-    /\/\.ssh\//,
-    /\/\.gnupg\//,
-
-    // Shell profiles (prevent injection)
-    /\/\.(bashrc|zshrc|profile|bash_profile)$/,
-
-    // Credential files
-    /\/\.(env|credentials|secrets)$/,
-    /passwords?\.(txt|json|yaml)$/,
-    /secrets?\.(txt|json|yaml)$/,
-
-    // Version control internals
-    /\/\.git\/(objects|refs)\//,
-  ];
-
-  for (const pattern of denyPatterns) {
-    if (pattern.test(normalizedPath)) {
-      return true;
-    }
-  }
-
-  return false;
+  return isProtectedPath(normalizedPath);
 }
 
 /**
@@ -113,14 +86,13 @@ export function validateWritePath(filePath: string, options: {
   const normalizedPath = path.resolve(options.cwd, filePath);
 
   // Prevent writing to system directories
-  if (normalizedPath.startsWith('/etc/') ||
-      normalizedPath.startsWith('/usr/') ||
-      normalizedPath.startsWith('/bin/') ||
-      normalizedPath.startsWith('/sbin/')) {
-    return {
-      valid: false,
-      reason: 'Cannot write to system directories',
-    };
+  for (const sysDir of SYSTEM_WRITE_DIRECTORIES) {
+    if (normalizedPath.startsWith(sysDir)) {
+      return {
+        valid: false,
+        reason: 'Cannot write to system directories',
+      };
+    }
   }
 
   // Check allowed directories

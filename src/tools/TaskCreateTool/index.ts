@@ -6,20 +6,9 @@ import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { taskStore } from '../TaskStore';
 
 const execAsync = promisify(exec);
-
-interface TaskRecord {
-  id: string;
-  command: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  createdAt: number;
-  output?: string;
-}
-
-// Session-level task storage
-const tasks = new Map<string, TaskRecord>();
-let nextTaskId = 1;
 
 const TaskCreateInputSchema = z.object({
   command: z.string().describe('Command to execute'),
@@ -38,42 +27,37 @@ export const tool = buildTool<TaskCreateInput, string>({
 
   call: async (input, context): Promise<ToolResultType<string>> => {
     try {
-      const taskId = `task_${nextTaskId++}`;
       const workingDir = input.cwd || context.cwd;
-
-      const task: TaskRecord = {
-        id: taskId,
-        command: input.command,
-        status: 'pending',
-        createdAt: Date.now(),
-      };
-
-      tasks.set(taskId, task);
+      const task = taskStore.create(input.command);
 
       if (input.background) {
         // Run in background
-        task.status = 'running';
+        taskStore.update(task.id, { status: 'running' });
         execAsync(input.command, {
           cwd: workingDir,
           timeout: 3600000, // 1 hour timeout
         })
           .then(({ stdout, stderr }) => {
-            task.status = 'completed';
-            task.output = stdout || stderr;
+            taskStore.update(task.id, {
+              status: 'completed',
+              output: stdout || stderr,
+            });
           })
           .catch((error) => {
-            task.status = 'failed';
-            task.output = error.message;
+            taskStore.update(task.id, {
+              status: 'failed',
+              output: error.message,
+            });
           });
 
         return toolResult(
-          `Background task created: ${taskId}\n` +
+          `Background task created: ${task.id}\n` +
           `Command: ${input.command}\n` +
           `Status: Running\n` +
           `Use TaskGet to check status.`,
           {
             metadata: {
-              task_id: taskId,
+              task_id: task.id,
               command: input.command,
               background: true,
             },
@@ -81,20 +65,22 @@ export const tool = buildTool<TaskCreateInput, string>({
         );
       } else {
         // Run synchronously
-        task.status = 'running';
+        taskStore.update(task.id, { status: 'running' });
         const { stdout, stderr } = await execAsync(input.command, {
           cwd: workingDir,
           timeout: 300000, // 5 minute timeout
         });
 
-        task.status = 'completed';
-        task.output = stdout || stderr;
+        taskStore.update(task.id, {
+          status: 'completed',
+          output: stdout || stderr,
+        });
 
         return toolResult(
-          `Task completed: ${taskId}\n\n${task.output}`,
+          `Task completed: ${task.id}\n\n${stdout || stderr}`,
           {
             metadata: {
-              task_id: taskId,
+              task_id: task.id,
               command: input.command,
               background: false,
             },

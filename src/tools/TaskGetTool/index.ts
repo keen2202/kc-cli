@@ -4,23 +4,7 @@ import { z } from 'zod';
 import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
-
-interface TaskRecord {
-  id: string;
-  command: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
-  createdAt: number;
-  output?: string;
-}
-
-// Access task storage from TaskCreateTool (would use shared state in production)
-declare global {
-  var taskRegistry: Map<string, TaskRecord>;
-}
-
-if (!global.taskRegistry) {
-  global.taskRegistry = new Map();
-}
+import { taskStore } from '../TaskStore';
 
 const TaskGetInputSchema = z.object({
   task_id: z.string().optional().describe('Task ID to query (omit for all tasks)'),
@@ -37,11 +21,9 @@ export const tool = buildTool<TaskGetInput, string>({
 
   call: async (input, context): Promise<ToolResultType<string>> => {
     try {
-      const allTasks = Array.from(global.taskRegistry.values());
-
       if (input.task_id) {
         // Get specific task
-        const task = global.taskRegistry.get(input.task_id);
+        const task = taskStore.get(input.task_id);
         if (!task) {
           return toolError(`Task not found: ${input.task_id}`);
         }
@@ -63,9 +45,9 @@ export const tool = buildTool<TaskGetInput, string>({
       }
 
       // List all tasks
-      let filteredTasks = allTasks;
+      let filteredTasks = taskStore.getAll();
       if (input.status_filter) {
-        filteredTasks = allTasks.filter(t => t.status === input.status_filter);
+        filteredTasks = filteredTasks.filter(t => t.status === input.status_filter);
       }
 
       if (filteredTasks.length === 0) {
@@ -101,7 +83,7 @@ export const tool = buildTool<TaskGetInput, string>({
 
   checkPermissions: (): PermissionResult => ({
     behavior: 'allow',
-    updatedInput: {},
+    updatedInput: undefined,
     decisionReason: { type: 'readonly', reason: 'Task status query is read-only' },
   }),
 

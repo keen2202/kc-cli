@@ -30,11 +30,12 @@ export const tool = buildTool<GlobInput, string>({
       // Convert glob pattern to regex
       function globToRegex(pattern: string): RegExp {
         const regex = pattern
+          .replace(/[.+^${}()|[\]\\]/g, '\\$&') // Escape special regex chars (except * and ?)
           .replace(/\*\*/g, '___DOUBLE___')
           .replace(/\*/g, '___SINGLE___')
           .replace(/___DOUBLE___/g, '.*')
           .replace(/___SINGLE___/g, '[^/]*')
-          .replace(/\?/g, '.');
+          .replace(/\?/g, '[^/]');
         return new RegExp(`^${regex}$`);
       }
 

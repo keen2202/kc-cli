@@ -98,16 +98,24 @@ export const tool = buildTool<WebFetchInput, string>({
   },
 
   checkPermissions: (input, context): PermissionResult => {
-    // Block internal/private URLs
+    // Block internal/private URLs (RFC 1918 private ranges)
     const url = new URL(input.url);
     const hostname = url.hostname.toLowerCase();
+
+    // Parse IP address for range checks
+    const ipMatch = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
 
     if (
       hostname === 'localhost' ||
       hostname === '127.0.0.1' ||
       hostname.startsWith('192.168.') ||
       hostname.startsWith('10.') ||
-      hostname.startsWith('172.16.')
+      (ipMatch && (() => {
+        // Check 172.16.0.0/12 range (172.16.0.0 - 172.31.255.255)
+        const octet1 = parseInt(ipMatch[1], 10);
+        const octet2 = parseInt(ipMatch[2], 10);
+        return octet1 === 172 && octet2 >= 16 && octet2 <= 31;
+      })())
     ) {
       return {
         behavior: 'deny',

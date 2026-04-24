@@ -1,0 +1,304 @@
+// Ollama API Client (Local LLM Server)
+
+import { BaseApiClient } from './BaseApiClient';
+import type { LLMStreamEvent, LLMRequestConfig, LLMResponse, TokenUsage } from './BaseApiClient';
+import type { ToolCall } from '../types/message';
+
+export interface OllamaConfig {
+  baseUrl?: string;
+  model: string;
+}
+
+export class OllamaClient extends BaseApiClient {
+  constructor(config: OllamaConfig) {
+    super({
+      apiKey: '', // Ollama doesn't require API key
+      baseUrl: config.baseUrl || 'http://localhost:11434',
+      model: config.model,
+    });
+  }
+
+  /**
+   * Send a chat completion request
+   */
+  async chat(config: LLMRequestConfig): Promise<LLMResponse> {
+    const requestBody = this.buildRequestBody({ ...config, stream: false });
+
+    try {
+      const response = await fetch(`${this.baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+        signal: config.abortSignal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'Ollama API error');
+      }
+
+      const data = await response.json();
+      return this.parseResponse(data);
+    } catch (error) {
+      this.handleApiError(error, 'Failed to call Ollama API. Make sure Ollama is running');
+    }
+  }
+
+  /**
+   * Stream chat completion response
+   */
+  async *streamChat(config: LLMRequestConfig): AsyncGenerator<LLMStreamEvent> {
+    const requestBody = this.buildRequestBody({ ...config, stream: true });
+
+    try {
+      const response = await fetch(`${this.baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+        signal: config.abortSignal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'Ollama API error');
+      }
+
+      if (!response.body) {
+        throw new Error('Response body is null');
+      }
+
+      yield* this.parseStreamResponse(response.body);
+    } catch (error) {
+      yield {
+        type: 'error',
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
+    }
+  }
+
+  /**
+   * Validate API key (Ollama doesn't require one)
+   */
+  validateApiKey(): boolean {
+    return true;
+  }
+
+  /**
+   * Get model information
+   */
+  getModelInfo() {
+    // Ollama supports many models, context window varies
+    const modelInfo: Record<string, { maxTokens: number }> = {
+      'llama3': { maxTokens: 8192 },
+      'llama3.1': { maxTokens: 128000 },
+      'llama3.2': { maxTokens: 128000 },
+      'llama3.3': { maxTokens: 128000 },
+      'mistral': { maxTokens: 8192 },
+      'mixtral': { maxTokens: 32768 },
+      'qwen2': { maxTokens: 32768 },
+      'qwen2.5': { maxTokens: 128000 },
+      'gemma2': { maxTokens: 8192 },
+      'phi3': { maxTokens: 128000 },
+      'deepseek-coder': { maxTokens: 16384 },
+      'codellama': { maxTokens: 100000 },
+    };
+
+    const info = modelInfo[this.model] || { maxTokens: 8192 };
+
+    return {
+      provider: 'ollama',
+      model: this.model,
+      maxTokens: info.maxTokens,
+      supportsStreaming: true,
+      supportsTools: true, // Depends on model capabilities
+    };
+  }
+
+  /**
+   * Build request body for Ollama API
+   */
+  protected buildRequestBody(config: LLMRequestConfig): Record<string, unknown> {
+    const body: Record<string, unknown> = {
+      model: this.model,
+      stream: config.stream ?? true,
+    };
+
+    // Format messages
+    const messages: any[] = [];
+
+    if (config.systemPrompt) {
+      messages.push({
+        role: 'system',
+        content: config.systemPrompt,
+      });
+    }
+
+    messages.push(...this.formatMessages(config.messages));
+    body.messages = messages;
+
+    // Ollama options
+    body.options = {
+      temperature: config.temperature ?? 0.7,
+      num_predict: config.maxTokens ?? 4096,
+    };
+
+    // Tools (Ollama 0.1.30+ supports function calling)
+    if (config.tools && config.tools.length > 0) {
+      body.tools = this.formatTools(config.tools);
+    }
+
+    return body;
+  }
+
+  /**
+   * Parse non-streaming Response
+   */
+  private parseResponse(data: any): LLMResponse {
+    const message = data.message;
+    if (!message) {
+      throw new Error('No message in response');
+    }
+
+    const content = message.content || '';
+    const toolCalls: ToolCall[] = [];
+
+    // Parse tool calls (Ollama format)
+    if (message.tool_calls && Array.isArray(message.tool_calls)) {
+      for (const tc of message.tool_calls) {
+        toolCalls.push({
+          id: tc.id || `tool_call_${Date.now()}`,
+          toolName: tc.function?.name || '',
+          input: tc.function?.arguments || {},
+          status: 'completed',
+        });
+      }
+    }
+
+    // Parse usage
+    const usage: TokenUsage = {
+      inputTokens: data.prompt_eval_count || 0,
+      outputTokens: data.eval_count || 0,
+      totalTokens: (data.prompt_eval_count || 0) + (data.eval_count || 0),
+    };
+
+    return {
+      content,
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      usage,
+    };
+  }
+
+  /**
+   * Parse streaming response
+   */
+  private async *parseStreamResponse(body: ReadableStream): AsyncGenerator<LLMStreamEvent> {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Ollama returns NDJSON (newline-delimited JSON)
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          try {
+            const data = JSON.parse(trimmed);
+            yield* this.parseStreamChunk(data);
+
+            if (data.done) {
+              yield { type: 'stop' };
+              return;
+            }
+          } catch (error) {
+            console.warn('Failed to parse Ollama chunk:', error);
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  /**
+   * Parse single stream chunk
+   */
+  private *parseStreamChunk(data: any): Generator<LLMStreamEvent> {
+    // Text delta
+    if (data.message?.content) {
+      yield {
+        type: 'text_delta',
+        text: data.message.content,
+      };
+    }
+
+    // Tool calls
+    if (data.message?.tool_calls && Array.isArray(data.message.tool_calls)) {
+      for (const tc of data.message.tool_calls) {
+        try {
+          const toolCall: ToolCall = {
+            id: tc.id || `tool_call_${Date.now()}`,
+            toolName: tc.function?.name || '',
+            input: tc.function?.arguments || {},
+            status: 'completed',
+          };
+
+          yield {
+            type: 'tool_use',
+            toolCall,
+          };
+        } catch (error) {
+          console.warn('Failed to parse Ollama tool call:', error);
+        }
+      }
+    }
+
+    // Usage (only in final chunk)
+    if (data.done && data.prompt_eval_count !== undefined) {
+      yield {
+        type: 'stop',
+        usage: {
+          inputTokens: data.prompt_eval_count || 0,
+          outputTokens: data.eval_count || 0,
+          totalTokens: (data.prompt_eval_count || 0) + (data.eval_count || 0),
+        },
+      };
+    }
+  }
+
+  /**
+   * Handle API errors with Ollama-specific handling
+   */
+  protected handleApiError(error: unknown, context: string): never {
+    if (error instanceof Error) {
+      const message = error.message;
+
+      // Connection refused - Ollama not running
+      if (message.includes('ECONNREFUSED') || message.includes('fetch failed')) {
+        throw new Error(`${context}: Cannot connect to Ollama at ${this.baseUrl}. Is Ollama running?`);
+      }
+
+      if (message.includes('model') && message.includes('not found')) {
+        throw new Error(`${context}: Model '${this.model}' not found. Run 'ollama pull ${this.model}' first`);
+      }
+    }
+
+    super.handleApiError(error, context);
+  }
+}

@@ -121,16 +121,36 @@ src/
 ├── permissions/               # Security system
 │   ├── engine.ts              # Permission engine
 │   ├── rules.ts               # Rule matching
-│   └── classifier.ts          # Auto classifier
+│   ├── classifier.ts          # Auto classifier
+│   ├── readonlyCommands.ts    # Shared read-only command patterns
+│   └── protectedPaths.ts      # Shared protected path definitions
 ├── query/
 │   └── QueryEngine.ts         # LLM query engine
 ├── tools/                     # Tool implementations
+│   ├── TaskStore.ts           # Shared task storage
 │   ├── BashTool/              # Shell execution
 │   ├── FileReadTool/          # File reading
 │   ├── FileWriteTool/         # File writing
 │   └── ...                    # More tools
-└── types/                     # Type definitions
+├── types/                     # Type definitions
+│   ├── orchestrator.ts        # Shared orchestrator types
+│   └── ...
+└── utils/                     # Utilities
+    ├── format.ts              # Shared formatting helpers
+    ├── path.ts                # Path validation
+    └── tokenEstimation.ts     # Token estimation
 ```
+
+### Placeholder Directories
+
+The following directories are reserved for future development and currently contain only `.gitkeep` files:
+
+- `src/api/` — LLM API client implementations (Anthropic, OpenAI, Ollama)
+- `src/commands/` — Additional CLI subcommands
+- `src/server/` — HTTP/WebSocket server for remote access
+- `src/terminal/` — Advanced terminal UI (ink-based)
+- `src/services/skills/` — Skill system for specialized workflows
+- `src/services/tools/` — Service-level tool implementations
 
 ## Available Tools
 

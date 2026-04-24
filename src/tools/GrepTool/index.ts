@@ -28,7 +28,12 @@ export const tool = buildTool<GrepInput, string>({
     try {
       const searchPath = path.resolve(context.cwd, input.path);
       const flags = input.case_sensitive ? 'g' : 'gi';
-      const regex = new RegExp(input.pattern, flags);
+      let regex: RegExp;
+      try {
+        regex = new RegExp(input.pattern, flags);
+      } catch (regexError) {
+        return toolError(`Invalid regex pattern: ${input.pattern} - ${regexError instanceof Error ? regexError.message : String(regexError)}`);
+      }
       const results: Array<{ file: string; line: number; match: string; context?: string }> = [];
 
       // Recursively search files

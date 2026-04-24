@@ -1,8 +1,8 @@
 // Multi-agent coordination types
 
-import type { ToolName, ToolDefinition, ToolUseContext } from '../types/tools';
-import type { PermissionMode, PermissionContext } from '../types/permissions';
-import type { AgentEvent, TokenUsage } from '../state/types';
+import type { ToolName } from '../types/tools';
+import type { PermissionMode } from '../types/permissions';
+import type { AgentEvent } from '../state/types';
 
 /**
  * Sub-agent identity
@@ -61,19 +61,10 @@ export interface SubAgentRuntime {
   error?: Error;
 }
 
-/**
- * Sub-agent result
- */
-export interface SubAgentResult {
-  agentId: string;
-  name: string;
-  success: boolean;
-  output: string; // Formatted result text
-  toolUseCount: number;
-  totalTokensUsed: number;
-  duration: number; // milliseconds
-  error?: string;
-}
+export type { SubAgentResult, MultiAgentEvent } from '../types/orchestrator';
+
+// Re-import for local use
+import type { SubAgentResult } from '../types/orchestrator';
 
 /**
  * Aggregated result from multiple sub-agents
@@ -85,46 +76,6 @@ export interface AggregatedResult {
   totalToolUses: number;
   summary: string; // Natural language summary for LLM
 }
-
-/**
- * Multi-agent events - discriminated union
- */
-export type MultiAgentEvent =
-  | {
-      type: 'agent:subagent_spawned';
-      agentId: string;
-      name: string;
-      timestamp: number;
-    }
-  | {
-      type: 'agent:subagent_progress';
-      agentId: string;
-      event: AgentEvent;
-      timestamp: number;
-    }
-  | {
-      type: 'agent:subagent_completed';
-      agentId: string;
-      result: SubAgentResult;
-      timestamp: number;
-    }
-  | {
-      type: 'agent:subagent_failed';
-      agentId: string;
-      error: string;
-      timestamp: number;
-    }
-  | {
-      type: 'agent:subagent_timed_out';
-      agentId: string;
-      elapsed: number;
-      timestamp: number;
-    }
-  | {
-      type: 'agent:subagent_cancelled';
-      agentId: string;
-      timestamp: number;
-    };
 
 /**
  * Sub-agent error types

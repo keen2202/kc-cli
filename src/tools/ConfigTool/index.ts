@@ -16,7 +16,9 @@ const ConfigInputSchema = z.object({
 
 type ConfigInput = z.infer<typeof ConfigInputSchema>;
 
-// Session config storage
+// Session config storage with size limits
+const MAX_SESSION_CONFIG_ENTRIES = 100;
+const MAX_SESSION_VALUE_SIZE = 10 * 1024; // 10KB per value
 const sessionConfig = new Map<string, string>();
 
 export const tool = buildTool<ConfigInput, string>({
@@ -47,6 +49,12 @@ export const tool = buildTool<ConfigInput, string>({
           }
 
           if (input.scope === 'session') {
+            if (sessionConfig.size >= MAX_SESSION_CONFIG_ENTRIES) {
+              return toolError(`Session config limit reached (${MAX_SESSION_CONFIG_ENTRIES} entries)`);
+            }
+            if (input.value.length > MAX_SESSION_VALUE_SIZE) {
+              return toolError(`Value too large (max ${MAX_SESSION_VALUE_SIZE} bytes)`);
+            }
             sessionConfig.set(input.key, input.value);
             return toolResult(`Set ${input.key} = ${input.value} (session scope)`, {
               metadata: { key: input.key, scope: input.scope },

@@ -125,7 +125,10 @@ export async function executeMemoryExtraction(context: PostTurnHookContext): Pro
       state.pendingContext = null;
       // Run trailing extraction without throttle
       state.turnsSinceLastExtraction = turnThrottle;
-      void executeMemoryExtraction(trailingContext);
+      // Fire-and-forget with error boundary
+      executeMemoryExtraction(trailingContext).catch(err => {
+        console.error('[MemoryExtraction] Trailing extraction failed:', err);
+      });
     }
   }
 }

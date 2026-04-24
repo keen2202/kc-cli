@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
+import { DANGEROUS_GIT_PATTERNS, isReadOnlyGitCommand } from '../../permissions/readonlyCommands';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -16,22 +17,6 @@ const GitInputSchema = z.object({
 });
 
 type GitInput = z.infer<typeof GitInputSchema>;
-
-// Read-only Git commands
-const READONLY_COMMANDS = new Set([
-  'status', 'log', 'diff', 'branch', 'remote', 'show',
-  'ls-files', 'ls-tree', 'cat-file', 'describe', 'tag',
-  'shortlog', 'name-rev', 'rev-parse', 'rev-list',
-  'show-ref', 'for-each-ref', 'config --list',
-]);
-
-// Dangerous Git commands
-const DANGEROUS_COMMANDS = [
-  /push\s+--force/,
-  /reset\s+--hard/,
-  /clean\s+-fd/,
-  /filter-branch/,
-];
 
 export const tool = buildTool<GitInput, string>({
   name: 'Git',
@@ -66,7 +51,7 @@ export const tool = buildTool<GitInput, string>({
     const command = input.command.trim();
 
     // Check for dangerous commands
-    for (const pattern of DANGEROUS_COMMANDS) {
+    for (const pattern of DANGEROUS_GIT_PATTERNS) {
       if (pattern.test(command)) {
         return {
           behavior: 'deny',
@@ -76,8 +61,7 @@ export const tool = buildTool<GitInput, string>({
     }
 
     // Check if read-only
-    const baseCommand = command.split(' ')[0];
-    if (READONLY_COMMANDS.has(baseCommand) || READONLY_COMMANDS.has(command)) {
+    if (isReadOnlyGitCommand(command)) {
       return {
         behavior: 'allow',
         updatedInput: input,
@@ -92,12 +76,11 @@ export const tool = buildTool<GitInput, string>({
   },
 
   isReadOnly: (input) => {
-    const baseCommand = input.command.split(' ')[0];
-    return READONLY_COMMANDS.has(baseCommand) || READONLY_COMMANDS.has(input.command);
+    return isReadOnlyGitCommand(input.command);
   },
   isConcurrencySafe: () => false,
   isDestructive: (input) => {
-    return DANGEROUS_COMMANDS.some(pattern => pattern.test(input.command));
+    return DANGEROUS_GIT_PATTERNS.some(pattern => pattern.test(input.command));
   },
 
   prompt: () => 'Execute Git commands. Read-only operations are auto-allowed.',

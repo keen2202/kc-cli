@@ -46,6 +46,13 @@ export function updateState(updates: Partial<GlobalState>): void {
   Object.assign(currentState, updates);
 }
 
+/**
+ * Reset global state (for testing isolation)
+ */
+export function resetState(): void {
+  state = null;
+}
+
 function findProjectRoot(dir: string): string | null {
   const markers = [
     '.git',

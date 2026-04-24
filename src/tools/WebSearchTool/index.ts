@@ -46,9 +46,9 @@ export const tool = buildTool<WebSearchInput, string>({
     }
   },
 
-  checkPermissions: (): PermissionResult => ({
+  checkPermissions: (input): PermissionResult => ({
     behavior: 'allow',
-    updatedInput: {},
+    updatedInput: input,
     decisionReason: { type: 'readonly', reason: 'Web search is read-only' },
   }),
 
