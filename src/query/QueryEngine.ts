@@ -594,6 +594,20 @@ export class QueryEngine {
   }
 
   /**
+   * Abort the current query
+   */
+  abort(reason?: string): void {
+    this.abortController.abort(reason);
+  }
+
+  /**
+   * Check if the query has been aborted
+   */
+  isAborted(): boolean {
+    return this.abortController.signal.aborted;
+  }
+
+  /**
    * Enforce message history limit to prevent unbounded memory growth.
    * Removes oldest messages when limit is exceeded.
    */
@@ -601,8 +615,8 @@ export class QueryEngine {
     const maxMessages = this.config.maxMessages ?? QueryEngine.DEFAULT_MAX_MESSAGES;
 
     if (this.messages.length > maxMessages) {
-      // Remove oldest messages, keep most recent
-      const excess = this.messages.length - maxMessages + QueryEngine.MESSAGE_TRIM_COUNT;
+      // Remove only the excess messages, keep most recent
+      const excess = this.messages.length - maxMessages;
       this.messages = this.messages.slice(excess);
 
       // Invalidate cached estimate after trim

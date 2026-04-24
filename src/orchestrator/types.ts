@@ -3,6 +3,16 @@
 import type { ToolName } from '../types/tools';
 import type { PermissionMode } from '../types/permissions';
 import type { AgentEvent } from '../state/types';
+import type { StreamEvent } from '../types/message';
+
+/**
+ * QueryEngine interface - avoids circular import while providing type safety
+ */
+export interface QueryEngineLike {
+  submitMessage(message: string): AsyncGenerator<StreamEvent | AgentEvent>;
+  abort(reason?: string): void;
+  isAborted(): boolean;
+}
 
 /**
  * Sub-agent identity
@@ -52,7 +62,7 @@ export interface SubAgentRuntime {
   identity: SubAgentIdentity;
   status: SubAgentStatus;
   config: SubAgentSpawnConfig;
-  queryEngine: any; // QueryEngine instance (circular import avoided)
+  queryEngine: QueryEngineLike | null; // QueryEngine instance (circular import avoided)
   abortController: AbortController;
   startedAt: number;
   completedAt?: number;
@@ -96,7 +106,7 @@ export interface SpawnResult {
   agentId: string;
   success: boolean;
   error?: string;
-  queryEngine: any; // QueryEngine instance
+  queryEngine: QueryEngineLike | null; // QueryEngine instance
 }
 
 /**

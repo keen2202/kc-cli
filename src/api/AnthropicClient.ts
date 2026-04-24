@@ -252,13 +252,16 @@ export class AnthropicClient extends BaseApiClient {
   }
 
   /**
-   * Parse streaming response
+   * Parse streaming response with stateful SSE accumulator
+   * Handles arbitrary chunk boundaries properly
    */
   private async *parseStreamResponse(body: ReadableStream): AsyncGenerator<LLMStreamEvent> {
     const reader = body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
 
+    // SSE state machine
+    let currentEventType: string | null = null;
     let currentToolCall: Partial<ToolCall> | null = null;
     let toolInputBuffer = '';
 
@@ -267,44 +270,92 @@ export class AnthropicClient extends BaseApiClient {
         const { done, value } = await reader.read();
 
         if (done) {
+          // Process remaining buffer
+          if (buffer.trim()) {
+            yield* this.processBufferLine(buffer.trim(), {
+              currentEventType: currentEventType,
+              currentToolCall,
+              toolInputBuffer,
+              setEventType: (type) => { currentEventType = type; },
+              setToolCall: (tc) => { currentToolCall = tc; },
+              setToolInputBuffer: (buf) => { toolInputBuffer = buf; },
+            });
+          }
           break;
         }
 
         buffer += decoder.decode(value, { stream: true });
 
-        // Parse SSE messages
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+        // Split by double newline (SSE message separator)
+        const parts = buffer.split('\n\n');
+        // Keep last incomplete part in buffer
+        buffer = parts.pop() || '';
 
-        for (const line of lines) {
-          const trimmed = line.trim();
-
-          if (trimmed.startsWith('event: ')) {
-            const eventType = trimmed.slice(7);
-
-            // Next line should be "data:"
-            const dataLine = buffer.split('\n')[0];
-            if (dataLine?.startsWith('data: ')) {
-              const dataStr = dataLine.slice(6);
-              buffer = buffer.slice(dataLine.length + 1);
-
-              try {
-                const data = JSON.parse(dataStr);
-                yield* this.parseStreamEvent(eventType, data, {
-                  currentToolCall,
-                  toolInputBuffer,
-                  setToolCall: (tc) => { currentToolCall = tc; },
-                  setToolInputBuffer: (buf) => { toolInputBuffer = buf; },
-                });
-              } catch (error) {
-                console.warn('Failed to parse SSE event:', error);
-              }
-            }
-          }
+        // Process complete messages
+        for (const part of parts) {
+          const trimmed = part.trim();
+          if (!trimmed) continue;
+          
+          yield* this.processBufferLine(trimmed, {
+            currentEventType: currentEventType,
+            currentToolCall,
+            toolInputBuffer,
+            setEventType: (type) => { currentEventType = type; },
+            setToolCall: (tc) => { currentToolCall = tc; },
+            setToolInputBuffer: (buf) => { toolInputBuffer = buf; },
+          });
         }
       }
     } finally {
       reader.releaseLock();
+    }
+  }
+
+  /**
+   * Process a single SSE message block
+   */
+  private *processBufferLine(
+    block: string,
+    context: {
+      currentEventType: string | null;
+      currentToolCall: Partial<ToolCall> | null;
+      toolInputBuffer: string;
+      setEventType: (type: string) => void;
+      setToolCall: (tc: Partial<ToolCall>) => void;
+      setToolInputBuffer: (buf: string) => void;
+    }
+  ): Generator<LLMStreamEvent> {
+    const lines = block.split('\n');
+    let eventType: string | null = null;
+    let dataStr: string | null = null;
+
+    // Parse event type and data from the block
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('event: ')) {
+        eventType = trimmed.slice(7);
+        context.setEventType(eventType);
+      } else if (trimmed.startsWith('data: ')) {
+        dataStr = trimmed.slice(6);
+      }
+    }
+
+    // Must have both event type and data
+    if (!eventType && !context.currentEventType) return;
+    if (!dataStr) return;
+
+    const resolvedEventType = eventType || context.currentEventType;
+
+    try {
+      const data = JSON.parse(dataStr);
+      yield* this.parseStreamEvent(resolvedEventType!, data, {
+        currentToolCall: context.currentToolCall,
+        toolInputBuffer: context.toolInputBuffer,
+        setToolCall: context.setToolCall,
+        setToolInputBuffer: context.setToolInputBuffer,
+      });
+    } catch (error) {
+      console.warn('Failed to parse SSE event data:', error);
     }
   }
 

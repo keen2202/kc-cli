@@ -10,6 +10,7 @@ import type {
   SpawnResult,
   SubAgentMessage,
   SubAgentResult,
+  QueryEngineLike,
 } from '../types';
 import type { ToolUseContext, ToolDefinition, ToolName } from '../../types/tools';
 import type { PermissionMode } from '../../types/permissions';
@@ -158,6 +159,11 @@ export class InProcessBackend implements SubAgentBackend {
         });
       });
 
+      // Wire up abort controller to query engine
+      abortController.signal.addEventListener('abort', () => {
+        queryEngine.abort('Sub-agent timeout or cancellation requested');
+      }, { once: true });
+
       return {
         agentId,
         success: true,
@@ -179,7 +185,7 @@ export class InProcessBackend implements SubAgentBackend {
   private async runAgentLoop(
     runtime: SubAgentRuntime,
     parentContext: ToolUseContext,
-    queryEngine: any
+    queryEngine: QueryEngineLike
   ): Promise<void> {
     const { config, abortController } = runtime;
     const agentId = runtime.identity.agentId;

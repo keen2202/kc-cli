@@ -5,24 +5,39 @@ import * as fs from 'fs';
 import { isProtectedPath, SYSTEM_WRITE_DIRECTORIES } from '../permissions/protectedPaths';
 
 /**
+ * Resolve path safely, handling symlinks before validation
+ */
+async function resolvePathBeforeCheck(filePath: string, cwd: string): Promise<string> {
+  try {
+    // Use realpath to resolve symlinks
+    return await fs.promises.realpath(filePath);
+  } catch {
+    // File doesn't exist yet, use normal resolve
+    return path.resolve(cwd, filePath);
+  }
+}
+
+/**
  * Check if path is allowed based on security rules
  */
-export function isPathAllowed(filePath: string, options: {
+export async function isPathAllowed(filePath: string, options: {
   cwd: string;
   allowedDirectories?: string[];
   operation: 'read' | 'write' | 'execute';
-}): 'allow' | 'deny' | 'ask' {
-  const normalizedPath = path.resolve(options.cwd, filePath);
+}): Promise<'allow' | 'deny' | 'ask'> {
+  // Resolve symlinks first to prevent bypass
+  const resolvedPath = await resolvePathBeforeCheck(filePath, options.cwd);
 
-  // Step 1: Check deny patterns
-  if (matchesDenyPattern(normalizedPath)) {
+  // Step 1: Check deny patterns on resolved path
+  if (matchesDenyPattern(resolvedPath)) {
     return 'deny';
   }
 
-  // Step 2: Check if in allowed directories
+  // Step 2: Check if in allowed directories (on resolved path)
   if (options.allowedDirectories) {
     for (const allowedDir of options.allowedDirectories) {
-      if (normalizedPath.startsWith(path.resolve(options.cwd, allowedDir))) {
+      const resolvedAllowedDir = path.resolve(options.cwd, allowedDir);
+      if (resolvedPath.startsWith(resolvedAllowedDir)) {
         return 'allow';
       }
     }
@@ -79,15 +94,16 @@ export async function resolvePathSafely(filePath: string, options: {
 /**
  * Validate path for write operations
  */
-export function validateWritePath(filePath: string, options: {
+export async function validateWritePath(filePath: string, options: {
   cwd: string;
   allowedDirectories: string[];
-}): { valid: boolean; reason?: string } {
-  const normalizedPath = path.resolve(options.cwd, filePath);
+}): Promise<{ valid: boolean; reason?: string }> {
+  // Resolve symlinks first
+  const resolvedPath = await resolvePathBeforeCheck(filePath, options.cwd);
 
-  // Prevent writing to system directories
+  // Prevent writing to system directories (check resolved path)
   for (const sysDir of SYSTEM_WRITE_DIRECTORIES) {
-    if (normalizedPath.startsWith(sysDir)) {
+    if (resolvedPath.startsWith(sysDir)) {
       return {
         valid: false,
         reason: 'Cannot write to system directories',
@@ -95,10 +111,10 @@ export function validateWritePath(filePath: string, options: {
     }
   }
 
-  // Check allowed directories
+  // Check allowed directories (on resolved path)
   for (const allowedDir of options.allowedDirectories) {
     const resolvedAllowedDir = path.resolve(options.cwd, allowedDir);
-    if (normalizedPath.startsWith(resolvedAllowedDir)) {
+    if (resolvedPath.startsWith(resolvedAllowedDir)) {
       return { valid: true };
     }
   }

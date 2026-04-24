@@ -415,7 +415,9 @@ async function listTools() {
   }
 }
 
-function buildSystemPrompt(tools: any[]): string {
+import type { ToolDefinition } from './types/tools';
+
+function buildSystemPrompt(tools: ToolDefinition[]): string {
   const toolNames = tools.map(t => t.name).join(', ');
 
   return `You are CC-CLI, an intelligent CLI agent that helps with software development tasks.

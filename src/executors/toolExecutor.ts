@@ -84,15 +84,33 @@ export class ToolExecutor {
     timeoutMs: number,
     toolName: string
   ): Promise<ToolResult> {
-    const timeoutError = new Error(`Tool '${toolName}' timed out after ${timeoutMs / 1000}s`);
+    // Create abort controller for this tool execution
+    const toolAbortController = new AbortController();
 
     // Create timeout promise
+    const timeoutError = new Error(`Tool '${toolName}' timed out after ${timeoutMs / 1000}s`);
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(timeoutError), timeoutMs);
+      setTimeout(() => {
+        toolAbortController.abort(timeoutError);
+        reject(timeoutError);
+      }, timeoutMs);
     });
 
+    // Merge with parent abort signal if available
+    if (context.abortController?.signal) {
+      context.abortController.signal.addEventListener('abort', () => {
+        toolAbortController.abort(context.abortController?.signal.reason);
+      }, { once: true });
+    }
+
+    // Create enriched context with abort signal
+    const enrichedContext: ToolUseContext = {
+      ...context,
+      abortController: toolAbortController,
+    };
+
     // Create tool execution promise
-    const execPromise = tool.call(input, context);
+    const execPromise = tool.call(input, enrichedContext);
 
     // Race between timeout and execution
     try {
@@ -189,6 +207,26 @@ export class ToolExecutor {
   }
 
   /**
+   * Extract content string from tool input for permission matching
+   */
+  private extractContentForPermission(toolName: string, input: Record<string, unknown>): string | undefined {
+    // Extract the most relevant string for content-based permission rules
+    switch (toolName) {
+      case 'Bash':
+        return input.command as string;
+      case 'FileRead':
+      case 'FileWrite':
+      case 'Glob':
+      case 'Grep':
+        return input.path as string;
+      case 'Git':
+        return input.args as string;
+      default:
+        return undefined;
+    }
+  }
+
+  /**
    * Batch permission check for multiple tool calls
    * Returns permission results for all tools before execution
    */
@@ -210,7 +248,7 @@ export class ToolExecutor {
 
       const permission = await hasPermissionsToUseTool(toolCall.toolName, toolCall.input, {
         toolCheckPermissions: tool.checkPermissions,
-        content: context.cwd,
+        content: this.extractContentForPermission(toolCall.toolName, toolCall.input),
         config: this.permissionConfig,
       });
 
@@ -230,7 +268,7 @@ export class ToolExecutor {
   ): Promise<PermissionResult> {
     return await hasPermissionsToUseTool(toolCall.toolName, toolCall.input, {
       toolCheckPermissions: tool.checkPermissions,
-      content: context.cwd,
+      content: this.extractContentForPermission(toolCall.toolName, toolCall.input),
       config: this.permissionConfig,
     });
   }
@@ -247,5 +285,12 @@ export class ToolExecutor {
    */
   hasTool(toolName: string): boolean {
     return this.tools.has(toolName);
+  }
+
+  /**
+   * Get tool definition by name
+   */
+  getTool(toolName: string): ToolDefinition | undefined {
+    return this.tools.get(toolName);
   }
 }
