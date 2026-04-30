@@ -551,13 +551,6 @@ export class QueryEngine {
   }
 
   /**
-   * Abort current query
-   */
-  abort(): void {
-    this.abortController.abort();
-  }
-
-  /**
    * Get conversation history
    */
   getMessages(): ChatMessage[] {
