@@ -70,7 +70,7 @@ export class QueryEngine {
     // Initialize API client
     this.apiClient = createAPIClient({
       provider: config.provider,
-      apiKey: config.apiKey || process.env.CC_API_KEY || '',
+      apiKey: config.apiKey || process.env.KC_API_KEY || '',
       baseUrl: config.apiBaseUrl,
       model: config.model,
     });

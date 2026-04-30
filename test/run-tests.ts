@@ -1,7 +1,7 @@
-// Simple test script for cc-cli
+// Simple test script for kc-cli
 
 async function runTests() {
-  console.log('Running cc-cli tests...\n');
+  console.log('Running kc-cli tests...\n');
 
   // Test 1: Tool Registry
   console.log('Test 1: Tool Registry');

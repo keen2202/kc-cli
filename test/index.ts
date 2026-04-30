@@ -1,4 +1,4 @@
-// Basic functionality test for cc-cli
+// Basic functionality test for kc-cli
 
 import { describe, it, expect } from './test-utils';
 

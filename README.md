@@ -1,4 +1,4 @@
-# CC-CLI: Intelligent CLI Agent System
+# KC-CLI: Intelligent CLI Agent System
 
 An AI-powered intelligent CLI assistant for software development, inspired by Claude Code's architecture.
 
@@ -25,35 +25,35 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 ### Installation
 
 ```bash
-cd cc-cli
+cd kc-cli
 npm install
-npm run cc -- "List all files in the current directory"
-npm run cc  # Interactive mode
+npm run kc -- "List all files in the current directory"
+npm run kc  # Interactive mode
 ```
 
 ### Configuration
 
 ```bash
 # Anthropic (default)
-export CC_API_KEY=sk-ant-xxx
-export CC_PROVIDER=anthropic
+export KC_API_KEY=sk-ant-xxx
+export KC_PROVIDER=anthropic
 
 # OpenAI
-export CC_API_KEY=sk-xxx
-export CC_PROVIDER=openai
-export CC_API_BASE_URL=https://api.openai.com/v1
+export KC_API_KEY=sk-xxx
+export KC_PROVIDER=openai
+export KC_API_BASE_URL=https://api.openai.com/v1
 
 # Qwen (DashScope)
-export CC_API_KEY=sk-xxx
-export CC_PROVIDER=qwen
+export KC_API_KEY=sk-xxx
+export KC_PROVIDER=qwen
 
 # GLM (Zhipu AI)
-export CC_API_KEY=xxx
-export CC_PROVIDER=glm
+export KC_API_KEY=xxx
+export KC_PROVIDER=glm
 
 # Ollama (local)
-export CC_PROVIDER=ollama
-export CC_API_BASE_URL=http://localhost:11434
+export KC_PROVIDER=ollama
+export KC_API_BASE_URL=http://localhost:11434
 ```
 
 ## Usage
@@ -61,22 +61,22 @@ export CC_API_BASE_URL=http://localhost:11434
 ### Interactive Mode
 
 ```bash
-npm run cc
+npm run kc
 ```
 
 ### Single Prompt Mode
 
 ```bash
-npm run cc -- "Find all TypeScript files"
-npm run cc -- "Create a simple HTTP server"
-npm run cc -- "Search for 'TODO' in the codebase"
+npm run kc -- "Find all TypeScript files"
+npm run kc -- "Create a simple HTTP server"
+npm run kc -- "Search for 'TODO' in the codebase"
 ```
 
 ### Commands
 
 ```bash
-npm run cc -- config   # Show configuration
-npm run cc -- tools    # List available tools
+npm run kc -- config   # Show configuration
+npm run kc -- tools    # List available tools
 ```
 
 ### Options
@@ -281,7 +281,7 @@ Sub-agents run with isolated QueryEngine instances using Node.js `AsyncLocalStor
 
 ## Memory System
 
-Persistent file-based memory stored in `~/.cc-cli/memory/<project-hash>/`:
+Persistent file-based memory stored in `~/.kc-cli/memory/<project-hash>/`:
 
 - **4 discrete types**: `user`, `feedback`, `project`, `reference`
 - **YAML frontmatter**: Each memory file has structured metadata (name, description, type, timestamps)

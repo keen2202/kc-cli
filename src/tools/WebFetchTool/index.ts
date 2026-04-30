@@ -33,7 +33,7 @@ export const tool = buildTool<WebFetchInput, string>({
       const options: http.RequestOptions = {
         method: input.method,
         headers: {
-          'User-Agent': 'cc-cli/0.1.0',
+          'User-Agent': 'kc-cli/0.1.0',
           ...input.headers,
         },
         timeout: input.timeout * 1000,

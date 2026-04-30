@@ -1,12 +1,12 @@
 {
-  "name": "cc-cli",
+  "name": "kc-cli",
   "version": "0.1.0",
   "description": "Intelligent CLI Agent System - Server-side AI-powered development assistant",
   "main": "src/main.ts",
   "type": "module",
   "scripts": {
     "dev": "npx tsx src/main.ts",
-    "cc": "npx tsx src/main.ts",
+    "kc": "npx tsx src/main.ts",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "npx tsx test/run-tests.ts"

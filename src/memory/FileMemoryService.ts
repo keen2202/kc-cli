@@ -24,7 +24,7 @@ import {
   ALLOWED_MEMORY_EXTENSIONS,
   ALLOWED_SESSION_EXTENSIONS,
   ensureGitignore,
-  getCcCliBasePath,
+  getKcCliBasePath,
 } from './paths';
 import { parseFrontmatter, composeMemoryFile, validateMemoryType } from './frontmatter';
 
@@ -36,11 +36,11 @@ export class FileMemoryService implements MemoryService {
     await ensureSessionDirs();
 
     // Create base memory directory
-    const memoryBasePath = path.join(getCcCliBasePath(), 'memory');
+    const memoryBasePath = path.join(getKcCliBasePath(), 'memory');
     await fs.mkdir(memoryBasePath, { recursive: true });
 
     // Ensure .gitignore exists
-    await ensureGitignore(getCcCliBasePath());
+    await ensureGitignore(getKcCliBasePath());
   }
 
   // ==================== Memory Operations ====================

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// CC-CLI: Intelligent CLI Agent System
+// KC-CLI: Intelligent CLI Agent System
 // Main entry point
 
 import { Command } from 'commander';
@@ -20,7 +20,7 @@ const VERSION = '0.1.0';
 // ASCII Art Banner
 const BANNER = `
 ${chalk.cyan.bold('╔══════════════════════════════════════╗')}
-${chalk.cyan.bold('║')}  ${chalk.yellow.bold('CC-CLI')} - Intelligent Agent System  ${chalk.cyan.bold('║')}
+${chalk.cyan.bold('║')}  ${chalk.yellow.bold('KC-CLI')} - Intelligent Agent System  ${chalk.cyan.bold('║')}
 ${chalk.cyan.bold('║')}  ${chalk.gray('v' + VERSION)}                             ${chalk.cyan.bold('║')}
 ${chalk.cyan.bold('╚══════════════════════════════════════╝')}
 `;
@@ -31,8 +31,8 @@ async function main() {
   const program = new Command();
 
   program
-    .name('cc')
-    .description('CC-CLI - Intelligent CLI Agent System')
+    .name('kc')
+    .description('KC-CLI - Intelligent CLI Agent System')
     .version(VERSION)
     .argument('[prompt]', 'What would you like me to do?')
     .option('-c, --cwd <directory>', 'Working directory', process.cwd())
@@ -279,7 +279,7 @@ async function runREPL(queryEngine: QueryEngine) {
   process.on('SIGTERM', cleanup);
 
   const askQuestion = () => {
-    rl.question(chalk.cyan.bold('cc> '), async (input) => {
+    rl.question(chalk.cyan.bold('kc> '), async (input) => {
       const trimmed = input.trim();
 
       // Handle commands
@@ -420,7 +420,7 @@ import type { ToolDefinition } from './types/tools';
 function buildSystemPrompt(tools: ToolDefinition[]): string {
   const toolNames = tools.map(t => t.name).join(', ');
 
-  return `You are CC-CLI, an intelligent CLI agent that helps with software development tasks.
+  return `You are KC-CLI, an intelligent CLI agent that helps with software development tasks.
 
 You have access to the following tools: ${toolNames}
 

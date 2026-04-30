@@ -63,9 +63,9 @@ export interface ConfigLayer {
 /**
  * Load configuration from multiple layers (priority ascending):
  * 1. System defaults
- * 2. User config (~/.cc-cli/settings.json)
- * 3. Project config (.cc-cli/settings.json)
- * 4. Environment variables (CC_*)
+ * 2. User config (~/.kc-cli/settings.json)
+ * 3. Project config (.kc-cli/settings.json)
+ * 4. Environment variables (KC_*)
  * 5. CLI arguments (passed separately)
  *
  * Optimization: User and project config files are read in parallel
@@ -81,8 +81,8 @@ export async function loadConfig(cwd: string): Promise<{ config: Config; layers:
   });
 
   // Layer 2 & 3: Read user and project config in parallel
-  const userConfigPath = path.join(os.homedir(), '.cc-cli', 'settings.json');
-  const projectConfigPath = path.join(cwd, '.cc-cli', 'settings.json');
+  const userConfigPath = path.join(os.homedir(), '.kc-cli', 'settings.json');
+  const projectConfigPath = path.join(cwd, '.kc-cli', 'settings.json');
 
   const [userConfig, projectConfig] = await Promise.all([
     loadConfigFile(userConfigPath),
@@ -134,39 +134,39 @@ async function loadConfigFile(filePath: string): Promise<Partial<Config> | null>
 function loadEnvConfig(): Partial<Config> {
   const config: Partial<Config> = {};
 
-  if (process.env.CC_API_KEY) {
-    config.apiKey = process.env.CC_API_KEY;
+  if (process.env.KC_API_KEY) {
+    config.apiKey = process.env.KC_API_KEY;
   }
-  if (process.env.CC_API_BASE_URL) {
-    config.apiBaseUrl = process.env.CC_API_BASE_URL;
+  if (process.env.KC_API_BASE_URL) {
+    config.apiBaseUrl = process.env.KC_API_BASE_URL;
   }
-  if (process.env.CC_MODEL) {
-    config.model = process.env.CC_MODEL;
+  if (process.env.KC_MODEL) {
+    config.model = process.env.KC_MODEL;
   }
-  if (process.env.CC_PROVIDER) {
-    config.provider = process.env.CC_PROVIDER as Config['provider'];
+  if (process.env.KC_PROVIDER) {
+    config.provider = process.env.KC_PROVIDER as Config['provider'];
   }
-  if (process.env.CC_PERMISSION_MODE) {
-    config.permissionMode = process.env.CC_PERMISSION_MODE as Config['permissionMode'];
+  if (process.env.KC_PERMISSION_MODE) {
+    config.permissionMode = process.env.KC_PERMISSION_MODE as Config['permissionMode'];
   }
-  if (process.env.CC_SEARCH_PROVIDER) {
-    config.searchProvider = process.env.CC_SEARCH_PROVIDER as Config['searchProvider'];
+  if (process.env.KC_SEARCH_PROVIDER) {
+    config.searchProvider = process.env.KC_SEARCH_PROVIDER as Config['searchProvider'];
   }
-  if (process.env.CC_SEARCH_API_KEY) {
-    config.searchApiKey = process.env.CC_SEARCH_API_KEY;
+  if (process.env.KC_SEARCH_API_KEY) {
+    config.searchApiKey = process.env.KC_SEARCH_API_KEY;
   }
-  if (process.env.CC_VERBOSE) {
-    config.verbose = process.env.CC_VERBOSE === 'true' || process.env.CC_VERBOSE === '1';
+  if (process.env.KC_VERBOSE) {
+    config.verbose = process.env.KC_VERBOSE === 'true' || process.env.KC_VERBOSE === '1';
   }
 
   // Memory environment variables
-  if (process.env.CC_MEMORY_ENABLED) {
+  if (process.env.KC_MEMORY_ENABLED) {
     config.memory = config.memory || {} as any;
-    (config.memory as any).enabled = process.env.CC_MEMORY_ENABLED === 'true' || process.env.CC_MEMORY_ENABLED === '1';
+    (config.memory as any).enabled = process.env.KC_MEMORY_ENABLED === 'true' || process.env.KC_MEMORY_ENABLED === '1';
   }
-  if (process.env.CC_MEMORY_AUTO_EXTRACT) {
+  if (process.env.KC_MEMORY_AUTO_EXTRACT) {
     config.memory = config.memory || {} as any;
-    (config.memory as any).autoExtract = process.env.CC_MEMORY_AUTO_EXTRACT === 'true' || process.env.CC_MEMORY_AUTO_EXTRACT === '1';
+    (config.memory as any).autoExtract = process.env.KC_MEMORY_AUTO_EXTRACT === 'true' || process.env.KC_MEMORY_AUTO_EXTRACT === '1';
   }
 
   return config;

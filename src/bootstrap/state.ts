@@ -61,7 +61,7 @@ function findProjectRoot(dir: string): string | null {
     'Cargo.toml',
     'go.mod',
     'CMakeLists.txt',
-    '.cc-cli',
+    '.kc-cli',
   ];
 
   let current = dir;

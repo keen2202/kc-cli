@@ -41,5 +41,5 @@ temp/
 *.tmp
 
 # Memory and session data (contains conversation transcripts)
-~/.cc-cli/memory/
-~/.cc-cli/sessions/
+~/.kc-cli/memory/
+~/.kc-cli/sessions/

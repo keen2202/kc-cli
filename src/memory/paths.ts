@@ -4,27 +4,27 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 
-const CC_CLI_BASE_DIR = '.cc-cli';
+const KC_CLI_BASE_DIR = '.kc-cli';
 const MEMORY_DIR = 'memory';
 const SESSIONS_DIR = 'sessions';
 const ARCHIVE_DIR = '.archive';
 
 /**
- * Get the base cc-cli directory path (~/.cc-cli/)
+ * Get the base kc-cli directory path (~/.kc-cli/)
  */
-export function getCcCliBasePath(): string {
-  return path.join(os.homedir(), CC_CLI_BASE_DIR);
+export function getKcCliBasePath(): string {
+  return path.join(os.homedir(), KC_CLI_BASE_DIR);
 }
 
 /**
- * Get the memory base directory (~/.cc-cli/memory/)
+ * Get the memory base directory (~/.kc-cli/memory/)
  */
 export function getMemoryBasePath(): string {
-  return path.join(getCcCliBasePath(), MEMORY_DIR);
+  return path.join(getKcCliBasePath(), MEMORY_DIR);
 }
 
 /**
- * Get the project-specific memory directory (~/.cc-cli/memory/<project-hash>/)
+ * Get the project-specific memory directory (~/.kc-cli/memory/<project-hash>/)
  */
 export function getProjectMemoryPath(projectHash: string): string {
   const sanitized = sanitizeProjectHash(projectHash);
@@ -41,14 +41,14 @@ export function getMemoryFilePath(projectHash: string, fileName: string): string
 }
 
 /**
- * Get the session base directory (~/.cc-cli/sessions/)
+ * Get the session base directory (~/.kc-cli/sessions/)
  */
 export function getSessionBasePath(): string {
-  return path.join(getCcCliBasePath(), SESSIONS_DIR);
+  return path.join(getKcCliBasePath(), SESSIONS_DIR);
 }
 
 /**
- * Get the archive directory (~/.cc-cli/sessions/.archive/)
+ * Get the archive directory (~/.kc-cli/sessions/.archive/)
  */
 export function getArchivePath(): string {
   return path.join(getSessionBasePath(), ARCHIVE_DIR);
@@ -206,7 +206,7 @@ export async function ensureGitignore(basePath: string): Promise<void> {
     await fs.access(gitignorePath);
   } catch {
     // File doesn't exist, create it
-    const gitignoreContent = `# cc-cli memory and session data
+    const gitignoreContent = `# kc-cli memory and session data
 # Contains conversation transcripts and extracted memories
 memory/
 sessions/
