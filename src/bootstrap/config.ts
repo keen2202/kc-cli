@@ -9,8 +9,8 @@ const ConfigSchema = z.object({
   // API Configuration
   apiKey: z.string().optional(),
   apiBaseUrl: z.string().optional(),
-  model: z.string().default('claude-sonnet-4-20250514'),
-  provider: z.enum(['anthropic', 'openai', 'ollama', 'deepseek', 'openai-compatible', 'qwen', 'glm']).default('anthropic'),
+  model: z.string().default('deepseek-v4-pro'),
+  provider: z.enum(['anthropic', 'openai', 'ollama', 'deepseek', 'openai-compatible', 'qwen', 'glm']).default('deepseek'),
 
   // Permission Configuration
   permissionMode: z.enum(['default', 'bypassPermissions', 'dontAsk', 'plan', 'acceptEdits', 'auto']).default('default'),
