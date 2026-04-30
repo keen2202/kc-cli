@@ -117,6 +117,9 @@ export class OpenAICompatibleClient extends BaseApiClient {
       'qwen-plus': { maxTokens: 32768 },
       'qwen-max': { maxTokens: 32768 },
       'qwen-long': { maxTokens: 1000000 },
+      // DeepSeek models
+      'deepseek-v4-pro': { maxTokens: 131072 },
+      'deepseek-v4-flash': { maxTokens: 131072 },
       // GLM models
       'glm-4': { maxTokens: 128000 },
       'glm-4-plus': { maxTokens: 128000 },
