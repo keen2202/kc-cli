@@ -138,7 +138,7 @@ export function createAPIClient(config: APIClientFactoryConfig): BaseApiClient {
         apiKey,
         baseUrl: baseUrl || 'https://api.deepseek.com',
         model: resolveModel('deepseek', model),
-        provider: 'openai',
+        provider: 'deepseek',
       });
 
     case 'openai-compatible':

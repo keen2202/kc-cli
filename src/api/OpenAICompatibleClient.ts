@@ -9,11 +9,11 @@ export interface OpenAICompatibleConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
-  provider?: 'openai' | 'qwen' | 'glm';
+  provider?: 'openai' | 'qwen' | 'glm' | 'deepseek';
 }
 
 export class OpenAICompatibleClient extends BaseApiClient {
-  private provider: 'openai' | 'qwen' | 'glm';
+  private provider: 'openai' | 'qwen' | 'glm' | 'deepseek';
 
   constructor(config: OpenAICompatibleConfig) {
     super({
@@ -141,6 +141,7 @@ export class OpenAICompatibleClient extends BaseApiClient {
   private getEndpoint(): string {
     switch (this.provider) {
       case 'openai':
+      case 'deepseek':
         return '/v1/chat/completions';
       case 'qwen':
         // DashScope OpenAI-compatible endpoint
