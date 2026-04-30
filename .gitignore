@@ -35,6 +35,10 @@ yarn-error.log*
 coverage/
 .nyc_output/
 
+# Worktrees
+.worktrees/
+worktrees/
+
 # Temporary files
 tmp/
 temp/
