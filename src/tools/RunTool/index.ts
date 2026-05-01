@@ -6,6 +6,7 @@ import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { SandboxManager } from '../../services/sandbox';
 
 const execAsync = promisify(exec);
 
@@ -35,7 +36,14 @@ export const tool = buildTool<RunInput, string>({
         ...(input.env || {}),
       };
 
-      const { stdout, stderr } = await execAsync(input.command, {
+      // Wrap command through sandbox for isolation
+      const sandbox = new SandboxManager({
+        enabled: true,
+        workDir: workingDir,
+      });
+      const wrappedCmd = sandbox.wrapCommand(input.command);
+
+      const { stdout, stderr } = await execAsync(wrappedCmd, {
         cwd: workingDir,
         timeout,
         env,

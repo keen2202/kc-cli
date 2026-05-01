@@ -27,7 +27,16 @@ const ConfigSchema = z.object({
   maxOutputSize: z.number().default(10000), // 10KB
 
   // Database Configuration
-  databaseConnections: z.record(z.string()).default({}),
+  databaseConnections: z.record(z.object({
+    type: z.enum(['sqlite', 'postgres', 'mysql']),
+    path: z.string().optional(),     // for sqlite
+    host: z.string().optional(),     // for postgres/mysql
+    port: z.number().optional(),
+    database: z.string().optional(),
+    user: z.string().optional(),
+    password: z.string().optional(),
+    readonly: z.boolean().optional(),
+  })).default({}),
 
   // Web Configuration
   searchProvider: z.enum(['tavily', 'google', 'bing', 'brave']).default('tavily'),
@@ -46,6 +55,20 @@ const ConfigSchema = z.object({
     maxSessionSnapshots: z.number().default(100),
     sessionRetentionDays: z.number().default(30),
     relevanceSearchLimit: z.number().default(5),
+  }).default({}),
+
+  // Sandbox Configuration
+  sandbox: z.object({
+    enabled: z.boolean().default(true),
+    backend: z.enum(['bubblewrap', 'seccomp', 'noop']).default('bubblewrap'),
+    allowNetwork: z.boolean().default(false),
+    maxMemoryMb: z.number().default(512),
+    cpuTimeLimitSec: z.number().default(60),
+  }).default({}),
+
+  // MCP Configuration
+  mcp: z.object({
+    enabled: z.boolean().default(true),
   }).default({}),
 
   // General
@@ -157,6 +180,20 @@ function loadEnvConfig(): Partial<Config> {
   }
   if (process.env.KC_VERBOSE) {
     config.verbose = process.env.KC_VERBOSE === 'true' || process.env.KC_VERBOSE === '1';
+  }
+
+  // Sandbox environment variables
+  if (process.env.KC_SANDBOX_ENABLED) {
+    config.sandbox = config.sandbox || {} as any;
+    (config.sandbox as any).enabled = process.env.KC_SANDBOX_ENABLED === 'true' || process.env.KC_SANDBOX_ENABLED === '1';
+  }
+  if (process.env.KC_SANDBOX_BACKEND) {
+    config.sandbox = config.sandbox || {} as any;
+    (config.sandbox as any).backend = process.env.KC_SANDBOX_BACKEND;
+  }
+  if (process.env.KC_SANDBOX_ALLOW_NETWORK) {
+    config.sandbox = config.sandbox || {} as any;
+    (config.sandbox as any).allowNetwork = process.env.KC_SANDBOX_ALLOW_NETWORK === 'true' || process.env.KC_SANDBOX_ALLOW_NETWORK === '1';
   }
 
   // Memory environment variables

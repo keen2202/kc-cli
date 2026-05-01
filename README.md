@@ -305,8 +305,20 @@ Persistent file-based memory stored in `~/.kc-cli/memory/<project-hash>/`:
 npm run dev        # Run in development mode
 npm run typecheck  # Type check with tsc --noEmit
 npm run build      # Build TypeScript
-npm test           # Run tests
+npm test           # Run tests (vitest)
+npm run test:watch # Run tests in watch mode
+npm run test:coverage # Run tests with coverage report
 ```
+
+## Documentation
+
+- [Architecture](docs/architecture.md) — System architecture and design patterns
+- [Tool Development](docs/tool-development.md) — Guide to building custom tools
+- [Configuration](docs/configuration.md) — Configuration system and settings
+- [API Clients](docs/api-clients.md) — LLM provider integration
+- [MCP Integration](docs/mcp-integration.md) — Model Context Protocol setup
+- [Sandbox Security](docs/sandbox-security.md) — Sandboxing and security model
+- [Plugin Development](docs/plugin-development.md) — Plugin authoring guide
 
 ## License
 

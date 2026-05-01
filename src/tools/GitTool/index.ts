@@ -13,7 +13,7 @@ const execAsync = promisify(exec);
 const GitInputSchema = z.object({
   command: z.string().describe('Git command to execute (without "git" prefix)'),
   cwd: z.string().optional().describe('Working directory (defaults to project root)'),
-  timeout: z.number().default(30).describe('Timeout in seconds'),
+  timeout: z.number().default(60).describe('Timeout in seconds'),
 });
 
 type GitInput = z.infer<typeof GitInputSchema>;
@@ -27,21 +27,29 @@ export const tool = buildTool<GitInput, string>({
   call: async (input, context): Promise<ToolResultType<string>> => {
     try {
       const workingDir = input.cwd || context.cwd;
-      const timeout = (input.timeout || 30) * 1000;
+      const timeout = (input.timeout || 60) * 1000;
 
-      const { stdout, stderr } = await execAsync(`git ${input.command}`, {
+      // Use -c color.ui=never for clean, parseable output
+      const gitCmd = `git -c color.ui=never ${input.command}`;
+
+      const { stdout, stderr } = await execAsync(gitCmd, {
         cwd: workingDir,
         timeout,
         maxBuffer: 10 * 1024 * 1024, // 10MB
       });
 
-      const output = stdout || stderr;
-      return toolResult(output.trim(), {
+      // Sanitize output: truncate if extremely large
+      let output = (stdout || stderr || '').trim();
+      if (output.length > 100_000) {
+        output = output.slice(0, 100_000) + '\n\n[Output truncated — too large]';
+      }
+
+      return toolResult(output, {
         metadata: { command: input.command, cwd: workingDir },
       });
     } catch (error: any) {
-      const output = error.stdout || error.stderr || error.message;
-      return toolError(`Git command failed: ${output.trim()}`, {
+      const output = (error.stdout || error.stderr || error.message || '').trim();
+      return toolError(`Git command failed: ${output.slice(0, 2000)}`, {
         command: input.command,
       });
     }

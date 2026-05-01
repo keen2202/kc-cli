@@ -1,6 +1,7 @@
 // Global state management
 
 import type { PermissionMode } from '../types/permissions';
+import type { Config } from './config';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -14,6 +15,7 @@ export interface GlobalState {
   bareMode: boolean;
   maxTurns: number | null;
   maxBudgetUsd: number | null;
+  config: Config | null;
 }
 
 let state: GlobalState | null = null;
@@ -36,6 +38,7 @@ export function initializeState(overrides: Partial<GlobalState> = {}): GlobalSta
     bareMode: false,
     maxTurns: null,
     maxBudgetUsd: null,
+    config: null,
     ...overrides,
   };
   return state;

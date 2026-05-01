@@ -2,7 +2,7 @@
 // Uses AsyncLocalStorage for async context isolation
 
 import { AsyncLocalStorage } from 'async_hooks';
-import type { SubAgentBackend } from './types';
+import type { SubAgentBackend } from './types.js';
 import type {
   SubAgentSpawnConfig,
   SubAgentRuntime,
@@ -11,16 +11,16 @@ import type {
   SubAgentMessage,
   SubAgentResult,
   QueryEngineLike,
-} from '../types';
-import type { ToolUseContext, ToolDefinition, ToolName } from '../../types/tools';
-import type { PermissionMode } from '../../types/permissions';
-import { EventBus } from '../event-bus';
+} from '../types.js';
+import type { ToolUseContext, ToolDefinition, ToolName } from '../../types/tools.js';
+import type { PermissionMode } from '../../types/permissions.js';
+import { EventBus } from '../event-bus.js';
 import {
   deriveChildPermissions,
   buildChildToolAllowList,
   createChildPermissionContext,
-} from '../permission-cascader';
-import { ResultAggregator } from '../result-aggregator';
+} from '../permission-cascader.js';
+import { ResultAggregator } from '../result-aggregator.js';
 
 // Async context store for sub-agent isolation
 const agentContextStore = new AsyncLocalStorage<SubAgentRuntime>();

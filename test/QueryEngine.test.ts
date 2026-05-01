@@ -1,7 +1,13 @@
 // QueryEngine Tests
 
-import { describe, it, expect } from '../test-utils';
-import { toolRegistry, registerBuiltInTools } from '../../src/tools.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { toolRegistry, registerBuiltInTools } from '../src/tools.js';
+import { initializeState } from '../src/bootstrap/state.js';
+
+beforeEach(() => {
+  initializeState();
+  process.env.KC_API_KEY = 'test-dummy-key';
+});
 
 describe('QueryEngine', () => {
   it('should be creatable with tools', async () => {
@@ -11,7 +17,7 @@ describe('QueryEngine', () => {
   });
 
   it('should have state machine', async () => {
-    const { QueryEngine } = await import('../../src/query/QueryEngine.js');
+    const { QueryEngine } = await import('../src/query/QueryEngine.js');
     await registerBuiltInTools();
     const tools = toolRegistry.getAllTools();
 
@@ -28,7 +34,7 @@ describe('QueryEngine', () => {
   });
 
   it('should have state store', async () => {
-    const { QueryEngine } = await import('../../src/query/QueryEngine.js');
+    const { QueryEngine } = await import('../src/query/QueryEngine.js');
     await registerBuiltInTools();
     const tools = toolRegistry.getAllTools();
 
@@ -44,7 +50,7 @@ describe('QueryEngine', () => {
   });
 
   it('should clear conversation', async () => {
-    const { QueryEngine } = await import('../../src/query/QueryEngine.js');
+    const { QueryEngine } = await import('../src/query/QueryEngine.js');
     await registerBuiltInTools();
     const tools = toolRegistry.getAllTools();
 
@@ -63,8 +69,8 @@ describe('QueryEngine', () => {
 
 describe('State Machine', () => {
   it('should start in idle state', async () => {
-    const { AgentStateMachine } = await import('../../src/state/machine.js');
-    const { ObservableStateStore, createInitialState } = await import('../../src/state/store.js');
+    const { AgentStateMachine } = await import('../src/state/machine.js');
+    const { ObservableStateStore, createInitialState } = await import('../src/state/store.js');
 
     const store = new ObservableStateStore(createInitialState());
     const machine = new AgentStateMachine(store);
@@ -73,8 +79,8 @@ describe('State Machine', () => {
   });
 
   it('should transition from idle to compacting', async () => {
-    const { AgentStateMachine } = await import('../../src/state/machine.js');
-    const { ObservableStateStore, createInitialState } = await import('../../src/state/store.js');
+    const { AgentStateMachine } = await import('../src/state/machine.js');
+    const { ObservableStateStore, createInitialState } = await import('../src/state/store.js');
 
     const store = new ObservableStateStore(createInitialState());
     const machine = new AgentStateMachine(store);
@@ -84,8 +90,8 @@ describe('State Machine', () => {
   });
 
   it('should validate transitions', async () => {
-    const { AgentStateMachine, InvalidTransitionError } = await import('../../src/state/machine.js');
-    const { ObservableStateStore, createInitialState } = await import('../../src/state/store.js');
+    const { AgentStateMachine, InvalidTransitionError } = await import('../src/state/machine.js');
+    const { ObservableStateStore, createInitialState } = await import('../src/state/store.js');
 
     const store = new ObservableStateStore(createInitialState());
     const machine = new AgentStateMachine(store);
@@ -98,8 +104,8 @@ describe('State Machine', () => {
   });
 
   it('should throw on invalid transition', async () => {
-    const { AgentStateMachine, InvalidTransitionError } = await import('../../src/state/machine.js');
-    const { ObservableStateStore, createInitialState } = await import('../../src/state/store.js');
+    const { AgentStateMachine, InvalidTransitionError } = await import('../src/state/machine.js');
+    const { ObservableStateStore, createInitialState } = await import('../src/state/store.js');
 
     const store = new ObservableStateStore(createInitialState());
     const machine = new AgentStateMachine(store);
@@ -113,8 +119,8 @@ describe('State Machine', () => {
   });
 
   it('should detect terminal states', async () => {
-    const { AgentStateMachine } = await import('../../src/state/machine.js');
-    const { ObservableStateStore, createInitialState } = await import('../../src/state/store.js');
+    const { AgentStateMachine } = await import('../src/state/machine.js');
+    const { ObservableStateStore, createInitialState } = await import('../src/state/store.js');
 
     const store = new ObservableStateStore(createInitialState());
     const machine = new AgentStateMachine(store);
@@ -131,8 +137,8 @@ describe('State Machine', () => {
   });
 
   it('should reset to idle', async () => {
-    const { AgentStateMachine } = await import('../../src/state/machine.js');
-    const { ObservableStateStore, createInitialState } = await import('../../src/state/store.js');
+    const { AgentStateMachine } = await import('../src/state/machine.js');
+    const { ObservableStateStore, createInitialState } = await import('../src/state/store.js');
 
     const store = new ObservableStateStore(createInitialState());
     const machine = new AgentStateMachine(store);
@@ -147,21 +153,21 @@ describe('State Machine', () => {
 
 describe('Token Estimation', () => {
   it('should estimate tokens for short text', async () => {
-    const { estimateTokens } = await import('../../src/utils/tokenEstimation.js');
+    const { estimateTokens } = await import('../src/utils/tokenEstimation.js');
 
     const tokens = estimateTokens('Hello, world!');
     expect(tokens).toBeGreaterThan(0);
   });
 
   it('should handle empty string', async () => {
-    const { estimateTokens } = await import('../../src/utils/tokenEstimation.js');
+    const { estimateTokens } = await import('../src/utils/tokenEstimation.js');
 
     const tokens = estimateTokens('');
     expect(tokens).toBe(0);
   });
 
   it('should scale with text length', async () => {
-    const { estimateTokens } = await import('../../src/utils/tokenEstimation.js');
+    const { estimateTokens } = await import('../src/utils/tokenEstimation.js');
 
     const shortTokens = estimateTokens('Hello');
     const longTokens = estimateTokens('Hello world, this is a longer test message with more words');
@@ -172,7 +178,7 @@ describe('Token Estimation', () => {
 
 describe('Compaction Service', () => {
   it('should not compact few messages', async () => {
-    const { microcompact } = await import('../../src/services/compaction.js');
+    const { microcompact } = await import('../src/services/compaction.js');
 
     const messages = [
       { id: '1', role: 'user', content: 'Hello', timestamp: Date.now() },
@@ -184,19 +190,27 @@ describe('Compaction Service', () => {
   });
 
   it('should compact many messages', async () => {
-    const { microcompact } = await import('../../src/services/compaction.js');
+    const { microcompact } = await import('../src/services/compaction.js');
 
-    // Create 20 messages
-    const messages = Array.from({ length: 20 }, (_, i) => ({
-      id: `msg_${i}`,
-      role: i % 2 === 0 ? 'user' : 'assistant',
-      content: `Message ${i}: ${'x'.repeat(1000)}`,
-      timestamp: Date.now(),
-    }));
+    // Create messages with tool calls and tool results
+    const messages: any[] = [];
+    for (let i = 0; i < 10; i++) {
+      messages.push(
+        { id: `user_${i}`, role: 'user', content: `Request ${i}`, timestamp: Date.now() },
+        {
+          id: `assistant_${i}`, role: 'assistant', content: '',
+          timestamp: Date.now(),
+          toolCalls: [{ id: `tc_${i}`, toolName: 'Bash', input: { command: 'ls' } }],
+        },
+        {
+          id: `tool_${i}`, role: 'tool', content: '',
+          timestamp: Date.now(),
+          toolResults: [{ toolCallId: `tc_${i}`, output: 'x'.repeat(200), isError: false }],
+        },
+      );
+    }
 
     const result = microcompact(messages, 5);
     expect(result.wasCompacted).toBe(true);
   });
 });
-
-console.log('\n✅ QueryEngine and session tests completed');

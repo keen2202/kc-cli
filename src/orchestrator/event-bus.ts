@@ -1,7 +1,7 @@
 // In-memory event bus for multi-agent communication
 
-import type { AgentEvent } from '../state/types';
-import type { MultiAgentEvent } from '../types/orchestrator';
+import type { AgentEvent } from '../state/types.js';
+import type { MultiAgentEvent } from '../types/orchestrator.js';
 
 type EventHandler = (event: AgentEvent | MultiAgentEvent) => void;
 type AnyHandler = (agentId: string, event: AgentEvent | MultiAgentEvent) => void;

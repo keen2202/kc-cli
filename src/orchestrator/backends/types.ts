@@ -1,7 +1,7 @@
 // Backend abstract interface for sub-agent execution
 
-import type { SubAgentSpawnConfig, SubAgentStatus, SubAgentRuntime, SpawnResult } from '../types';
-import type { ToolUseContext, SubAgentMessage } from '../types';
+import type { SubAgentSpawnConfig, SubAgentStatus, SubAgentRuntime, SpawnResult } from '../types.js';
+import type { ToolUseContext, SubAgentMessage } from '../types.js';
 
 /**
  * SubAgentBackend - Abstract interface for executing sub-agents

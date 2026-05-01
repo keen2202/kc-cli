@@ -8,6 +8,7 @@ import { hasPermissionsToUseTool } from '../../permissions/engine';
 import { DANGEROUS_BASH_PATTERNS, isReadOnlyBashCommand } from '../../permissions/readonlyCommands';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { SandboxManager } from '../../services/sandbox';
 
 const execAsync = promisify(exec);
 
@@ -37,8 +38,15 @@ export const tool = buildTool<BashInput, string>({
       const workingDir = input.workingDir || context.cwd;
       const timeout = (input.timeout || 30) * 1000; // Convert to ms
 
-      // Execute command
-      const { stdout, stderr } = await execAsync(`bash -c '${input.command.replace(/'/g, "'\\''")}'`, {
+      // Wrap command through sandbox for isolation
+      const sandbox = new SandboxManager({
+        enabled: true,
+        workDir: workingDir,
+      });
+      const wrappedCmd = sandbox.wrapCommand(input.command);
+
+      // Execute wrapped command
+      const { stdout, stderr } = await execAsync(wrappedCmd, {
         cwd: workingDir,
         timeout,
         maxBuffer: 10 * 1024 * 1024, // 10MB

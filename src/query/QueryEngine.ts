@@ -6,7 +6,7 @@ import type { ToolDefinition, ToolUseContext } from '../types/tools';
 import { AgentStateMachine } from '../state/machine';
 import { ObservableStateStore, createInitialState } from '../state/store';
 import { ToolExecutor } from '../executors/toolExecutor';
-import { shouldCompact, microcompact, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES, CompactConfig } from '../services/compaction';
+import { shouldCompact, microcompact, fullCompact, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES, CompactConfig } from '../services/compaction';
 import { estimateMessageTokensArray } from '../utils/tokenEstimation';
 import type { AgentEvent, TokenUsage } from '../state/types';
 import { hasPermissionsToUseTool } from '../permissions/engine';
@@ -15,6 +15,7 @@ import { createAPIClient, LLMProvider } from '../api';
 import type { BaseApiClient, LLMStreamEvent as APIStreamEvent, LLMRequestConfig } from '../api';
 import { MemoryIntegration, createMemoryIntegration } from '../memory/integration';
 import type { MemoryIntegrationConfig } from '../memory/integration';
+import { classifyApiError, getRetryDelay, RetryState } from '../services/error-classifier';
 
 import { v4 as uuidv4 } from 'uuid';
 
@@ -50,6 +51,7 @@ export class QueryEngine {
   // Services
   private toolExecutor: ToolExecutor;
   private compactFailureCount = 0;
+  private retryState = new RetryState();
 
   // Conversation state
   private messages: ChatMessage[] = [];
@@ -203,12 +205,29 @@ export class QueryEngine {
 
         // Check if microcompact was sufficient
         if (this.cachedTokenEstimate < threshold) {
+          this.compactFailureCount = 0;
           return;
         }
       }
 
-      // Full compact would require LLM API integration
-      // For now, we just use microcompact
+      // Full LLM-based compaction if microcompact wasn't enough
+      const { fullCompact } = await import('../services/compaction');
+      const fullResult = await fullCompact(
+        this.messages,
+        this.apiClient,
+        config,
+        this.config.systemPrompt
+      );
+
+      if (fullResult.wasCompacted) {
+        this.messages = fullResult.messages;
+        this.cachedTokenEstimate = estimateMessageTokensArray(this.messages);
+        yield this.createCompactFullEvent(
+          estimateMessageTokensArray(this.messages) + fullResult.tokensSaved,
+          this.cachedTokenEstimate
+        );
+      }
+
       this.compactFailureCount = 0;
     } catch (error) {
       this.compactFailureCount++;
@@ -295,7 +314,21 @@ export class QueryEngine {
 
       yield this.createTurnCompleteEvent(assistantMsg);
     } catch (error) {
-      yield this.createErrorEvent(error instanceof Error ? error : new Error(String(error)));
+      const err = error instanceof Error ? error : new Error(String(error));
+      const classified = classifyApiError(err);
+
+      if (classified.retryable && this.retryState.canRetry('streaming')) {
+        const attempt = this.retryState.incrementAttempt('streaming');
+        const delay = getRetryDelay(attempt - 1);
+        yield this.createErrorEvent(new Error(`Retrying (${attempt}/${3}) after ${classified.context}: ${err.message}`));
+        await new Promise(resolve => setTimeout(resolve, delay));
+        // Re-enter streaming phase
+        yield* this.streamingPhase();
+        return;
+      }
+
+      this.retryState.reset('streaming');
+      yield this.createErrorEvent(err);
     }
   }
 

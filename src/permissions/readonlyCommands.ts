@@ -65,11 +65,12 @@ export const MEDIUM_RISK_BASH_PATTERNS: RegExp[] = [
  * These are always denied regardless of permission mode
  */
 export const DANGEROUS_BASH_PATTERNS: RegExp[] = [
-  /\brm\s+-rf\s+\/\b/,
+  /\brm\s+-rf\s+\//,
   /\bmkfs\b/,
   /\bdd\s+if=.*of=\/dev\//,
   /\bFormat\b.*\/Q/,
   /\bshutdown\b.*\/r/,
+  /\brm\s+-rf\b/,
 ];
 
 /**
@@ -86,6 +87,8 @@ export const DANGEROUS_GIT_PATTERNS: RegExp[] = [
  * Check if a bash command matches any read-only pattern
  */
 export function isReadOnlyBashCommand(command: string): boolean {
+  // Commands with output redirect are NOT read-only (they write to files)
+  if (/[|>]/.test(command)) return false;
   return READONLY_BASH_PATTERNS.some(p => p.test(command));
 }
 

@@ -57,7 +57,7 @@ export class PermissionClassifier {
     // Always deny known dangerous patterns
     const command = (input.command as string) || '';
 
-    if (command.match(/\b(rm\s+-rf\s+)\b/)) {
+    if (command.match(/\brm\s+-rf/)) {
       return {
         behavior: 'deny',
         confidence: 0.99,

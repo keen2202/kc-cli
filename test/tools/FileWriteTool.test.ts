@@ -1,6 +1,6 @@
 // FileWriteTool Tests
 
-import { describe, it, expect } from '../test-utils';
+import { describe, it, expect } from 'vitest';
 import { tool as FileWriteTool } from '../../src/tools/FileWriteTool/index.js';
 
 describe('FileWriteTool', () => {
@@ -44,4 +44,3 @@ describe('FileWriteTool', () => {
   });
 });
 
-console.log('\n✅ FileWriteTool tests completed');

@@ -1,12 +1,12 @@
 // Team Create Tool - Batch spawn multiple sub-agents
 
 import { z } from 'zod';
-import { buildTool, toolResult, toolError } from '../Tool';
-import type { ToolResult as ToolResultType } from '../types/tools';
-import type { PermissionResult } from '../types/permissions';
-import { getOrchestrator } from './agent-orchestrator';
-import { createAgentConfig } from './agent-definitions';
-import type { ToolName } from '../types/tools';
+import { buildTool, toolResult, toolError } from '../Tool.js';
+import type { ToolResult as ToolResultType } from '../types/tools.js';
+import type { PermissionResult } from '../types/permissions.js';
+import { getOrchestrator } from './agent-orchestrator.js';
+import { createAgentConfig } from './agent-definitions.js';
+import type { ToolName } from '../types/tools.js';
 
 const TeamAgentConfigSchema = z.object({
   name: z.string().describe('Unique name for this sub-agent'),

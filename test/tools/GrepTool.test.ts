@@ -1,6 +1,6 @@
 // GrepTool Tests
 
-import { describe, it, expect } from '../test-utils';
+import { describe, it, expect } from 'vitest';
 import { tool as GrepTool } from '../../src/tools/GrepTool/index.js';
 
 describe('GrepTool', () => {
@@ -67,4 +67,3 @@ describe('GrepTool', () => {
   });
 });
 
-console.log('\n✅ GrepTool tests completed');

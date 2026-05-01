@@ -1,12 +1,13 @@
-// Agent Tool - Spawn sub-agents for parallel work
-// NOTE: Multi-agent coordination framework is implemented in src/orchestrator/
-// but has TypeScript compilation issues on Windows ESM. The framework is ready
-// and can be enabled once type errors are resolved.
+// Agent Tool - Spawn sub-agents for parallel work via the orchestrator
 
 import { z } from 'zod';
 import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
+import type { SubAgentSpawnConfig } from '../../orchestrator/types';
+import { getOrchestrator } from '../../orchestrator/agent-orchestrator.js';
+import { createAgentConfig } from '../../orchestrator/agent-definitions.js';
+import { toolRegistry } from '../../tools.js';
 
 const AgentInputSchema = z.object({
   prompt: z.string().describe('Instructions for the sub-agent'),
@@ -33,37 +34,63 @@ export const tool = buildTool<AgentInput, string>({
 
   call: async (input, context): Promise<ToolResultType<string>> => {
     try {
-      // TODO: Enable multi-agent coordination once TypeScript ESM issues are resolved
-      // The full implementation is in src/orchestrator/:
-      // - agent-orchestrator.ts - Central coordinator
-      // - event-bus.ts - In-memory pub/sub
-      // - permission-cascader.ts - Permission inheritance
-      // - result-aggregator.ts - Result collection
-      // - backends/in-process.ts - AsyncLocalStorage isolation
-      // - agent-definitions.ts - Pre-defined agent types
+      const tools = toolRegistry.getAllTools();
+      const orchestrator = getOrchestrator(tools);
 
-      return toolResult(
-        `Sub-agent spawned (simulated - multi-agent framework ready, awaiting TS fix)\n\n` +
-        `Task: ${input.description || input.prompt.slice(0, 100)}\n` +
-        `Agent Type: ${input.agent_type || 'general'}\n` +
-        `Prompt length: ${input.prompt.length} chars\n` +
-        `Timeout: ${input.timeout}s\n\n` +
-        `Multi-agent coordination framework is implemented in src/orchestrator/.\n` +
-        `Once TypeScript ESM path issues are resolved, this will:\n` +
-        `1. Create isolated QueryEngine instance\n` +
-        `2. Apply permission cascading (child <= parent)\n` +
-        `3. Run agent loop with EventBus forwarding\n` +
-        `4. Collect and format results`,
-        {
-          metadata: {
-            prompt_length: input.prompt.length,
-            timeout: input.timeout,
-            agent_type: input.agent_type || 'general',
-            simulated: true,
-            framework_ready: true,
-          },
+      let config: SubAgentSpawnConfig;
+
+      if (input.agent_type) {
+        const agentConfig = createAgentConfig(input.agent_type, input.prompt, {
+          timeoutSeconds: input.timeout,
+        });
+        if (!agentConfig) {
+          return toolError(
+            `Unknown agent type: ${input.agent_type}. Available types: researcher, implementer, verifier, explorer, general`
+          );
         }
+        config = agentConfig;
+      } else {
+        config = {
+          name: input.description || `agent-${Date.now()}`,
+          prompt: input.prompt,
+          systemPromptMode: 'default',
+          timeoutSeconds: input.timeout,
+        };
+      }
+
+      const agentId = await orchestrator.spawn(config, context);
+
+      // If background mode, return immediately with the agent ID
+      if (input.background) {
+        return toolResult(
+          `Sub-agent spawned in background.\nAgent ID: ${agentId}\nTask: ${input.description || input.prompt.slice(0, 100)}`,
+          {
+            metadata: {
+              agent_id: agentId,
+              agent_type: input.agent_type || 'general',
+              background: true,
+              status: 'running',
+            },
+          }
+        );
+      }
+
+      // Wait for the sub-agent to complete
+      const result = await orchestrator.waitForCompletion(
+        agentId,
+        input.timeout * 1000
       );
+
+      return toolResult(result.output, {
+        metadata: {
+          agent_id: agentId,
+          agent_type: input.agent_type || 'general',
+          success: result.success,
+          duration_ms: result.duration,
+          tool_use_count: result.toolUseCount,
+          total_tokens_used: result.totalTokensUsed,
+        },
+      });
     } catch (error) {
       return toolError(`Agent spawn failed: ${error instanceof Error ? error.message : String(error)}`);
     }

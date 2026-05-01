@@ -179,10 +179,21 @@ export async function fullCompact(
     const summaryPrompt = buildCompactPrompt(oldMessages, systemPrompt);
 
     // Call LLM to generate summary (no tools)
-    // TODO: Integrate with real LLM API client once implemented
     let summaryResponse: string;
     try {
-      summaryResponse = await apiClient.generateSummary(summaryPrompt);
+      const response = await apiClient.chat({
+        model: config.model,
+        messages: [{
+          id: `summary_${Date.now()}`,
+          role: 'user',
+          content: summaryPrompt,
+          timestamp: Date.now(),
+        }],
+        maxTokens: 1024,
+        temperature: 0.3,
+        stream: false,
+      });
+      summaryResponse = response.content;
     } catch {
       // If API client fails, fall back to a simple truncation summary
       summaryResponse = buildFallbackSummary(oldMessages);

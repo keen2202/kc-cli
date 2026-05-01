@@ -1,6 +1,6 @@
 // FileReadTool Tests
 
-import { describe, it, expect } from '../test-utils';
+import { describe, it, expect } from 'vitest';
 import { tool as FileReadTool } from '../../src/tools/FileReadTool/index.js';
 
 describe('FileReadTool', () => {
@@ -53,4 +53,3 @@ describe('FileReadTool', () => {
   });
 });
 
-console.log('\n✅ FileReadTool tests completed');

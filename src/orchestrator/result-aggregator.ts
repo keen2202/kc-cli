@@ -1,6 +1,6 @@
 // Result aggregation system for multi-agent coordination
 
-import type { SubAgentResult, AggregatedResult, SubAgentSpawnConfig } from './types';
+import type { SubAgentResult, AggregatedResult, SubAgentSpawnConfig } from './types.js';
 
 interface ExpectedAgent {
   config: SubAgentSpawnConfig;

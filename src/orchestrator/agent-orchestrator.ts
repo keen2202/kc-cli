@@ -5,14 +5,14 @@ import type {
   SubAgentResult,
   AggregatedResult,
   SubAgentStatus,
-} from '../types';
-import type { ToolUseContext, ToolDefinition, ToolName } from '../../types/tools';
-import type { PermissionMode } from '../../types/permissions';
-import { EventBus } from '../event-bus';
-import { InProcessBackend } from './backends/in-process';
-import { ResultAggregator } from '../result-aggregator';
-import { deriveChildPermissions } from '../permission-cascader';
-import { getState } from '../../bootstrap/state';
+} from '../types.js';
+import type { ToolUseContext, ToolDefinition, ToolName } from '../types/tools.js';
+import type { PermissionMode } from '../types/permissions.js';
+import { EventBus } from './event-bus.js';
+import { InProcessBackend } from './backends/in-process.js';
+import { ResultAggregator } from './result-aggregator.js';
+import { deriveChildPermissions } from './permission-cascader.js';
+import { getState } from '../bootstrap/state.js';
 
 /**
  * AgentOrchestrator - Manages sub-agent lifecycle

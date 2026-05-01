@@ -1,9 +1,14 @@
 // Permission System Tests
 
-import { describe, it, expect } from '../test-utils';
-import { parseRuleString, formatRuleString, matchRuleContent } from '../../src/permissions/rules.js';
-import { containsProtectedPath, isProtectedPath } from '../../src/permissions/protectedPaths.js';
-import { PermissionClassifier } from '../../src/permissions/classifier.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { parseRuleString, formatRuleString, matchRuleContent } from '../src/permissions/rules.js';
+import { containsProtectedPath, isProtectedPath } from '../src/permissions/protectedPaths.js';
+import { PermissionClassifier } from '../src/permissions/classifier.js';
+import { initializeState } from '../src/bootstrap/state.js';
+
+beforeEach(() => {
+  initializeState();
+});
 
 describe('Permission Rules', () => {
   it('should parse simple tool name', () => {
@@ -143,7 +148,7 @@ describe('Permission Classifier', () => {
 
 describe('Permission Engine Config', () => {
   it('should accept config with rules', async () => {
-    const { hasPermissionsToUseTool } = await import('../../src/permissions/engine.js');
+    const { hasPermissionsToUseTool } = await import('../src/permissions/engine.js');
 
     const config = {
       alwaysDenyRules: ['DangerousTool'],
@@ -156,7 +161,7 @@ describe('Permission Engine Config', () => {
   });
 
   it('should deny tools in alwaysDenyRules', async () => {
-    const { hasPermissionsToUseTool } = await import('../../src/permissions/engine.js');
+    const { hasPermissionsToUseTool } = await import('../src/permissions/engine.js');
 
     const config = {
       alwaysDenyRules: ['Bash'],
@@ -166,5 +171,3 @@ describe('Permission Engine Config', () => {
     expect(result.behavior).toBe('deny');
   });
 });
-
-console.log('\n✅ Permission system tests completed');

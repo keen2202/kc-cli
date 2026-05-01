@@ -14,16 +14,14 @@ import { toolRegistry, registerBuiltInTools } from './tools';
 import { QueryEngine } from './query/QueryEngine';
 import type { AgentEvent } from './state/types';
 import type { StreamEvent } from './types/message';
+import { formatToolResult, formatBanner, formatSeparator, setBareMode } from './ui';
+import { Spinner } from './ui/spinner';
+import { updateStatus, clearStatus } from './ui/statusline';
+import { MCPClientManager, convertMCPTool, loadMCPConfig } from './mcp';
 
 const VERSION = '0.1.0';
 
-// ASCII Art Banner
-const BANNER = `
-${chalk.cyan.bold('╔══════════════════════════════════════╗')}
-${chalk.cyan.bold('║')}  ${chalk.yellow.bold('KC-CLI')} - Intelligent Agent System  ${chalk.cyan.bold('║')}
-${chalk.cyan.bold('║')}  ${chalk.gray('v' + VERSION)}                             ${chalk.cyan.bold('║')}
-${chalk.cyan.bold('╚══════════════════════════════════════╝')}
-`;
+const BANNER = formatBanner(VERSION);
 
 async function main() {
   profileCheckpoint('start');
@@ -46,7 +44,14 @@ async function main() {
     .option('--bare', 'Minimal mode: skip hooks and heavy initialization')
     .option('--bypass-permissions', 'Bypass all permission checks')
     .option('--profile', 'Show startup profile')
+    .option('--acp', 'Run as ACP server (JSON-RPC over stdio)')
     .action(async (prompt: string | undefined, opts: any) => {
+      if (opts.acp) {
+        const { ACPServer } = await import('./acp');
+        const server = new ACPServer();
+        await server.start();
+        return;
+      }
       await runAgent(prompt, opts);
     });
 
@@ -83,10 +88,16 @@ async function runAgent(prompt: string | undefined, opts: any) {
     maxTurns: opts.maxTurns ? parseInt(opts.maxTurns) : null,
     maxBudgetUsd: opts.maxBudget ? parseFloat(opts.maxBudget) : null,
   });
+
+  if (opts.bare) {
+    setBareMode(true);
+  }
+
   profileCheckpoint('state_init');
 
   // Phase 2: Load configuration
   const { config, layers } = await loadConfig(cwd);
+  updateState({ config });
 
   if (opts.verbose) {
     console.log(chalk.gray(`\nConfig loaded from ${layers.length} sources:`));
@@ -107,6 +118,56 @@ async function runAgent(prompt: string | undefined, opts: any) {
     await registerBuiltInTools();
   }
   profileCheckpoint('tools_registered');
+
+  // Phase 3b: Initialize MCP servers
+  let mcpManager: MCPClientManager | null = null;
+  if (!opts.bare) {
+    try {
+      const mcpConfig = await loadMCPConfig(cwd);
+      if (Object.keys(mcpConfig.servers).length > 0) {
+        mcpManager = new MCPClientManager();
+        for (const [serverId, serverConfig] of Object.entries(mcpConfig.servers)) {
+          try {
+            await mcpManager.connect(serverId, serverConfig);
+            const mcpTools = mcpManager.getServerTools(serverId);
+            for (const mcpTool of mcpTools) {
+              const toolDef = convertMCPTool(mcpTool, serverId, mcpManager);
+              toolRegistry.registerMCPTool(toolDef);
+            }
+            if (opts.verbose) {
+              console.log(chalk.gray(`  MCP: ${serverId} (${mcpTools.length} tools)`));
+            }
+          } catch (error) {
+            console.warn(chalk.yellow(`Warning: MCP server "${serverId}" failed to connect: ${error instanceof Error ? error.message : error}`));
+          }
+        }
+      }
+    } catch {
+      // MCP config loading is optional, ignore errors
+    }
+  }
+  profileCheckpoint('mcp_initialized');
+
+  // Phase 3c: Initialize plugins
+  let pluginManager: import('./plugins/plugin-manager').PluginManager | null = null;
+  if (!opts.bare) {
+    try {
+      const { PluginManager } = await import('./plugins');
+      pluginManager = new PluginManager();
+      await pluginManager.loadAll(cwd);
+      await pluginManager.initAll();
+      const pluginTools = pluginManager.getPluginTools();
+      for (const tool of pluginTools) {
+        toolRegistry.registerPluginTool(tool);
+      }
+      if (opts.verbose && pluginTools.length > 0) {
+        console.log(chalk.gray(`  Plugins: ${pluginTools.length} tool(s) loaded`));
+      }
+    } catch {
+      // Plugin loading is optional
+    }
+  }
+  profileCheckpoint('plugins_initialized');
 
   // Phase 4: Create query engine
   const tools = toolRegistry.getAllTools();
@@ -139,12 +200,28 @@ async function runAgent(prompt: string | undefined, opts: any) {
 
   profileCheckpoint('engine_created');
 
+  updateStatus({
+    provider,
+    model,
+    maxTurns: getState().maxTurns || 50,
+    sessionStartTime: Date.now(),
+  });
+
   // Phase 5: Run REPL or single prompt
   if (prompt) {
     // Single prompt mode
     await executePrompt(queryEngine, prompt);
+  } else if (!opts.bare && process.stdout.isTTY) {
+    // Ink-based interactive UI
+    const { renderInkUI } = await import('./ui/renderer');
+    renderInkUI({
+      queryEngine,
+      provider,
+      model,
+      maxTurns: getState().maxTurns || 50,
+    });
   } else {
-    // Interactive REPL mode
+    // Fallback readline REPL (bare mode or non-TTY)
     await runREPL(queryEngine);
   }
 
@@ -168,90 +245,104 @@ async function executePrompt(queryEngine: QueryEngine, prompt: string) {
   }
 }
 
-/**
- * Unified event handler for both AgentEvent and legacy StreamEvent types
- */
 function handleStreamEvent(event: AgentEvent | StreamEvent): void {
   if (event.type.startsWith('agent:')) {
-    // Handle AgentEvent types
     switch (event.type) {
       case 'agent:text_delta':
         process.stdout.write(event.text);
         break;
 
       case 'agent:turn_complete':
-        // Turn complete, continue to next phase
         break;
 
-      case 'agent:tool_started':
-        console.log(chalk.yellow(`\n\n🔧 Using tool: ${event.toolCall.toolName}`));
-        console.log(chalk.gray(`   Input: ${JSON.stringify(event.toolCall.input)}`));
+      case 'agent:tool_started': {
+        const spinner = new Spinner();
+        spinner.start(`${event.toolCall.toolName}`);
+        (globalThis as any).__currentSpinner = spinner;
         break;
+      }
 
-      case 'agent:tool_completed':
-        console.log(chalk.green(`\n✅ Tool completed successfully`));
-        if (event.result.output.length < 200) {
-          console.log(chalk.gray(`   Output: ${event.result.output}`));
+      case 'agent:tool_completed': {
+        const spinner = (globalThis as any).__currentSpinner;
+        if (spinner) {
+          spinner.stop(formatToolResult(event.result.output, false));
+          (globalThis as any).__currentSpinner = null;
+        } else {
+          console.log(formatToolResult(event.result.output, false));
+        }
+        updateStatus({ turnCount: (getState() as any).turnCount });
+        break;
+      }
+
+      case 'agent:tool_failed': {
+        const spinner = (globalThis as any).__currentSpinner;
+        if (spinner) {
+          spinner.fail(formatToolResult(event.error.message, true));
+          (globalThis as any).__currentSpinner = null;
+        } else {
+          console.log(formatToolResult(event.error.message, true));
         }
         break;
-
-      case 'agent:tool_failed':
-        console.log(chalk.red(`\n❌ Tool failed: ${event.error.message}`));
-        break;
+      }
 
       case 'agent:tool_permission_denied':
-        console.log(chalk.red(`\n🚫 Tool permission denied: ${event.reason}`));
+        console.log(chalk.red(`\nTool permission denied: ${event.reason}`));
         break;
 
       case 'agent:compact_micro':
         if (getState().verbose) {
-          console.log(chalk.gray(`\n📦 Microcompacted ~${event.tokensSaved} tokens`));
+          console.log(chalk.gray(`\nMicrocompacted ~${event.tokensSaved} tokens`));
         }
         break;
 
       case 'agent:compact_full':
         if (getState().verbose) {
-          console.log(chalk.gray(`\n📦 Full compact: ${event.originalTokens} → ${event.compactedTokens} tokens`));
+          console.log(chalk.gray(`\nFull compact: ${event.originalTokens} → ${event.compactedTokens} tokens`));
         }
         break;
 
       case 'agent:error':
-        console.error(chalk.red(`\n❌ Error: ${event.error.message}`));
+        console.error(chalk.red(`\nError: ${event.error.message}`));
         break;
 
       case 'agent:complete':
-        console.log(); // Newline
+        console.log();
         break;
     }
   } else {
-    // Handle legacy StreamEvent types (backward compatibility)
     switch (event.type) {
       case 'text_delta':
         process.stdout.write(event.text);
         break;
 
-      case 'tool_use_start':
-        console.log(chalk.yellow(`\n\n🔧 Using tool: ${event.toolCall.toolName}`));
-        console.log(chalk.gray(`   Input: ${JSON.stringify(event.toolCall.input)}`));
+      case 'tool_use_start': {
+        const spinner = new Spinner();
+        spinner.start(`${event.toolCall.toolName}`);
+        (globalThis as any).__currentSpinner = spinner;
         break;
+      }
 
-      case 'tool_use_end':
-        if (event.result.isError) {
-          console.log(chalk.red(`\n❌ Tool error: ${event.result.output}`));
-        } else {
-          console.log(chalk.green(`\n✅ Tool completed successfully`));
-          if (event.result.output.length < 200) {
-            console.log(chalk.gray(`   Output: ${event.result.output}`));
+      case 'tool_use_end': {
+        const spinner = (globalThis as any).__currentSpinner;
+        if (spinner) {
+          if (event.result.isError) {
+            spinner.fail(formatToolResult(event.result.output, true));
+          } else {
+            spinner.stop(formatToolResult(event.result.output, false));
           }
+          (globalThis as any).__currentSpinner = null;
+        } else {
+          console.log(formatToolResult(event.result.output, event.result.isError));
         }
         break;
+      }
 
       case 'error':
-        console.error(chalk.red(`\n❌ Error: ${event.error.message}`));
+        console.error(chalk.red(`\nError: ${event.error.message}`));
         break;
 
       case 'complete':
-        console.log(); // Newline
+        console.log();
         break;
     }
   }

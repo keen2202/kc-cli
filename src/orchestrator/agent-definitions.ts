@@ -1,7 +1,7 @@
 // Pre-defined agent types for common tasks
 
-import type { SubAgentSpawnConfig, AgentDefinition } from './types';
-import type { ToolName } from '../types/tools';
+import type { SubAgentSpawnConfig, AgentDefinition } from './types.js';
+import type { ToolName } from '../types/tools.js';
 
 /**
  * Built-in agent definitions for common task types

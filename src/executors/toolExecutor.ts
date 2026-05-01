@@ -4,6 +4,7 @@ import type { ToolCall, ToolResult } from '../types/message';
 import type { ToolDefinition, ToolUseContext } from '../types/tools';
 import type { PermissionResult } from '../types/permissions';
 import type { ToolExecutionState } from '../state/types';
+import type { PluginHooks } from '../plugins/types';
 import { hasPermissionsToUseTool } from '../permissions/engine';
 
 /**
@@ -18,16 +19,18 @@ export class ToolExecutor {
     alwaysAskRules?: string[];
     alwaysAllowRules?: string[];
   };
+  private pluginHooks?: PluginHooks;
   private readonly DEFAULT_TIMEOUT_MS = 30_000; // 30 seconds
 
   constructor(tools: ToolDefinition[], cwd: string, permissionConfig?: {
     alwaysDenyRules?: string[];
     alwaysAskRules?: string[];
     alwaysAllowRules?: string[];
-  }) {
+  }, pluginHooks?: PluginHooks) {
     this.tools = new Map(tools.map(tool => [tool.name, tool]));
     this.cwd = cwd;
     this.permissionConfig = permissionConfig;
+    this.pluginHooks = pluginHooks;
   }
 
   /**
@@ -50,7 +53,25 @@ export class ToolExecutor {
         };
       }
 
-      // 2. Permission check
+      // 2. Plugin preToolUse hook (may modify input)
+      let effectiveInput = toolCall.input;
+      if (this.pluginHooks?.preToolUse) {
+        try {
+          const modifiedInput = await this.pluginHooks.preToolUse(toolCall.toolName, toolCall.input, context);
+          if (modifiedInput === null) {
+            return {
+              toolCallId: toolCall.id,
+              output: `Tool execution blocked by plugin hook`,
+              isError: true,
+            };
+          }
+          effectiveInput = modifiedInput;
+        } catch (err) {
+          console.warn(`[Plugin] preToolUse hook error:`, err);
+        }
+      }
+
+      // 3. Permission check
       const permissionResult = await this.checkPermission(toolCall, tool, context);
       if (permissionResult.behavior === 'deny') {
         return {
@@ -60,9 +81,18 @@ export class ToolExecutor {
         };
       }
 
-      // 3. Execute tool with timeout
+      // 4. Execute tool with timeout
       const timeoutMs = this.getToolTimeout(tool);
-      const result = await this.executeWithTimeout(tool, toolCall.input, context, timeoutMs, toolCall.toolName);
+      const result = await this.executeWithTimeout(tool, effectiveInput, context, timeoutMs, toolCall.toolName);
+
+      // 5. Plugin postToolUse hook
+      if (this.pluginHooks?.postToolUse) {
+        try {
+          await this.pluginHooks.postToolUse(toolCall.toolName, effectiveInput, result, context);
+        } catch (err) {
+          console.warn(`[Plugin] postToolUse hook error:`, err);
+        }
+      }
 
       return result;
     } catch (error) {

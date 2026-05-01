@@ -1,6 +1,6 @@
 // Bash Tool Tests
 
-import { describe, it, expect, printTestSummary } from '../test-utils';
+import { describe, it, expect } from 'vitest';
 import { tool as BashTool } from '../../src/tools/BashTool/index.js';
 import { isReadOnlyBashCommand, DANGEROUS_BASH_PATTERNS } from '../../src/permissions/readonlyCommands.js';
 
@@ -18,8 +18,8 @@ describe('BashTool', () => {
     expect(BashTool.inputSchema).toBeDefined();
   });
 
-  it('should be marked as not read-only by default', () => {
-    const result = BashTool.isReadOnly?.({ command: 'ls' });
+  it('should be marked as not read-only for write commands', () => {
+    const result = BashTool.isReadOnly?.({ command: 'mkdir testdir' });
     expect(result).toBe(false);
   });
 
@@ -48,7 +48,7 @@ describe('BashTool', () => {
 
   it('should ask for non-read-only commands', () => {
     const result = BashTool.checkPermissions!(
-      { command: 'echo test', timeout: 30, background: false },
+      { command: 'mkdir testdir', timeout: 30, background: false },
       { cwd: process.cwd(), abortController: new AbortController() } as any
     );
     expect(result.behavior).toBe('ask');
@@ -79,4 +79,3 @@ describe('Readonly Commands', () => {
   });
 });
 
-console.log('\n✅ BashTool tests completed');

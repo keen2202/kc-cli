@@ -128,9 +128,12 @@ export class AnthropicClient extends BaseApiClient {
       stream: config.stream ?? true,
     };
 
-    // Anthropic uses system as a separate field
     if (config.systemPrompt) {
-      body.system = config.systemPrompt;
+      body.system = [{
+        type: 'text',
+        text: config.systemPrompt,
+        cache_control: { type: 'ephemeral' },
+      }];
     }
 
     // Format messages (filter out system messages)
@@ -197,10 +200,11 @@ export class AnthropicClient extends BaseApiClient {
    * Format tools for Anthropic API
    */
   protected formatTools(tools: any[]): Array<Record<string, unknown>> {
-    return tools.map(tool => ({
+    return tools.map((tool, index) => ({
       name: tool.name,
       description: tool.description,
       input_schema: this.extractSchemaParameters(tool.inputSchema),
+      ...(index === tools.length - 1 ? { cache_control: { type: 'ephemeral' } } : {}),
     }));
   }
 
@@ -237,11 +241,12 @@ export class AnthropicClient extends BaseApiClient {
       }
     }
 
-    // Parse usage
     const usage: TokenUsage = {
       inputTokens: data.usage?.input_tokens || 0,
       outputTokens: data.usage?.output_tokens || 0,
       totalTokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0),
+      cacheReadTokens: data.usage?.cache_read_input_tokens || 0,
+      cacheCreationTokens: data.usage?.cache_creation_input_tokens || 0,
     };
 
     return {

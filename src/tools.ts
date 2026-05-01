@@ -35,18 +35,23 @@ import { tool as AskUserTool } from './tools/AskUserTool/index.js';
 import { tool as AgentTool } from './tools/AgentTool/index.js';
 import { tool as DeployTool } from './tools/DeployTool/index.js';
 
-// Batch 5: Multi-agent coordination (TODO: fix Windows ESM path issue)
-// import { tool as TeamCreateTool } from './orchestrator/team-create-tool.js';
+// Batch 5: Multi-agent coordination
+import { tool as TeamCreateTool } from './orchestrator/team-create-tool.js';
+
+// Batch 6: LSP integration
+import { tool as LSPTool } from './lsp/tool.js';
 
 class ToolRegistryImpl implements ToolRegistry {
   tools: Map<ToolName, ToolDefinition> = new Map();
+  mcpTools: Map<string, ToolDefinition> = new Map();
 
   getTool(name: ToolName): ToolDefinition | undefined {
-    return this.tools.get(name);
+    return this.tools.get(name) || this.mcpTools.get(name);
   }
 
   getAllTools(): ToolDefinition[] {
-    return Array.from(this.tools.values())
+    const allTools = [...this.tools.values(), ...this.mcpTools.values()];
+    return allTools
       .filter(tool => tool.isEnabled?.() !== false)
       .sort((a, b) => a.name.localeCompare(b.name)); // Stable sort for prompt cache
   }
@@ -55,8 +60,21 @@ class ToolRegistryImpl implements ToolRegistry {
     this.tools.set(tool.name as ToolName, tool);
   }
 
+  registerMCPTool(tool: ToolDefinition): void {
+    this.mcpTools.set(tool.name, tool);
+  }
+
+  registerPluginTool(tool: ToolDefinition): void {
+    this.mcpTools.set(tool.name, tool);
+  }
+
+  unregisterMCPTools(): void {
+    this.mcpTools.clear();
+  }
+
   unregisterTool(name: ToolName): void {
     this.tools.delete(name);
+    this.mcpTools.delete(name);
   }
 
   /**
@@ -116,8 +134,10 @@ export async function registerBuiltInTools(): Promise<void> {
     TodoWriteTool, TaskCreateTool, TaskGetTool, AskUserTool,
     // Batch 4: Advanced tools
     AgentTool, DeployTool,
-    // Batch 5: Multi-agent coordination (TODO: fix Windows ESM path issue)
-    // TeamCreateTool,
+    // Batch 5: Multi-agent coordination
+    TeamCreateTool,
+    // Batch 6: LSP integration
+    LSPTool,
   ];
   
   for (const tool of implementedTools) {

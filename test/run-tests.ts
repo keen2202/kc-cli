@@ -1,52 +1,23 @@
-// Simple test script for kc-cli
+// Vitest wrapper - runs vitest programmatically
+// The main test runner is now `npx vitest run` (see package.json "test" script)
+
+import { startVitest } from 'vitest/node';
 
 async function runTests() {
-  console.log('Running kc-cli tests...\n');
+  console.log('Running kc-cli tests via vitest...\n');
 
-  // Test 1: Tool Registry
-  console.log('Test 1: Tool Registry');
-  try {
-    const { toolRegistry, registerBuiltInTools } = await import('../src/tools.js');
-    await registerBuiltInTools();
-    const tools = toolRegistry.getAllTools();
-    console.log(`  ✓ Registered ${tools.length} tools: ${tools.map(t => t.name).join(', ')}`);
-  } catch (error) {
-    console.error(`  ✗ Failed: ${error.message}`);
+  const vitest = await startVitest('run', [], {
+    config: './vitest.config.ts',
+  });
+
+  await vitest?.close();
+
+  if (vitest?.state.getCountOfFailedTests() ?? 0 > 0) {
+    process.exit(1);
   }
-
-  // Test 2: Path Utilities
-  console.log('\nTest 2: Path Utilities');
-  try {
-    const { isPathAllowed } = await import('../src/utils/path.js');
-    const safeResult = isPathAllowed('/safe/path/file.txt', { cwd: '/safe', operation: 'read' });
-    const unsafeResult = isPathAllowed('/etc/passwd', { cwd: '/safe', operation: 'read' });
-    console.log(`  ✓ Safe path result: ${safeResult}, System path result: ${unsafeResult}`);
-  } catch (error) {
-    console.error(`  ✗ Failed: ${error.message}`);
-  }
-
-  // Test 3: Config Loading
-  console.log('\nTest 3: Config Loading');
-  try {
-    const { loadConfig } = await import('../src/bootstrap/config.js');
-    const { config, layers } = await loadConfig(process.cwd());
-    console.log(`  ✓ Config loaded - Provider: ${config.provider}, Model: ${config.model}, Layers: ${layers.length}`);
-  } catch (error) {
-    console.error(`  ✗ Failed: ${error.message}`);
-  }
-
-  // Test 4: State Management
-  console.log('\nTest 4: State Management');
-  try {
-    const { initializeState, getState } = await import('../src/bootstrap/state.js');
-    initializeState();
-    const state = getState();
-    console.log(`  ✓ State initialized - CWD: ${state.cwd}, Session: ${state.sessionId}`);
-  } catch (error) {
-    console.error(`  ✗ Failed: ${error.message}`);
-  }
-
-  console.log('\n✅ Tests completed!');
 }
 
-runTests().catch(console.error);
+runTests().catch((error) => {
+  console.error('Test runner failed:', error);
+  process.exit(1);
+});
