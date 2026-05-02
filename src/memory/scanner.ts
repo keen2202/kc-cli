@@ -5,6 +5,7 @@ import * as fs from 'fs/promises';
 import type { MemoryEntry, MemoryType, MemoryManifestEntry } from '../memory/types';
 import { getProjectMemoryPath } from '../memory/paths';
 import { parseFrontmatter, validateMemoryType } from '../memory/frontmatter';
+import { getAgeText } from '../utils/format';
 
 const MAX_MEMORY_FILES = 200;
 

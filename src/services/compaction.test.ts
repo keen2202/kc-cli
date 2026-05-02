@@ -31,7 +31,7 @@ function makeToolMessages(count: number): ChatMessage[] {
       role: 'assistant',
       content: '',
       timestamp: Date.now(),
-      toolCalls: [{ id: `tc_${i}`, toolName: 'Bash', input: { command: 'ls' } }],
+      toolCalls: [{ id: `tc_${i}`, toolName: 'Bash', input: { command: 'ls' }, status: 'completed' }],
     });
     messages.push({
       id: `tool_${i}`,

@@ -29,7 +29,7 @@ export interface ToolResult<T = unknown> {
 export interface ToolDefinition<Input = Record<string, unknown>, Output = unknown, Progress = unknown> {
   name: string;
   description: string;
-  inputSchema: z.ZodType<Input>;
+  inputSchema: z.ZodType<Input, any, any>;
   outputSchema?: z.ZodType<Output>;
 
   call: (

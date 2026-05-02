@@ -1,6 +1,6 @@
 // Tool registry and assembly
 
-import type { ToolDefinition, ToolName, ToolRegistry } from '../types/tools';
+import type { ToolDefinition, ToolName, ToolRegistry } from './types/tools';
 
 // Import implemented tools statically to avoid Windows path issues with dynamic imports
 // Note: Using .js extension for ESM compatibility with tsx
@@ -56,7 +56,7 @@ class ToolRegistryImpl implements ToolRegistry {
       .sort((a, b) => a.name.localeCompare(b.name)); // Stable sort for prompt cache
   }
 
-  registerTool(tool: ToolDefinition): void {
+  registerTool(tool: ToolDefinition<any, any, any>): void {
     this.tools.set(tool.name as ToolName, tool);
   }
 

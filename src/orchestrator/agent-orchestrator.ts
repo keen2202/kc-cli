@@ -5,7 +5,7 @@ import type {
   SubAgentResult,
   AggregatedResult,
   SubAgentStatus,
-} from '../types.js';
+} from './types.js';
 import type { ToolUseContext, ToolDefinition, ToolName } from '../types/tools.js';
 import type { PermissionMode } from '../types/permissions.js';
 import { EventBus } from './event-bus.js';
@@ -221,7 +221,7 @@ export class AgentOrchestrator {
     return agentIds.map((id) => ({
       agentId: id,
       name: id.split('@')[0] || id,
-      status: this.backend.getStatus(id) || 'unknown',
+      status: this.backend.getStatus(id) || 'unknown' as SubAgentStatus,
     }));
   }
 

@@ -212,21 +212,21 @@ export class InProcessBackend implements SubAgentBackend {
           }
 
           // Forward event to parent via EventBus
-          this.eventBus.emit(agentId, event);
+          this.eventBus.emit(agentId, event as any);
 
           // Collect final message
           if (event.type === 'agent:text_delta') {
-            lastAssistantMessage += event.text;
+            lastAssistantMessage += (event as any).text;
           } else if (event.type === 'agent:turn_complete') {
-            if (event.message?.content) {
-              lastAssistantMessage = event.message.content;
+            if ((event as any).message?.content) {
+              lastAssistantMessage = (event as any).message.content;
             }
-            if (event.message?.toolCalls && event.message.toolCalls.length > 0) {
+            if ((event as any).message?.toolCalls && (event as any).message.toolCalls.length > 0) {
               hasToolCalls = true;
-              runtime.toolUseCount += event.message.toolCalls.length;
+              runtime.toolUseCount += (event as any).message.toolCalls.length;
             }
           } else if (event.type === 'agent:tool_completed') {
-            runtime.totalTokensUsed += event.result?.metadata?.tokensUsed || 0;
+            runtime.totalTokensUsed += Number((event as any).result?.metadata?.tokensUsed) || 0;
           }
         }
 

@@ -326,7 +326,7 @@ export class AnthropicClient extends BaseApiClient {
       currentToolCall: Partial<ToolCall> | null;
       toolInputBuffer: string;
       setEventType: (type: string) => void;
-      setToolCall: (tc: Partial<ToolCall>) => void;
+      setToolCall: (tc: Partial<ToolCall> | null) => void;
       setToolInputBuffer: (buf: string) => void;
     }
   ): Generator<LLMStreamEvent> {
@@ -373,7 +373,7 @@ export class AnthropicClient extends BaseApiClient {
     context: {
       currentToolCall: Partial<ToolCall> | null;
       toolInputBuffer: string;
-      setToolCall: (tc: Partial<ToolCall>) => void;
+      setToolCall: (tc: Partial<ToolCall> | null) => void;
       setToolInputBuffer: (buf: string) => void;
     }
   ): Generator<LLMStreamEvent> {

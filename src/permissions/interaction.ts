@@ -45,7 +45,8 @@ export class PermissionHandler {
     toolCall: ToolCall,
     permissionResult: PermissionResult
   ): Promise<PermissionResult> {
-    const { behavior, message } = permissionResult;
+    const { behavior } = permissionResult;
+    const message = 'message' in permissionResult ? permissionResult.message : '';
 
     // Log if verbose
     if (this.options.verbose) {
@@ -272,5 +273,5 @@ export function formatPermissionResult(result: PermissionResult): string {
   const icon = result.behavior === 'allow' ? '✅' :
                result.behavior === 'deny' ? '❌' : '❓';
 
-  return `${icon} ${result.behavior}: ${result.message || 'No message'}`;
+  return `${icon} ${result.behavior}: ${'message' in result ? result.message : 'No message'}`;
 }

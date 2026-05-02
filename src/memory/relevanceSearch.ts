@@ -1,6 +1,7 @@
 // Memory relevance search - finds most relevant memories for a query
 
 import type { MemoryManifestEntry, MemoryEntry } from './types';
+import { getAgeText } from '../utils/format';
 
 /**
  * Find relevant memories using heuristic keyword matching

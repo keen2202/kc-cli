@@ -277,7 +277,7 @@ export class ToolExecutor {
       }
 
       const permission = await hasPermissionsToUseTool(toolCall.toolName, toolCall.input, {
-        toolCheckPermissions: tool.checkPermissions,
+        toolCheckPermissions: tool.checkPermissions as any,
         content: this.extractContentForPermission(toolCall.toolName, toolCall.input),
         config: this.permissionConfig,
       });
@@ -297,7 +297,7 @@ export class ToolExecutor {
     context: ToolUseContext
   ): Promise<PermissionResult> {
     return await hasPermissionsToUseTool(toolCall.toolName, toolCall.input, {
-      toolCheckPermissions: tool.checkPermissions,
+      toolCheckPermissions: tool.checkPermissions as any,
       content: this.extractContentForPermission(toolCall.toolName, toolCall.input),
       config: this.permissionConfig,
     });

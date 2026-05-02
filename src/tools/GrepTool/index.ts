@@ -68,11 +68,11 @@ export const tool = buildTool<GrepInput, string>({
                   const matchLine = lines[i].trim();
 
                   // Get context lines if requested
-                  let context: string | undefined;
+                  let contextLines: string | undefined;
                   if (input.context_lines > 0) {
                     const start = Math.max(0, i - input.context_lines);
                     const end = Math.min(lines.length, i + input.context_lines + 1);
-                    context = lines.slice(start, end).map((l, idx) => {
+                    contextLines = lines.slice(start, end).map((l, idx) => {
                       const lineNum = start + idx + 1;
                       return lineNum === i + 1 ? `> ${lineNum}: ${l}` : `  ${lineNum}: ${l}`;
                     }).join('\n');
@@ -82,7 +82,7 @@ export const tool = buildTool<GrepInput, string>({
                     file: path.relative(context.cwd, fullPath),
                     line: i + 1,
                     match: matchLine,
-                    context,
+                    context: contextLines,
                   });
 
                   if (results.length >= input.max_results) break;

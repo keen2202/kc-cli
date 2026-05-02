@@ -76,8 +76,8 @@ export const tool = buildTool<TeamCreateInput, string>({
                 name: agentConfig.name,
                 timeoutSeconds: agentConfig.timeout,
                 maxTurns: agentConfig.max_turns,
-                tools_allow: agentConfig.tools_allow as ToolName[] | undefined,
-                tools_deny: agentConfig.tools_deny as ToolName[] | undefined,
+                tools: agentConfig.tools_allow as ToolName[] | undefined,
+                deniedTools: agentConfig.tools_deny as ToolName[] | undefined,
               }
             );
 
@@ -150,8 +150,8 @@ export const tool = buildTool<TeamCreateInput, string>({
       const outputLines = [
         `Team execution completed\n`,
         `Agents: ${aggregatedResult.results.length}`,
-        `Success: ${aggregatedResult.results.filter((r) => r.success).length}`,
-        `Failed: ${aggregatedResult.results.filter((r) => !r.success).length}`,
+        `Success: ${aggregatedResult.results.filter((r: any) => r.success).length}`,
+        `Failed: ${aggregatedResult.results.filter((r: any) => !r.success).length}`,
         `Total tokens: ${aggregatedResult.totalTokensUsed.toLocaleString()}`,
         `Total time: ${(aggregatedResult.totalDuration / 1000).toFixed(1)}s\n`,
         `=== Individual Results ===\n`,
@@ -175,8 +175,8 @@ export const tool = buildTool<TeamCreateInput, string>({
         metadata: {
           agent_ids: agentIds,
           total: aggregatedResult.results.length,
-          success: aggregatedResult.results.filter((r) => r.success).length,
-          failed: aggregatedResult.results.filter((r) => !r.success).length,
+          success: aggregatedResult.results.filter((r: any) => r.success).length,
+          failed: aggregatedResult.results.filter((r: any) => !r.success).length,
           total_tokens: aggregatedResult.totalTokensUsed,
           total_duration: aggregatedResult.totalDuration,
           wait_for_all: true,

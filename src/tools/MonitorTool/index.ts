@@ -35,9 +35,12 @@ export const tool = buildTool<MonitorInput, string>({
       }
 
       if (input.metric === 'all' || input.metric === 'memory') {
-        const totalMem = (os.totalmem() / 1024 / 1024 / 1024).toFixed(2);
-        const freeMem = (os.freemem() / 1024 / 1024 / 1024).toFixed(2);
-        const usedMem = (totalMem - parseFloat(freeMem)).toFixed(2);
+        const totalMemGb = os.totalmem() / 1024 / 1024 / 1024;
+        const freeMemGb = os.freemem() / 1024 / 1024 / 1024;
+        const usedMemGb = totalMemGb - freeMemGb;
+        const totalMem = totalMemGb.toFixed(2);
+        const freeMem = freeMemGb.toFixed(2);
+        const usedMem = usedMemGb.toFixed(2);
         results.push(
           `Memory:
   Total: ${totalMem} GB
