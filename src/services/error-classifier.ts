@@ -32,12 +32,12 @@ export function classifyApiError(error: Error): ClassifiedError {
   }
 
   // Transient: timeout
-  if (message.includes('timeout') || message.includes('timed out') || message.includes('ETIMEDOUT')) {
+  if (message.includes('timeout') || message.includes('timed out') || message.includes('etimedout')) {
     return { error, errorClass: 'transient', retryable: true, retryAfterMs: 1000, context: 'timeout' };
   }
 
   // Transient: network errors
-  if (message.includes('ECONNRESET') || message.includes('ECONNREFUSED') || message.includes('fetch failed')) {
+  if (message.includes('econnreset') || message.includes('econnrefused') || message.includes('fetch failed')) {
     return { error, errorClass: 'transient', retryable: true, retryAfterMs: 1000, context: 'network' };
   }
 
