@@ -5,7 +5,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 
-const ConfigSchema = z.object({
+export const ConfigSchema = z.object({
   // API Configuration
   apiKey: z.string().optional(),
   apiBaseUrl: z.string().optional(),
@@ -163,7 +163,7 @@ export async function loadConfig(cwd: string): Promise<{ config: Config; layers:
   return { config, layers };
 }
 
-async function loadConfigFile(filePath: string): Promise<Partial<Config> | null> {
+export async function loadConfigFile(filePath: string): Promise<Partial<Config> | null> {
   try {
     if (!fs.existsSync(filePath)) {
       return null;
@@ -177,7 +177,7 @@ async function loadConfigFile(filePath: string): Promise<Partial<Config> | null>
   }
 }
 
-function loadEnvConfig(): Partial<Config> {
+export function loadEnvConfig(): Partial<Config> {
   const config: Partial<Config> = {};
 
   if (process.env.KC_API_KEY) {
@@ -206,7 +206,7 @@ function loadEnvConfig(): Partial<Config> {
   }
 
   // Sandbox environment variables
-  const sb: Record<string, unknown> = config.sandbox ??= {} as any;
+  const sb = config.sandbox ??= {} as any;
   if (process.env.KC_SANDBOX_ENABLED) {
     sb.enabled = process.env.KC_SANDBOX_ENABLED === 'true' || process.env.KC_SANDBOX_ENABLED === '1';
   }
@@ -234,7 +234,7 @@ function loadEnvConfig(): Partial<Config> {
   }
 
   // Memory environment variables
-  const mem: Record<string, unknown> = config.memory ??= {} as any;
+  const mem = config.memory ??= {} as any;
   if (process.env.KC_MEMORY_ENABLED) {
     mem.enabled = process.env.KC_MEMORY_ENABLED === 'true' || process.env.KC_MEMORY_ENABLED === '1';
   }
@@ -245,13 +245,13 @@ function loadEnvConfig(): Partial<Config> {
   return config;
 }
 
-function mergeConfigLayers(layers: ConfigLayer[]): Partial<Config> {
+export function mergeConfigLayers(layers: ConfigLayer[]): Partial<Config> {
   return layers.reduce((merged, layer) => {
     return deepMerge(merged, layer.config);
   }, {} as Partial<Config>);
 }
 
-function deepMerge<T extends Record<string, any>>(target: T, source: Partial<T>): T {
+export function deepMerge<T extends Record<string, any>>(target: T, source: Partial<T>): T {
   const result = { ...target };
 
   for (const key in source) {
