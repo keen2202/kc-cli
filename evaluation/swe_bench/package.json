@@ -1,0 +1,16 @@
+{
+  "name": "kc-cli-swe-bench",
+  "version": "1.0.0",
+  "description": "SWE-bench evaluation adapter for KC-CLI",
+  "type": "module",
+  "scripts": {
+    "run:verified": "tsx run_predictions.ts --dataset verified --split dev",
+    "run:lite": "tsx run_predictions.ts --dataset lite --split dev",
+    "run:local": "tsx run_predictions.ts --dataset verified --split dev --limit 10",
+    "evaluate": "python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Verified --predictions_path ./output/preds.json --max_workers 4 --run_id kc-cli-local",
+    "submit": "tsx submit.ts"
+  },
+  "dependencies": {
+    "tsx": "^4.19.0"
+  }
+}

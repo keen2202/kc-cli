@@ -1,0 +1,10 @@
+# Output files
+output/
+data/
+
+# Node modules
+node_modules/
+
+# Temp files
+*.tmp
+*.log
