@@ -6,6 +6,7 @@ import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
 import * as path from 'path';
 import * as fs from 'fs';
+import { assertPathWithinWorkspace } from '../../utils/path';
 
 const FileWriteInputSchema = z.object({
   path: z.string().describe('File path to write'),
@@ -24,6 +25,7 @@ export const tool = buildTool<FileWriteInput, string>({
   call: async (input, context): Promise<ToolResultType<string>> => {
     try {
       const filePath = path.resolve(context.cwd, input.path);
+      assertPathWithinWorkspace(input.path, context.cwd);
 
       // Ensure directory exists (async)
       const dir = path.dirname(filePath);

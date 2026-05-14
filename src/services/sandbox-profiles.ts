@@ -257,6 +257,11 @@ export class NoopSandbox implements SandboxBackend {
 /**
  * Shell-escape a string for safe embedding in /bin/sh -c '...'
  */
+/**
+ * Shell-escape a string for safe embedding in sh -c '...'
+ * Strips null bytes (invalid in shell) and wraps in single quotes.
+ */
 function shellEscape(s: string): string {
-  return "'" + s.replace(/'/g, "'\\''") + "'";
+  const sanitized = s.replace(/\0/g, '');
+  return "'" + sanitized.replace(/'/g, "'\\''") + "'";
 }

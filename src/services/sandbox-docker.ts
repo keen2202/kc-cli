@@ -42,6 +42,7 @@ export class DockerSandbox implements SandboxBackend {
       // Security hardening
       '--read-only',
       '--security-opt', 'no-new-privileges=true',
+      '--cap-drop', 'ALL',
       '--pids-limit', '256',
 
       // Apply seccomp profile if available

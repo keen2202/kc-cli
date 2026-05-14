@@ -107,9 +107,16 @@ export const tool = buildTool<WebFetchInput, string>({
 
     if (
       hostname === 'localhost' ||
+      hostname === '0.0.0.0' ||
+      hostname === '[::1]' ||
+      hostname === '::1' ||
       hostname === '127.0.0.1' ||
+      hostname.startsWith('127.') ||
       hostname.startsWith('192.168.') ||
       hostname.startsWith('10.') ||
+      hostname.startsWith('169.254.') ||
+      hostname.startsWith('fd00:') ||
+      hostname.startsWith('fe80:') ||
       (ipMatch && (() => {
         // Check 172.16.0.0/12 range (172.16.0.0 - 172.31.255.255)
         const octet1 = parseInt(ipMatch[1], 10);

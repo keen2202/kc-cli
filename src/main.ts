@@ -194,6 +194,11 @@ async function runAgent(prompt: string | undefined, opts: any) {
       maxTurns: getState().maxTurns || 50,
       maxBudgetUsd: getState().maxBudgetUsd,
       systemPrompt,
+      permissionRules: {
+        deny: config.permissions.deny,
+        ask: config.permissions.ask,
+        allow: config.permissions.allow,
+      },
     },
     tools
   );

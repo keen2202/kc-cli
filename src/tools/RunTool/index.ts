@@ -6,6 +6,7 @@ import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { DANGEROUS_BASH_PATTERNS } from '../../permissions/readonlyCommands';
 
 const execAsync = promisify(exec);
 
@@ -89,23 +90,14 @@ export const tool = buildTool<RunInput, string>({
   },
 
   checkPermissions: (input, context): PermissionResult => {
-    const command = input.command.trim().toLowerCase();
+    const command = input.command.trim();
 
-    // Block dangerous commands
-    const dangerousPatterns = [
-      'rm -rf /',
-      'mkfs',
-      'dd if=',
-      'format /q',
-      'shutdown',
-      'reboot',
-    ];
-
-    for (const pattern of dangerousPatterns) {
-      if (command.includes(pattern)) {
+    // Block dangerous commands using shared pattern system
+    for (const pattern of DANGEROUS_BASH_PATTERNS) {
+      if (pattern.test(command)) {
         return {
           behavior: 'deny',
-          message: `Dangerous command blocked: ${pattern}`,
+          message: `Dangerous command blocked: ${pattern.source}`,
         };
       }
     }

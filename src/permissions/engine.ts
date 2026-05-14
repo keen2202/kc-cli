@@ -109,6 +109,12 @@ export async function hasPermissionsToUseTool(
       return toolResult;
     }
     if (toolResult.behavior === 'allow') {
+      // Tool says allow, but still check security-critical paths (Step 3)
+      // This prevents tools from accidentally bypassing protected path checks
+      const securityCheck = checkSecurityCritical(toolName, input);
+      if (securityCheck && securityCheck.behavior === 'ask') {
+        return securityCheck; // Security-critical overrides tool allow
+      }
       return toolResult;
     }
   }

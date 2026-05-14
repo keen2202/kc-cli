@@ -30,6 +30,11 @@ export interface QueryEngineConfig {
   contextWindow?: number; // For auto-compaction
   maxMessages?: number; // Max messages to keep in history (prevents unbounded growth)
   memory?: MemoryIntegrationConfig; // Memory system configuration
+  permissionRules?: {
+    deny?: string[];
+    ask?: string[];
+    allow?: string[];
+  };
 }
 
 /**
@@ -93,11 +98,12 @@ export class QueryEngine {
     // Initialize state machine
     this.stateMachine = new AgentStateMachine(this.stateStore);
 
-    // Initialize tool executor with permission config
+    // Initialize tool executor with permission config from user settings
+    const rules = config.permissionRules || {};
     this.toolExecutor = new ToolExecutor(tools, getState().cwd, {
-      alwaysDenyRules: [], // TODO: Load from config
-      alwaysAskRules: [],  // TODO: Load from config
-      alwaysAllowRules: [], // TODO: Load from config
+      alwaysDenyRules: rules.deny || [],
+      alwaysAskRules: rules.ask || [],
+      alwaysAllowRules: rules.allow || [],
     });
   }
 

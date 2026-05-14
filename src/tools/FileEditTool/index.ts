@@ -6,6 +6,7 @@ import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
 import * as path from 'path';
 import * as fs from 'fs';
+import { assertPathWithinWorkspace } from '../../utils/path';
 
 const FileEditInputSchema = z.object({
   file_path: z.string().describe('Path to file to edit'),
@@ -28,6 +29,7 @@ export const tool = buildTool<FileEditInput, string>({
   call: async (input, context): Promise<ToolResultType<string>> => {
     try {
       const filePath = path.resolve(context.cwd, input.file_path);
+      assertPathWithinWorkspace(input.file_path, context.cwd);
 
       // Check file exists
       if (!fs.existsSync(filePath)) {

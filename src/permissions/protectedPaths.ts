@@ -23,6 +23,14 @@ export const PROTECTED_PATH_PATTERNS: RegExp[] = [
   /passwords?\.(txt|json|yaml)$/,
   /secrets?\.(txt|json|yaml)$/,
 
+  // Cloud provider credentials
+  /\/\.aws\/(credentials|config)$/,
+  /\/\.config\/gcloud\//,
+  /\/\.kube\/config$/,
+  /\/\.docker\/config\.json$/,
+  /\/\.azure\//,
+  /\/\.terraform\.d\//,
+
   // Version control internals
   /\/\.git\/(objects|refs)\//,
 ];
@@ -38,6 +46,10 @@ export const PROTECTED_PATH_SUBSTRINGS: string[] = [
   '.gnupg',
   '/sys/',
   '/proc/',
+  '.aws/credentials',
+  '.kube/config',
+  '.docker/config.json',
+  '.config/gcloud',
 ];
 
 /**

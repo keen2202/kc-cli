@@ -6,6 +6,7 @@ import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
 import * as path from 'path';
 import * as fs from 'fs';
+import { assertPathWithinWorkspace } from '../../utils/path';
 
 const FileReadInputSchema = z.object({
   path: z.string().describe('File path to read'),
@@ -27,6 +28,7 @@ export const tool = buildTool<FileReadInput, string>({
   call: async (input, context): Promise<ToolResultType<string>> => {
     try {
       const filePath = path.resolve(context.cwd, input.path);
+      assertPathWithinWorkspace(input.path, context.cwd);
 
       // Check file exists (async)
       try {

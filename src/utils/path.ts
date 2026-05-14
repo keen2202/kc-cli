@@ -49,6 +49,22 @@ export async function isPathAllowed(filePath: string, options: {
 }
 
 /**
+ * Synchronous check: does a resolved path stay within the workspace?
+ * Rejects path traversal (..) and symlink escape.
+ */
+export function assertPathWithinWorkspace(filePath: string, cwd: string): void {
+  const resolved = path.resolve(cwd, filePath);
+  const normalizedCwd = cwd.endsWith(path.sep) ? cwd : cwd + path.sep;
+
+  // Check for path traversal: resolved path must be within cwd
+  if (resolved !== cwd && !resolved.startsWith(normalizedCwd)) {
+    throw new Error(
+      `Path traversal denied: "${filePath}" resolves to "${resolved}" which is outside workspace "${cwd}"`
+    );
+  }
+}
+
+/**
  * Check if path matches dangerous patterns
  */
 function matchesDenyPattern(normalizedPath: string): boolean {
