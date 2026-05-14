@@ -3,6 +3,9 @@
 import { BubblewrapSandbox, SeccompSandbox, NoopSandbox } from './sandbox-profiles';
 import type { SandboxPolicy } from './sandbox-policy';
 import { DEFAULT_SANDBOX_POLICY, getToolPolicy, shouldSandbox, mergeSandboxPolicy } from './sandbox-policy';
+import { SandboxProbe, type ProbeResult } from './sandbox-probe';
+import { SandboxMonitor, type SandboxMetrics, type ResourceLimits } from './sandbox-monitor';
+import { ImageManager } from './sandbox-images';
 
 export interface SandboxOptions {
   /** Whether sandboxing is enabled. When false, commands pass through unchanged. */
@@ -19,6 +22,10 @@ export interface SandboxOptions {
   cpuTimeLimitSec: number;
   /** Per-tool sandbox policy. If not provided, uses DEFAULT_SANDBOX_POLICY. */
   policy?: SandboxPolicy;
+  /** Whether to run escape detection probe on startup. Default: true. */
+  probeOnStart?: boolean;
+  /** Whether to enable runtime resource monitoring. Default: true. */
+  enableMonitor?: boolean;
 }
 
 export interface SandboxBackend {
@@ -39,10 +46,17 @@ const BACKEND_REGISTRY: Record<string, () => SandboxBackend> = {
   bubblewrap: () => new BubblewrapSandbox(),
   seccomp: () => new SeccompSandbox(),
   docker: () => {
-    // DockerSandbox is loaded dynamically to avoid requiring docker at build time
     try {
       const { DockerSandbox } = require('./sandbox-docker');
       return new DockerSandbox();
+    } catch {
+      return new NoopSandbox();
+    }
+  },
+  'windows-sandbox': () => {
+    try {
+      const { WindowsSandbox } = require('./sandbox-windows');
+      return new WindowsSandbox();
     } catch {
       return new NoopSandbox();
     }
@@ -62,9 +76,16 @@ export class SandboxManager {
   private options: SandboxOptions;
   private policy: SandboxPolicy;
   private _isAvailable: boolean;
+  private probe: SandboxProbe;
+  private monitor: SandboxMonitor;
+  private imageManager: ImageManager;
+  private probeResult: ProbeResult | null = null;
 
   constructor(options: Partial<SandboxOptions> & { workDir: string }) {
-    this.options = { ...DEFAULT_OPTIONS, ...options };
+    this.options = { ...DEFAULT_OPTIONS, probeOnStart: true, enableMonitor: true, ...options };
+    this.probe = new SandboxProbe();
+    this.monitor = new SandboxMonitor();
+    this.imageManager = new ImageManager();
 
     // Build the policy from config sandbox section or use defaults
     const configPolicy = options.policy;
@@ -102,6 +123,13 @@ export class SandboxManager {
         );
       }
       this.backend = new NoopSandbox();
+    }
+
+    // Run probe on startup if enabled and a real backend is available
+    if (this.options.probeOnStart && this._isAvailable) {
+      this.runProbe().catch(err => {
+        console.warn(`[sandbox] Probe failed: ${err.message}`);
+      });
     }
   }
 
@@ -185,11 +213,71 @@ export class SandboxManager {
   }
 
   /**
+   * Run isolation verification probe.
+   */
+  async runProbe(): Promise<ProbeResult> {
+    this.probeResult = await this.probe.verifyIsolation(this.backend, this.options);
+    if (!this.probeResult.overallPassed) {
+      console.warn(
+        `[sandbox] Probe detected potential isolation issues: ${this.probeResult.failures.map(f => f.name).join(', ')}`
+      );
+    }
+    return this.probeResult;
+  }
+
+  /**
+   * Get the cached probe result (if probe was run).
+   */
+  getProbeResult(): ProbeResult | null {
+    return this.probeResult;
+  }
+
+  /**
+   * Start runtime resource monitoring for a sandboxed process.
+   */
+  startMonitor(identifier: string | number, backend: 'docker' | 'proc', intervalMs?: number): void {
+    if (this.options.enableMonitor !== false) {
+      this.monitor.start(identifier, backend, intervalMs);
+    }
+  }
+
+  /**
+   * Stop monitoring and return collected metrics.
+   */
+  stopMonitor(): SandboxMetrics[] {
+    return this.monitor.stop();
+  }
+
+  /**
+   * Get the latest metrics snapshot.
+   */
+  getMonitorLatest(): SandboxMetrics | null {
+    return this.monitor.getLatest();
+  }
+
+  /**
+   * Check if current metrics exceed resource limits.
+   */
+  checkThresholds(): 'ok' | 'warn' | 'kill' {
+    return this.monitor.checkThresholds({
+      maxMemoryMb: this.options.maxMemoryMb,
+      cpuTimeLimitSec: this.options.cpuTimeLimitSec,
+    });
+  }
+
+  /**
+   * Get the image manager for Docker image operations.
+   */
+  getImageManager(): ImageManager {
+    return this.imageManager;
+  }
+
+  /**
    * Resolve the requested backend, falling back through the chain
    * bubblewrap -> seccomp -> docker -> noop if higher tiers are unavailable.
    */
   private resolveBackend(requested: string): SandboxBackend {
-    const fallbackOrder = ['bubblewrap', 'seccomp', 'docker', 'noop'];
+    const fallbackOrder = ['bubblewrap', 'seccomp', 'docker', 'windows-sandbox', 'noop'];
     const startIndex = fallbackOrder.indexOf(requested);
 
     // Start from the requested backend and fall back
