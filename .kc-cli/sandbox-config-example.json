@@ -1,0 +1,69 @@
+{
+  "//": "KC-CLI Sandbox Configuration Example",
+  "//": "Copy this to ~/.kc-cli/settings.json or .kc-cli/settings.json",
+
+  "sandbox": {
+    "enabled": true,
+    "backend": "bubblewrap",
+    "allowNetwork": false,
+    "maxMemoryMb": 512,
+    "cpuTimeLimitSec": 60,
+    "defaultEnforcement": "preferred",
+
+    "toolPolicies": {
+      "Bash": {
+        "enforcement": "required",
+        "allowNetwork": false
+      },
+      "Run": {
+        "enforcement": "required",
+        "allowNetwork": false
+      },
+      "FileWrite": {
+        "enforcement": "preferred"
+      },
+      "FileEdit": {
+        "enforcement": "preferred"
+      },
+      "FileRead": {
+        "enforcement": "excluded"
+      },
+      "Grep": {
+        "enforcement": "excluded"
+      },
+      "Glob": {
+        "enforcement": "excluded"
+      },
+      "WebFetch": {
+        "enforcement": "optional",
+        "allowNetwork": true
+      },
+      "WebSearch": {
+        "enforcement": "optional",
+        "allowNetwork": true
+      },
+      "Docker": {
+        "enforcement": "excluded"
+      },
+      "Sql": {
+        "enforcement": "preferred",
+        "allowNetwork": false
+      }
+    },
+
+    "patternRules": [
+      {
+        "pattern": "Task*",
+        "policy": { "enforcement": "excluded" }
+      },
+      {
+        "pattern": "Deploy*",
+        "policy": { "enforcement": "preferred", "allowNetwork": true }
+      },
+      {
+        "pattern": "Agent*",
+        "policy": { "enforcement": "excluded" }
+      }
+    ]
+  }
+}

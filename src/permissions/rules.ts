@@ -89,7 +89,7 @@ export function mergeRuleSets(ruleSets: PermissionRule[][]): PermissionRule[] {
   const seen = new Set<string>();
 
   // Reverse order so higher priority sources are processed last
-  for (const rules of ruleSets.reverse()) {
+  for (const rules of [...ruleSets].reverse()) {
     for (const rule of rules) {
       const key = formatRuleString(rule.ruleValue);
       if (!seen.has(key)) {

@@ -6,10 +6,26 @@ import type { PermissionResult } from '../types/permissions';
 import type { ToolExecutionState } from '../state/types';
 import type { PluginHooks } from '../plugins/types';
 import { hasPermissionsToUseTool } from '../permissions/engine';
+import { SandboxManager } from '../services/sandbox';
+import { mergeSandboxPolicy } from '../services/sandbox-policy';
+
+/**
+ * Symbol used to mark tool input that has already had its command
+ * wrapped by the executor's sandbox. Tools check for this marker
+ * to avoid double-wrapping.
+ */
+export const SANDBOX_WRAPPED_MARKER = Symbol.for('kc-cli.sandbox-wrapped');
+
+/**
+ * Tool names whose input contains a `command` field that must be
+ * sandbox-wrapped at the executor level to prevent tools from
+ * accidentally or intentionally bypassing sandbox policy.
+ */
+const COMMAND_EXECUTING_TOOLS = new Set(['Bash', 'Run']);
 
 /**
  * Tool executor that supports both sequential and parallel tool execution
- * with timeout protection to prevent infinite hangs.
+ * with timeout protection and sandbox isolation to prevent infinite hangs.
  */
 export class ToolExecutor {
   private tools: Map<string, ToolDefinition>;
@@ -20,17 +36,43 @@ export class ToolExecutor {
     alwaysAllowRules?: string[];
   };
   private pluginHooks?: PluginHooks;
+  private sandboxManager: SandboxManager;
   private readonly DEFAULT_TIMEOUT_MS = 30_000; // 30 seconds
 
-  constructor(tools: ToolDefinition[], cwd: string, permissionConfig?: {
-    alwaysDenyRules?: string[];
-    alwaysAskRules?: string[];
-    alwaysAllowRules?: string[];
-  }, pluginHooks?: PluginHooks) {
+  constructor(
+    tools: ToolDefinition[],
+    cwd: string,
+    permissionConfig?: {
+      alwaysDenyRules?: string[];
+      alwaysAskRules?: string[];
+      alwaysAllowRules?: string[];
+    },
+    pluginHooks?: PluginHooks,
+    sandboxOptions?: {
+      enabled?: boolean;
+      backend?: 'bubblewrap' | 'seccomp' | 'docker' | 'noop';
+      allowNetwork?: boolean;
+      maxMemoryMb?: number;
+      cpuTimeLimitSec?: number;
+      policy?: Parameters<typeof mergeSandboxPolicy>[0];
+    }
+  ) {
     this.tools = new Map(tools.map(tool => [tool.name, tool]));
     this.cwd = cwd;
     this.permissionConfig = permissionConfig;
     this.pluginHooks = pluginHooks;
+
+    // Initialize sandbox manager with config
+    const policy = sandboxOptions?.policy ? mergeSandboxPolicy(sandboxOptions.policy) : undefined;
+    this.sandboxManager = new SandboxManager({
+      workDir: cwd,
+      enabled: sandboxOptions?.enabled ?? true,
+      backend: sandboxOptions?.backend ?? 'bubblewrap',
+      allowNetwork: sandboxOptions?.allowNetwork ?? false,
+      maxMemoryMb: sandboxOptions?.maxMemoryMb ?? 512,
+      cpuTimeLimitSec: sandboxOptions?.cpuTimeLimitSec ?? 60,
+      policy,
+    });
   }
 
   /**
@@ -81,9 +123,52 @@ export class ToolExecutor {
         };
       }
 
-      // 4. Execute tool with timeout
+      // 3b. Check sandbox requirement for command-based tools
+      const sandboxDecision = this.sandboxManager.shouldSandboxTool(toolCall.toolName);
+      if (sandboxDecision === 'deny') {
+        return {
+          toolCallId: toolCall.id,
+          output: `Tool '${toolCall.toolName}' requires sandbox but no sandbox backend is available. ` +
+            'Install bubblewrap (bwrap) or docker, or configure this tool as excluded.',
+          isError: true,
+        };
+      }
+
+      // 3c. Pre-wrap commands at the executor level for command-executing tools.
+      // This is the authoritative sandbox enforcement point — tools MUST NOT
+      // bypass this by creating their own SandboxManager. The wrapped command
+      // is injected into input and marked to prevent double-wrapping.
+      let effectiveInputWithWrap = effectiveInput;
+      if (COMMAND_EXECUTING_TOOLS.has(toolCall.toolName) && sandboxDecision === 'run-sandboxed') {
+        const wrappedCommand = this.sandboxManager.wrapCommand(
+          (effectiveInput as Record<string, unknown>).command as string,
+          toolCall.toolName
+        );
+        effectiveInputWithWrap = {
+          ...effectiveInput,
+          command: wrappedCommand,
+          [SANDBOX_WRAPPED_MARKER]: true,
+        } as typeof effectiveInput;
+      }
+
+      // 4. Execute tool with timeout (sandbox info passed via context)
       const timeoutMs = this.getToolTimeout(tool);
-      const result = await this.executeWithTimeout(tool, effectiveInput, context, timeoutMs, toolCall.toolName);
+      const enrichedContext: ToolUseContext = {
+        ...context,
+        sandbox: this.sandboxManager,
+      };
+      const result = await this.executeWithTimeout(tool, effectiveInputWithWrap, enrichedContext, timeoutMs, toolCall.toolName);
+
+      // 4b. Add sandbox metadata to result
+      if (result.metadata) {
+        result.metadata.sandboxed = this.sandboxManager.isAvailable() && sandboxDecision === 'run-sandboxed';
+        result.metadata.sandboxBackend = this.sandboxManager.getBackendName();
+      } else {
+        result.metadata = {
+          sandboxed: this.sandboxManager.isAvailable() && sandboxDecision === 'run-sandboxed',
+          sandboxBackend: this.sandboxManager.getBackendName(),
+        };
+      }
 
       // 5. Plugin postToolUse hook
       if (this.pluginHooks?.postToolUse) {
@@ -119,8 +204,10 @@ export class ToolExecutor {
 
     // Create timeout promise
     const timeoutError = new Error(`Tool '${toolName}' timed out after ${timeoutMs / 1000}s`);
+    let timedOut = false;
     const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => {
+        timedOut = true;
         toolAbortController.abort(timeoutError);
         reject(timeoutError);
       }, timeoutMs);
@@ -145,15 +232,16 @@ export class ToolExecutor {
     // Race between timeout and execution
     try {
       const result = await Promise.race([execPromise, timeoutPromise]);
+      // After race resolves, check if abort happened (guards against stale results)
+      if (toolAbortController.signal.aborted) {
+        throw timeoutError;
+      }
       return {
-        toolCallId: '', // Will be set by caller
+        toolCallId: '',
         output: (result as any).output || '',
         isError: (result as any).isError || false,
       };
     } catch (error) {
-      if (error === timeoutError) {
-        throw error;
-      }
       throw error;
     }
   }
@@ -163,7 +251,7 @@ export class ToolExecutor {
    */
   private getToolTimeout(tool: ToolDefinition): number {
     // Check if tool has a custom timeout in its metadata
-    const timeout = (tool as any).timeout;
+    const timeout = tool.timeout;
     if (typeof timeout === 'number' && timeout > 0) {
       return timeout * 1000; // Convert seconds to ms
     }
@@ -179,6 +267,12 @@ export class ToolExecutor {
     context: ToolUseContext
   ): Promise<Map<string, ToolResult | Error>> {
     const results = new Map<string, ToolResult | Error>();
+
+    // Enrich context with sandbox manager
+    const enrichedContext: ToolUseContext = {
+      ...context,
+      sandbox: this.sandboxManager,
+    };
 
     // Group tools by concurrency safety
     const concurrentTools: ToolCall[] = [];
@@ -197,7 +291,7 @@ export class ToolExecutor {
     if (concurrentTools.length > 0) {
       const promises = concurrentTools.map(async (toolCall) => {
         try {
-          const result = await this.executeSingle(toolCall, context);
+          const result = await this.executeSingle(toolCall, enrichedContext);
           return { toolCallId: toolCall.id, result };
         } catch (error) {
           return {
@@ -223,7 +317,7 @@ export class ToolExecutor {
     // Execute sequential tools one by one
     for (const toolCall of sequentialTools) {
       try {
-        const result = await this.executeSingle(toolCall, context);
+        const result = await this.executeSingle(toolCall, enrichedContext);
         results.set(toolCall.id, result);
       } catch (error) {
         results.set(
@@ -322,5 +416,12 @@ export class ToolExecutor {
    */
   getTool(toolName: string): ToolDefinition | undefined {
     return this.tools.get(toolName);
+  }
+
+  /**
+   * Get the sandbox manager for inspecting sandbox state.
+   */
+  getSandboxManager(): SandboxManager {
+    return this.sandboxManager;
   }
 }

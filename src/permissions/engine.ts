@@ -144,6 +144,19 @@ export async function hasPermissionsToUseTool(
     };
   }
 
+  // Step 5.5: Check always-ask rules (overrides mode defaults)
+  const askMatch = matchRules(context.alwaysAskRules, toolName, options.content);
+  if (askMatch) {
+    return {
+      behavior: 'ask',
+      message: `Tool '${toolName}' requires explicit permission (alwaysAskRules)`,
+      decisionReason: {
+        type: 'policy_ask',
+        reason: 'Matched alwaysAskRules',
+      },
+    };
+  }
+
   // Step 6: Default based on mode
   switch (context.mode) {
     case 'dontAsk':

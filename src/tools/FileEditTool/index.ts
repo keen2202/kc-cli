@@ -74,6 +74,8 @@ export const tool = buildTool<FileEditInput, string>({
             changes: changes.length,
             original_size: originalContent.length,
             new_size: content.length,
+            oldContent: originalContent,
+            newContent: content,
           },
         }
       );

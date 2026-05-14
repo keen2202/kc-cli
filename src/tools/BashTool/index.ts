@@ -8,7 +8,6 @@ import { hasPermissionsToUseTool } from '../../permissions/engine';
 import { DANGEROUS_BASH_PATTERNS, isReadOnlyBashCommand } from '../../permissions/readonlyCommands';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { SandboxManager } from '../../services/sandbox';
 
 const execAsync = promisify(exec);
 
@@ -38,12 +37,32 @@ export const tool = buildTool<BashInput, string>({
       const workingDir = input.workingDir || context.cwd;
       const timeout = (input.timeout || 30) * 1000; // Convert to ms
 
-      // Wrap command through sandbox for isolation
-      const sandbox = new SandboxManager({
-        enabled: true,
-        workDir: workingDir,
-      });
-      const wrappedCmd = sandbox.wrapCommand(input.command);
+      // The ToolExecutor pre-wraps commands for 'Bash' tool at the executor level
+      // (the authoritative sandbox enforcement point). If the command has already
+      // been wrapped, we use it as-is to avoid double-wrapping.
+      // Check for the executor's wrapping marker on the input.
+      const SANDBOX_WRAPPED_MARKER = Symbol.for('kc-cli.sandbox-wrapped');
+      const alreadyWrapped = (input as any)[SANDBOX_WRAPPED_MARKER] === true;
+
+      let wrappedCmd = input.command;
+      let sandboxed = false;
+      let sandboxBackend: string | undefined;
+
+      if (alreadyWrapped) {
+        // Executor already wrapped the command — use it directly
+        sandboxed = context.sandbox?.isAvailable() ?? false;
+        sandboxBackend = context.sandbox?.getBackendName();
+      } else if (context.sandbox) {
+        // Fallback: wrap via shared sandbox manager from ToolExecutor
+        try {
+          wrappedCmd = context.sandbox.wrapCommand(input.command, 'Bash');
+          sandboxed = context.sandbox.isAvailable();
+          sandboxBackend = context.sandbox.getBackendName();
+        } catch {
+          // Sandbox denied — this should have been caught by ToolExecutor already
+          throw new Error('Bash tool requires sandbox but sandbox is not available');
+        }
+      }
 
       // Execute wrapped command
       const { stdout, stderr } = await execAsync(wrappedCmd, {
@@ -54,7 +73,12 @@ export const tool = buildTool<BashInput, string>({
 
       return toolResult(stdout, {
         isError: false,
-        metadata: { exitCode: 0, stderr: stderr.trim() || undefined },
+        metadata: {
+          exitCode: 0,
+          stderr: stderr.trim() || undefined,
+          sandboxed,
+          sandboxBackend,
+        },
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

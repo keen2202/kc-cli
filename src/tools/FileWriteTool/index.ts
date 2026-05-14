@@ -29,6 +29,16 @@ export const tool = buildTool<FileWriteInput, string>({
       const dir = path.dirname(filePath);
       await fs.promises.mkdir(dir, { recursive: true });
 
+      // Capture old content before write (for diff preview)
+      let oldContent: string | null = null;
+      if (!input.append) {
+        try {
+          oldContent = await fs.promises.readFile(filePath, 'utf-8');
+        } catch {
+          oldContent = null; // New file
+        }
+      }
+
       // Write file
       if (input.append) {
         await fs.promises.appendFile(filePath, input.content, 'utf-8');
@@ -45,6 +55,8 @@ export const tool = buildTool<FileWriteInput, string>({
             path: filePath,
             size: input.content.length,
             appended: input.append,
+            oldContent,
+            newContent: input.content,
           },
         }
       );

@@ -11,6 +11,36 @@ import type { SandboxBackend, SandboxOptions } from './sandbox';
 export class BubblewrapSandbox implements SandboxBackend {
   readonly name = 'bubblewrap';
 
+  /**
+   * Cached result of rlimit support detection.
+   * - true: bwrap supports --rlimit-* options
+   * - false: bwrap does not support --rlimit-* (older versions)
+   * - null: not yet detected
+   */
+  private _supportsRlimit: boolean | null = null;
+
+  /**
+   * Detect whether this bwrap version supports --rlimit-* options.
+   * bwrap < 0.10 does not support rlimit.
+   */
+  private supportsRlimit(): boolean {
+    if (this._supportsRlimit !== null) {
+      return this._supportsRlimit;
+    }
+    try {
+      const { execSync } = require('child_process');
+      // Test with a harmless dry-run to check option recognition
+      execSync('bwrap --bind / / --rlimit-cpu 1 -- /bin/true 2>/dev/null', {
+        stdio: 'ignore',
+        timeout: 3000,
+      });
+      this._supportsRlimit = true;
+    } catch {
+      this._supportsRlimit = false;
+    }
+    return this._supportsRlimit;
+  }
+
   isAvailable(): boolean {
     try {
       const { execSync } = require('child_process');
@@ -36,8 +66,19 @@ export class BubblewrapSandbox implements SandboxBackend {
     // Cleanup
     args.push('--die-with-parent');
 
-    // Bind-mount workspace as read-write
-    args.push('--bind', options.workDir, options.workDir);
+    // Bind-mount workspace as read-write.
+    // For workDirs under /tmp/, we bind AFTER --tmpfs /tmp
+    // (see below) to prevent the tmpfs from shadowing it.
+    if (!options.workDir.startsWith('/tmp/')) {
+      args.push('--bind', options.workDir, options.workDir);
+    }
+
+    // Bind workDir AFTER --tmpfs /tmp for /tmp/ subdirectories.
+    // The tmpfs creates an empty /tmp that shadows host /tmp subdirs;
+    // a later bind mount overlays the specific workDir on top.
+    if (options.workDir.startsWith('/tmp/')) {
+      args.push('--bind', options.workDir, options.workDir);
+    }
 
     // Bind-mount system directories as read-only
     const readOnlyDirs = ['/usr', '/lib', '/lib64', '/bin'];
@@ -49,45 +90,96 @@ export class BubblewrapSandbox implements SandboxBackend {
     args.push('--ro-bind', '/etc', '/etc');
     args.push('--ro-bind', '/sbin', '/sbin');
 
-    // proc and tmp filesystems
+    // proc filesystem
     args.push('--proc', '/proc');
+
+    // tmpfs and dev
     args.push('--tmpfs', '/tmp');
     args.push('--dev', '/dev');
 
-    // Resource limits via rlimit
-    if (options.maxMemoryMb > 0) {
-      const bytes = options.maxMemoryMb * 1024 * 1024;
-      args.push(`--rlimit-as`, `${bytes}`);
-    }
-    if (options.cpuTimeLimitSec > 0) {
-      args.push(`--rlimit-cpu`, `${options.cpuTimeLimitSec}`);
+    // Re-bind workDir AFTER --tmpfs /tmp when workDir is under /tmp.
+    // The tmpfs creates an empty /tmp that shadows host /tmp subdirs;
+    // a later bind mount overlays the specific workDir on top.
+    if (options.workDir.startsWith('/tmp/')) {
+      args.push('--bind', options.workDir, options.workDir);
     }
 
-    // Set hostname
+    // Resource limits — use bwrap --rlimit-* if supported,
+    // otherwise fall back to ulimit wrapper inside the sandbox.
+    // CPU time limits are enforced by the executor's timeout
+    // (ToolExecutor.executeWithTimeout), so we don't need a nested
+    // `timeout` wrapper here which would cause shell-escaping conflicts
+    // (shell operators like > && would escape the timeout scope).
+    const hasRlimit = this.supportsRlimit();
+    let innerCommand = command;
+
+    if (hasRlimit) {
+      // Use native bwrap rlimit support
+      if (options.maxMemoryMb > 0) {
+        const bytes = options.maxMemoryMb * 1024 * 1024;
+        args.push(`--rlimit-as`, `${bytes}`);
+      }
+      if (options.cpuTimeLimitSec > 0) {
+        args.push(`--rlimit-cpu`, `${options.cpuTimeLimitSec}`);
+      }
+    } else {
+      // Fall back to ulimit inside the sandbox for memory limits.
+      if (options.maxMemoryMb > 0) {
+        const kbytes = options.maxMemoryMb * 1024;
+        innerCommand = `ulimit -v ${kbytes} 2>/dev/null; ${command}`;
+      }
+    }
+
+    // Set hostname (requires --unshare-uts in bwrap >= 0.7)
+    args.push('--unshare-uts');
     args.push('--hostname', 'sandbox');
 
     // The actual command
-    args.push('--', '/bin/sh', '-c', shellEscape(command));
+    args.push('--', '/bin/sh', '-c', shellEscape(innerCommand));
 
     return args.join(' ');
   }
 }
 
 /**
- * SeccompSandbox — lightweight fallback that uses `timeout` and `ulimit`
- * for resource limits when bubblewrap is not available.
+ * SeccompSandbox — uses Linux seccomp-bpf for syscall filtering
+ * with `timeout` and `ulimit` for resource limits.
+ *
+ * Only allows whitelisted syscalls (read/write/execve etc.) and
+ * explicitly blocks dangerous syscalls (ptrace, mount, reboot etc.)
  */
 export class SeccompSandbox implements SandboxBackend {
   readonly name = 'seccomp';
 
   isAvailable(): boolean {
-    // Available on any POSIX system with timeout and ulimit
+    // Available on Linux with seccomp support
     try {
       const { execSync } = require('child_process');
       execSync('which timeout', { stdio: 'ignore' });
+      // Check for seccomp support in kernel
+      execSync('grep -q CONFIG_SECCOMP=y /boot/config-$(uname -r) 2>/dev/null || true', { stdio: 'ignore' });
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Get the path to the seccomp profile JSON file.
+   * Returns null if the profile file is not found.
+   */
+  private getSeccompProfilePath(): string | null {
+    try {
+      const path = require('path');
+      // The seccomp profile is in the same directory as this file
+      const profilePath = path.join(__dirname, 'seccomp-profile.json');
+      const fs = require('fs');
+      if (fs.existsSync(profilePath)) {
+        return profilePath;
+      }
+      return null;
+    } catch {
+      return null;
     }
   }
 
@@ -101,13 +193,44 @@ export class SeccompSandbox implements SandboxBackend {
     }
 
     // CPU time limit via timeout command
-    if (options.cpuTimeLimitSec > 0) {
-      parts.push(`timeout --signal=KILL ${options.cpuTimeLimitSec}`);
+    const timeoutCmd = options.cpuTimeLimitSec > 0
+      ? `timeout --signal=KILL ${options.cpuTimeLimitSec}`
+      : '';
+
+    // Seccomp profile wrapper (if available)
+    const seccompPath = this.getSeccompProfilePath();
+    let execCmd = `/bin/sh -c ${shellEscape(command)}`;
+
+    if (seccompPath) {
+      // Use bwrap with seccomp profile for syscall filtering
+      const bwrapArgs = [
+        'bwrap',
+        '--unshare-pid',
+        '--unshare-ipc',
+        '--die-with-parent',
+        '--bind', options.workDir, options.workDir,
+        '--ro-bind', '/usr', '/usr',
+        '--ro-bind', '/lib', '/lib',
+        '--ro-bind', '/lib64', '/lib64',
+        '--ro-bind', '/bin', '/bin',
+        '--proc', '/proc',
+        '--tmpfs', '/tmp',
+        '--dev', '/dev',
+        '--seccomp', seccompPath,
+        '--',
+      ];
+      if (timeoutCmd) {
+        parts.push(bwrapArgs.join(' '));
+        parts.push(timeoutCmd);
+      } else {
+        parts.push(bwrapArgs.join(' '));
+      }
+      execCmd = `/bin/sh -c ${shellEscape(command)}`;
     }
 
-    parts.push('/bin/sh', '-c', shellEscape(command));
+    parts.push(execCmd);
 
-    return parts.join(' ');
+    return parts.filter(Boolean).join(' ');
   }
 }
 

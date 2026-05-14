@@ -17,7 +17,7 @@ interface ServerProcess {
   process: ChildProcess;
   buffer: string;
   messageId: number;
-  pending: Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>;
+  pending: Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>;
   languageId: LanguageId;
   rootUri: string;
 }
@@ -46,6 +46,7 @@ export function detectLanguage(filePath: string): LanguageId {
 export class LSPClientManager {
   private servers = new Map<LanguageId, ServerProcess>();
   private diagnosticCache = new Map<string, LSPDiagnostic[]>();
+  private pendingDiagnostics = new Map<string, { resolve: (d: LSPDiagnostic[]) => void; timer: ReturnType<typeof setTimeout> }>();
 
   async connect(languageId: LanguageId, rootUri: string): Promise<boolean> {
     if (this.servers.has(languageId)) return true;
@@ -113,13 +114,38 @@ export class LSPClientManager {
         textDocument: { uri, languageId, version: 1, text: content },
       });
 
-      // Wait a bit for diagnostics to come back via notification
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      return this.diagnosticCache.get(filePath) || [];
+      // Wait for publishDiagnostics notification instead of arbitrary timeout
+      return await this.waitForDiagnostics(filePath, 5000);
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Wait for a publishDiagnostics notification for the given file.
+   * Falls back to cached diagnostics on timeout.
+   */
+  private waitForDiagnostics(filePath: string, timeoutMs: number): Promise<LSPDiagnostic[]> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingDiagnostics.delete(filePath);
+        resolve(this.diagnosticCache.get(filePath) || []);
+      }, timeoutMs);
+
+      this.pendingDiagnostics.set(filePath, { resolve, timer });
+    });
+  }
+
+  /**
+   * Send a request to the language server for a given file.
+   * Public API for CompletionProvider, NavigationProvider, etc.
+   */
+  async request(filePath: string, method: string, params: unknown): Promise<unknown> {
+    const languageId = detectLanguage(filePath);
+    const server = this.servers.get(languageId);
+    if (!server) return null;
+
+    return this.sendRequest(server, method, params);
   }
 
   async getHover(filePath: string, content: string, line: number, character: number): Promise<LSPHover | null> {
@@ -171,11 +197,18 @@ export class LSPClientManager {
   }
 
   async disconnectAll(): Promise<void> {
-    for (const [, server] of this.servers) {
+    // Resolve all pending diagnostics with empty arrays
+    this.pendingDiagnostics.forEach((pending) => {
+      clearTimeout(pending.timer);
+      pending.resolve([]);
+    });
+    this.pendingDiagnostics.clear();
+
+    this.servers.forEach((server) => {
       try {
         server.process.kill('SIGTERM');
       } catch {}
-    }
+    });
     this.servers.clear();
     this.diagnosticCache.clear();
   }
@@ -190,15 +223,15 @@ export class LSPClientManager {
     const header = `Content-Length: ${Buffer.byteLength(message)}\r\n\r\n`;
 
     return new Promise((resolve, reject) => {
-      server.pending.set(id, { resolve, reject });
-      server.process.stdin?.write(header + message);
-
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (server.pending.has(id)) {
           server.pending.delete(id);
           reject(new Error(`LSP request ${method} timed out`));
         }
       }, 10000);
+
+      server.pending.set(id, { resolve, reject, timer });
+      server.process.stdin?.write(header + message);
     });
   }
 
@@ -235,6 +268,7 @@ export class LSPClientManager {
   private handleMessage(server: ServerProcess, message: LSPMessage): void {
     if (message.id !== undefined && server.pending.has(message.id as number)) {
       const pending = server.pending.get(message.id as number)!;
+      clearTimeout(pending.timer);
       server.pending.delete(message.id as number);
 
       if (message.error) {
@@ -249,6 +283,14 @@ export class LSPClientManager {
       const params = message.params as { uri: string; diagnostics: LSPDiagnostic[] };
       const filePath = params.uri.replace('file://', '');
       this.diagnosticCache.set(filePath, params.diagnostics);
+
+      // Resolve any pending waitForDiagnostics promise
+      const pending = this.pendingDiagnostics.get(filePath);
+      if (pending) {
+        clearTimeout(pending.timer);
+        this.pendingDiagnostics.delete(filePath);
+        pending.resolve(params.diagnostics);
+      }
     }
   }
 }

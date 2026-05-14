@@ -37,7 +37,8 @@ export async function isPathAllowed(filePath: string, options: {
   if (options.allowedDirectories) {
     for (const allowedDir of options.allowedDirectories) {
       const resolvedAllowedDir = path.resolve(options.cwd, allowedDir);
-      if (resolvedPath.startsWith(resolvedAllowedDir)) {
+      const normalizedDir = resolvedAllowedDir.endsWith(path.sep) ? resolvedAllowedDir : resolvedAllowedDir + path.sep;
+      if (resolvedPath === resolvedAllowedDir || resolvedPath.startsWith(normalizedDir)) {
         return 'allow';
       }
     }
@@ -68,7 +69,8 @@ export async function resolvePathSafely(filePath: string, options: {
     // Check if resolved path is within allowed directories
     for (const allowedDir of options.allowedDirectories) {
       const resolvedAllowedDir = path.resolve(cwd, allowedDir);
-      if (resolvedPath.startsWith(resolvedAllowedDir)) {
+      const normalizedDir = resolvedAllowedDir.endsWith(path.sep) ? resolvedAllowedDir : resolvedAllowedDir + path.sep;
+      if (resolvedPath === resolvedAllowedDir || resolvedPath.startsWith(normalizedDir)) {
         return {
           resolvedPath,
           isSafe: true,
@@ -114,7 +116,8 @@ export async function validateWritePath(filePath: string, options: {
   // Check allowed directories (on resolved path)
   for (const allowedDir of options.allowedDirectories) {
     const resolvedAllowedDir = path.resolve(options.cwd, allowedDir);
-    if (resolvedPath.startsWith(resolvedAllowedDir)) {
+    const normalizedDir = resolvedAllowedDir.endsWith(path.sep) ? resolvedAllowedDir : resolvedAllowedDir + path.sep;
+    if (resolvedPath === resolvedAllowedDir || resolvedPath.startsWith(normalizedDir)) {
       return { valid: true };
     }
   }

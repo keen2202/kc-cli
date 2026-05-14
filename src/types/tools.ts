@@ -3,10 +3,20 @@
 import { z } from 'zod';
 import type { PermissionResult, PermissionContext } from './permissions';
 
+// Forward reference to avoid circular import
+export interface SandboxManagerLike {
+  isAvailable(): boolean;
+  wrapCommand(command: string, toolName?: string): string;
+  getBackendName(): string;
+  shouldSandboxTool(toolName: string): 'run-sandboxed' | 'run-unsandboxed' | 'deny';
+}
+
 export interface ToolUseContext {
   cwd: string;
   abortController: AbortController;
   permissions: PermissionContext;
+  /** Sandbox manager for command isolation. May be undefined if sandboxing is disabled. */
+  sandbox?: SandboxManagerLike;
   onProgress?: (progress: ToolCallProgress) => void;
   appendSystemMessage?: (message: string) => void;
 }
@@ -55,6 +65,7 @@ export interface ToolDefinition<Input = Record<string, unknown>, Output = unknow
   shouldDefer?: boolean;
   alwaysLoad?: boolean;
   searchHint?: string;
+  timeout?: number; // Custom timeout in ms for this tool
 }
 
 export type ToolName =

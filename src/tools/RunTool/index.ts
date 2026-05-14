@@ -6,7 +6,6 @@ import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { SandboxManager } from '../../services/sandbox';
 
 const execAsync = promisify(exec);
 
@@ -36,12 +35,31 @@ export const tool = buildTool<RunInput, string>({
         ...(input.env || {}),
       };
 
-      // Wrap command through sandbox for isolation
-      const sandbox = new SandboxManager({
-        enabled: true,
-        workDir: workingDir,
-      });
-      const wrappedCmd = sandbox.wrapCommand(input.command);
+      // The ToolExecutor pre-wraps commands for 'Run' tool at the executor level
+      // (the authoritative sandbox enforcement point). Check for the executor's
+      // wrapping marker to avoid double-wrapping.
+      const SANDBOX_WRAPPED_MARKER = Symbol.for('kc-cli.sandbox-wrapped');
+      const alreadyWrapped = (input as any)[SANDBOX_WRAPPED_MARKER] === true;
+
+      let wrappedCmd = input.command;
+      let sandboxed = false;
+      let sandboxBackend: string | undefined;
+
+      if (alreadyWrapped) {
+        // Executor already wrapped the command — use it directly
+        sandboxed = context.sandbox?.isAvailable() ?? false;
+        sandboxBackend = context.sandbox?.getBackendName();
+      } else if (context.sandbox) {
+        // Fallback: wrap via shared sandbox manager from ToolExecutor
+        try {
+          wrappedCmd = context.sandbox.wrapCommand(input.command, 'Run');
+          sandboxed = context.sandbox.isAvailable();
+          sandboxBackend = context.sandbox.getBackendName();
+        } catch {
+          // Sandbox denied — should have been caught by ToolExecutor
+          throw new Error('Run tool requires sandbox but sandbox is not available');
+        }
+      }
 
       const { stdout, stderr } = await execAsync(wrappedCmd, {
         cwd: workingDir,
@@ -57,6 +75,8 @@ export const tool = buildTool<RunInput, string>({
           command: input.command,
           cwd: workingDir,
           exit_code: 0,
+          sandboxed,
+          sandboxBackend,
         },
       });
     } catch (error: any) {

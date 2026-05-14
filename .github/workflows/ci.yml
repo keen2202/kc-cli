@@ -34,3 +34,9 @@ jobs:
       - name: Run tests with coverage
         run: npx vitest run --coverage
         if: matrix.node-version == '22.x'
+
+      - name: Coverage gate
+        if: matrix.node-version == '22.x'
+        run: |
+          echo "Checking coverage thresholds..."
+          npx vitest run --coverage --reporter=verbose

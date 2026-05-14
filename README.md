@@ -2,16 +2,26 @@
 
 An AI-powered intelligent CLI assistant for software development, inspired by Claude Code's architecture.
 
+## v2 Highlights
+
+- 🔒 **Sandbox Security**: All shell commands run in isolated sandboxes (Docker/Bubblewrap/seccomp) with network isolation and resource limits
+- 🎨 **Redesigned UI**: Sidebar with file tree (LSP markers), diff preview, command palette, model selector
+- 🔌 **LSP Integration**: Code completions, diagnostics, go-to-definition, find references, rename, quick fixes
+- 🧠 **Smart Model Adaptation**: Provider-specific prompts, dynamic parameter tuning, tiktoken-based token estimation
+- 🧪 **874 Tests**: Comprehensive test suite across 54 files
+
 ## Features
 
 - **Modular Tools**: 21 built-in tools — Bash, file I/O, search, Git, SQL, Docker, deployment, task management, and sub-agent spawning
-- **Multi-LLM Support**: Anthropic Claude, OpenAI GPT, Qwen (DashScope), GLM (Zhipu AI), Google Gemini, and Ollama (local)
-- **Permission System**: Three-layer security (allow/deny/ask) with bypass-immune safety checks, protected paths, and auto-classifier
+- **Multi-LLM Support**: Anthropic Claude, OpenAI GPT, Qwen (DashScope), GLM (Zhipu AI), Google Gemini, DeepSeek, and Ollama (local)
+- **Permission System**: 6-step deny-first security with bypass-immune safety checks, protected paths, and auto-classifier
+- **Sandbox Isolation**: Docker/Bubblewrap/seccomp backends with per-tool policies, seccomp profiles, and resource limits
+- **LSP Code Intelligence**: Language server integration for TypeScript, Go, Python, Rust, Java, C++
 - **Multi-Agent Orchestration**: Spawn sub-agents with isolated QueryEngine instances, permission cascading, and event bus coordination
 - **Memory System**: File-based persistent memory with YAML frontmatter, relevance search, and 4 discrete types (user/feedback/project/reference)
 - **Auto-Compaction**: Micro-compact (clear old tool results) and full-compact (LLM summarization) to manage context windows
 - **Session Management**: Session persistence, archival, pruning, and recovery with configurable retention
-- **Interactive REPL**: Readline-based terminal UI with slash commands
+- **Interactive REPL**: Terminal UI with sidebar, diff preview, command palette, and model selector
 - **Node.js Compatible**: Works with Node.js 16+ (no Bun required)
 
 ## Quick Start
@@ -103,6 +113,12 @@ Options:
 - `/mode <mode>` — Set permission mode
 - `/tools` — List available tools
 - `/status` — Show current status
+- `/palette` — Command palette with fuzzy search
+- `/model` — Interactive model/provider switcher
+- `/sidebar [module]` — Toggle sidebar (tools/files/tasks/memory)
+- `/diff` — View pending file diffs
+- `/accept` / `/reject` — Accept/reject file changes
+- `/permission [mode]` — View/switch permission mode
 - `/exit` — Exit
 
 ## Architecture
@@ -318,7 +334,10 @@ npm run test:coverage # Run tests with coverage report
 - [API Clients](docs/api-clients.md) — LLM provider integration
 - [MCP Integration](docs/mcp-integration.md) — Model Context Protocol setup
 - [Sandbox Security](docs/sandbox-security.md) — Sandboxing and security model
+- [LSP Integration](docs/lsp-integration.md) — Language server integration
+- [UI Guide](docs/ui-guide.md) — Terminal UI usage guide
 - [Plugin Development](docs/plugin-development.md) — Plugin authoring guide
+- [Changelog](CHANGELOG.md) — Version history
 
 ## License
 

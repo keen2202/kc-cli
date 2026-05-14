@@ -60,10 +60,33 @@ const ConfigSchema = z.object({
   // Sandbox Configuration
   sandbox: z.object({
     enabled: z.boolean().default(true),
-    backend: z.enum(['bubblewrap', 'seccomp', 'noop']).default('bubblewrap'),
+    backend: z.enum(['bubblewrap', 'seccomp', 'docker', 'noop']).default('bubblewrap'),
     allowNetwork: z.boolean().default(false),
     maxMemoryMb: z.number().default(512),
     cpuTimeLimitSec: z.number().default(60),
+    /** Default enforcement level for tools not explicitly configured */
+    defaultEnforcement: z.enum(['required', 'preferred', 'optional', 'excluded', 'inherit']).default('preferred'),
+    /** Per-tool sandbox policy overrides keyed by tool name */
+    toolPolicies: z.record(
+      z.object({
+        allowNetwork: z.boolean().optional(),
+        maxMemoryMb: z.number().optional(),
+        cpuTimeLimitSec: z.number().optional(),
+        enforcement: z.enum(['required', 'preferred', 'optional', 'excluded', 'inherit']).optional(),
+      })
+    ).default({}),
+    /** Pattern-based rules for tool name matching */
+    patternRules: z.array(
+      z.object({
+        pattern: z.string(),
+        policy: z.object({
+          allowNetwork: z.boolean().optional(),
+          maxMemoryMb: z.number().optional(),
+          cpuTimeLimitSec: z.number().optional(),
+          enforcement: z.enum(['required', 'preferred', 'optional', 'excluded', 'inherit']).optional(),
+        }),
+      })
+    ).default([]),
   }).default({}),
 
   // MCP Configuration
@@ -183,27 +206,40 @@ function loadEnvConfig(): Partial<Config> {
   }
 
   // Sandbox environment variables
+  const sb: Record<string, unknown> = config.sandbox ??= {} as any;
   if (process.env.KC_SANDBOX_ENABLED) {
-    config.sandbox = config.sandbox || {} as any;
-    (config.sandbox as any).enabled = process.env.KC_SANDBOX_ENABLED === 'true' || process.env.KC_SANDBOX_ENABLED === '1';
+    sb.enabled = process.env.KC_SANDBOX_ENABLED === 'true' || process.env.KC_SANDBOX_ENABLED === '1';
   }
   if (process.env.KC_SANDBOX_BACKEND) {
-    config.sandbox = config.sandbox || {} as any;
-    (config.sandbox as any).backend = process.env.KC_SANDBOX_BACKEND;
+    sb.backend = process.env.KC_SANDBOX_BACKEND;
   }
   if (process.env.KC_SANDBOX_ALLOW_NETWORK) {
-    config.sandbox = config.sandbox || {} as any;
-    (config.sandbox as any).allowNetwork = process.env.KC_SANDBOX_ALLOW_NETWORK === 'true' || process.env.KC_SANDBOX_ALLOW_NETWORK === '1';
+    sb.allowNetwork = process.env.KC_SANDBOX_ALLOW_NETWORK === 'true' || process.env.KC_SANDBOX_ALLOW_NETWORK === '1';
+  }
+  if (process.env.KC_SANDBOX_MAX_MEMORY_MB) {
+    sb.maxMemoryMb = parseInt(process.env.KC_SANDBOX_MAX_MEMORY_MB, 10);
+  }
+  if (process.env.KC_SANDBOX_CPU_TIME_LIMIT_SEC) {
+    sb.cpuTimeLimitSec = parseInt(process.env.KC_SANDBOX_CPU_TIME_LIMIT_SEC, 10);
+  }
+  if (process.env.KC_SANDBOX_DEFAULT_ENFORCEMENT) {
+    sb.defaultEnforcement = process.env.KC_SANDBOX_DEFAULT_ENFORCEMENT;
+  }
+  if (process.env.KC_SANDBOX_TOOL_POLICIES) {
+    try {
+      sb.toolPolicies = JSON.parse(process.env.KC_SANDBOX_TOOL_POLICIES);
+    } catch {
+      console.warn('Failed to parse KC_SANDBOX_TOOL_POLICIES environment variable');
+    }
   }
 
   // Memory environment variables
+  const mem: Record<string, unknown> = config.memory ??= {} as any;
   if (process.env.KC_MEMORY_ENABLED) {
-    config.memory = config.memory || {} as any;
-    (config.memory as any).enabled = process.env.KC_MEMORY_ENABLED === 'true' || process.env.KC_MEMORY_ENABLED === '1';
+    mem.enabled = process.env.KC_MEMORY_ENABLED === 'true' || process.env.KC_MEMORY_ENABLED === '1';
   }
   if (process.env.KC_MEMORY_AUTO_EXTRACT) {
-    config.memory = config.memory || {} as any;
-    (config.memory as any).autoExtract = process.env.KC_MEMORY_AUTO_EXTRACT === 'true' || process.env.KC_MEMORY_AUTO_EXTRACT === '1';
+    mem.autoExtract = process.env.KC_MEMORY_AUTO_EXTRACT === 'true' || process.env.KC_MEMORY_AUTO_EXTRACT === '1';
   }
 
   return config;

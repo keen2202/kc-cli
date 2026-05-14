@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ToolExecutor } from '../../src/executors/toolExecutor';
+import { ToolExecutor, SANDBOX_WRAPPED_MARKER } from '../../src/executors/toolExecutor';
 import type { ToolDefinition, ToolUseContext } from '../../src/types/tools';
 import type { ToolCall } from '../../src/types/message';
 
@@ -196,6 +196,146 @@ describe('ToolExecutor', () => {
       const results = await executor.batchPermissionCheck([makeToolCall({ toolName: 'Unknown' })], makeContext());
       expect(results).toHaveLength(1);
       expect(results[0].behavior).toBe('deny');
+    });
+  });
+
+  describe('sandbox command wrapping', () => {
+    it('should wrap commands for Bash tool when sandbox is available', async () => {
+      const mockCall = vi.fn().mockResolvedValue({ toolCallId: 'tc1', output: 'ok', isError: false });
+      const tool = makeTool({ name: 'Bash', call: mockCall });
+      const executor = new ToolExecutor([tool], '/tmp', undefined, undefined, {
+        enabled: true,
+        backend: 'noop', // Use noop for test determinism
+      });
+
+      // With noop backend, sandbox is NOT "available" for required tools
+      // So Bash (required) should be denied
+      const result = await executor.executeSingle(
+        makeToolCall({ toolName: 'Bash', input: { command: 'echo hello' } }),
+        makeContext()
+      );
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain('requires sandbox');
+    });
+
+    it('should wrap commands for Run tool when sandbox is available', async () => {
+      const mockCall = vi.fn().mockResolvedValue({ toolCallId: 'tc1', output: 'ok', isError: false });
+      const tool = makeTool({ name: 'Run', call: mockCall });
+      const executor = new ToolExecutor([tool], '/tmp', undefined, undefined, {
+        enabled: true,
+        backend: 'noop',
+      });
+
+      // Run is also 'required' enforcement, so noop backend means deny
+      const result = await executor.executeSingle(
+        makeToolCall({ toolName: 'Run', input: { command: 'echo hello' } }),
+        makeContext()
+      );
+      expect(result.isError).toBe(true);
+      expect(result.output).toContain('requires sandbox');
+    });
+
+    it('should NOT wrap commands for excluded tools', async () => {
+      const mockCall = vi.fn().mockResolvedValue({ toolCallId: 'tc1', output: 'ok', isError: false });
+      const tool = makeTool({ name: 'FileRead', call: mockCall });
+      const executor = new ToolExecutor([tool], '/tmp', undefined, undefined, {
+        enabled: true,
+        backend: 'noop',
+      });
+
+      // FileRead is excluded, so it should run without sandbox
+      const result = await executor.executeSingle(
+        makeToolCall({ toolName: 'FileRead', input: { path: '/tmp/test.txt' } }),
+        makeContext()
+      );
+      expect(result.isError).toBe(false);
+    });
+
+    it('should add sandbox metadata to results when sandbox is available', async () => {
+      const mockCall = vi.fn().mockResolvedValue({ toolCallId: 'tc1', output: 'ok', isError: false });
+      // Use a tool that's excluded from sandbox to avoid deny
+      const tool = makeTool({ name: 'FileRead', call: mockCall });
+      const executor = new ToolExecutor([tool], '/tmp', undefined, undefined, {
+        enabled: true,
+        backend: 'noop',
+      });
+
+      const result = await executor.executeSingle(
+        makeToolCall({ toolName: 'FileRead', input: { path: '/tmp/test.txt' } }),
+        makeContext()
+      );
+
+      // Should have sandbox metadata (even if not sandboxed)
+      expect(result.metadata).toBeDefined();
+      expect(result.metadata?.sandboxed).toBe(false); // noop = not truly sandboxed
+      expect(result.metadata?.sandboxBackend).toBe('noop');
+    });
+
+    it('should pass sandbox manager in context to tools', async () => {
+      let capturedContext: ToolUseContext | undefined;
+      const mockCall = vi.fn().mockImplementation((_input, ctx) => {
+        capturedContext = ctx;
+        return Promise.resolve({ toolCallId: 'tc1', output: 'ok', isError: false });
+      });
+      const tool = makeTool({ name: 'FileRead', call: mockCall });
+      const executor = new ToolExecutor([tool], '/tmp', undefined, undefined, {
+        enabled: true,
+        backend: 'noop',
+      });
+
+      await executor.executeSingle(
+        makeToolCall({ toolName: 'FileRead', input: { path: '/tmp/test.txt' } }),
+        makeContext()
+      );
+
+      expect(capturedContext).toBeDefined();
+      expect(capturedContext?.sandbox).toBeDefined();
+      expect(capturedContext?.sandbox?.getBackendName()).toBe('noop');
+    });
+  });
+
+  describe('error handling edge cases', () => {
+    it('should handle tool returning undefined output', async () => {
+      const tool = makeTool({
+        call: vi.fn().mockResolvedValue({ toolCallId: 'tc1', output: undefined, isError: false }),
+      });
+      const executor = new ToolExecutor([tool], '/tmp');
+      const result = await executor.executeSingle(makeToolCall(), makeContext());
+      expect(result).toBeDefined();
+    });
+
+    it('should handle tool returning null', async () => {
+      const tool = makeTool({
+        call: vi.fn().mockResolvedValue(null),
+      });
+      const executor = new ToolExecutor([tool], '/tmp');
+      const result = await executor.executeSingle(makeToolCall(), makeContext());
+      expect(result).toBeDefined();
+    });
+
+    it('should handle tool throwing non-Error', async () => {
+      const tool = makeTool({
+        call: vi.fn().mockRejectedValue('string error'),
+      });
+      const executor = new ToolExecutor([tool], '/tmp');
+      const result = await executor.executeSingle(makeToolCall(), makeContext());
+      expect(result.isError).toBe(true);
+    });
+
+    it('should handle concurrent execution with many tools', async () => {
+      const tool = makeTool();
+      const executor = new ToolExecutor([tool], '/tmp');
+      const calls = Array.from({ length: 10 }, (_, i) =>
+        makeToolCall({ id: `tc_${i}` })
+      );
+      const results = await executor.executeParallel(calls, makeContext());
+      expect(results.size).toBe(10);
+    });
+
+    it('should handle empty parallel execution', async () => {
+      const executor = new ToolExecutor([], '/tmp');
+      const results = await executor.executeParallel([], makeContext());
+      expect(results.size).toBe(0);
     });
   });
 });

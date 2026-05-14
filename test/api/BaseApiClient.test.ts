@@ -257,4 +257,103 @@ describe('BaseApiClient', () => {
       expect(events[1].type).toBe('stop');
     });
   });
+
+  describe('formatMessages edge cases', () => {
+    it('should handle multiple tool results in one message', () => {
+      const result = client.testFormatMessages([{
+        role: 'tool',
+        content: '',
+        toolResults: [
+          { toolCallId: 'call_1', output: 'result1', isError: false },
+          { toolCallId: 'call_2', output: 'result2', isError: false },
+        ],
+      }]);
+      // Implementation may combine or split - just verify both results are present
+      expect(result.length).toBeGreaterThanOrEqual(1);
+      const allContent = result.map((r: any) => r.content || '').join(' ');
+      expect(allContent).toContain('result1');
+      expect(allContent).toContain('result2');
+    });
+
+    it('should handle system messages', () => {
+      const result = client.testFormatMessages([
+        { role: 'system', content: 'You are helpful' },
+        { role: 'user', content: 'hello' },
+      ]);
+      expect(result).toHaveLength(2);
+      expect(result[0].role).toBe('system');
+    });
+
+    it('should handle empty messages array', () => {
+      const result = client.testFormatMessages([]);
+      expect(result).toHaveLength(0);
+    });
+
+    it('should handle assistant message with content and tool calls', () => {
+      const result = client.testFormatMessages([{
+        role: 'assistant',
+        content: 'Let me check that for you.',
+        toolCalls: [{
+          id: 'call_1',
+          toolName: 'Bash',
+          input: { command: 'ls' },
+        }],
+      }]);
+      expect(result[0].content).toBe('Let me check that for you.');
+      expect(result[0].tool_calls).toBeDefined();
+    });
+  });
+
+  describe('formatTools edge cases', () => {
+    it('should handle multiple tools', () => {
+      const result = client.testFormatTools([
+        { name: 'tool1', description: 'First', inputSchema: {}, call: async () => ({ toolCallId: '', output: '' }) },
+        { name: 'tool2', description: 'Second', inputSchema: {}, call: async () => ({ toolCallId: '', output: '' }) },
+      ]);
+      expect(result).toHaveLength(2);
+      expect((result[0].function as any).name).toBe('tool1');
+      expect((result[1].function as any).name).toBe('tool2');
+    });
+
+    it('should handle tool with complex inputSchema', () => {
+      const result = client.testFormatTools([{
+        name: 'complex_tool',
+        description: 'A tool with complex params',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'File path' },
+            options: {
+              type: 'object',
+              properties: {
+                recursive: { type: 'boolean' },
+              },
+            },
+          },
+          required: ['path'],
+        },
+        call: async () => ({ toolCallId: '', output: '' }),
+      }]);
+      expect(result).toHaveLength(1);
+    });
+  });
+
+  describe('buildRequestBody edge cases', () => {
+    it('should handle all optional parameters', () => {
+      const body = client.testBuildRequestBody({
+        model: 'test-model',
+        messages: [],
+        maxTokens: 2000,
+        temperature: 0.5,
+        topP: 0.9,
+        systemPrompt: 'test',
+        stream: false,
+      });
+      expect(body.model).toBe('test-model');
+      expect(body.max_tokens).toBe(2000);
+      expect(body.temperature).toBe(0.5);
+      expect(body.stream).toBe(false);
+      expect(body.system).toBe('test');
+    });
+  });
 });
