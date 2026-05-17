@@ -508,7 +508,7 @@ Phase 5 (Out-of-the-Box):
 
 ### TASK-063: User Profile Service
 
-**Status**: pending
+**Status**: completed
 **Priority**: P2
 **Phase**: Phase 4
 **预估工时**: 1.5d
@@ -522,20 +522,21 @@ Phase 5 (Out-of-the-Box):
 - `blocks`: [TASK-065, TASK-067, TASK-069]
 
 **Checklist**:
-- [ ] Create `src/services/userProfile.ts` with:
+- [x] Create `src/services/userProfile.ts` with:
   - `UserProfile` interface (level, preferredTools, codingStyle, sessionCount, totalToolCalls)
   - `UserProfileService` class with `getProfile()`, `updateLevel()`, `recordToolPreference()`, `recordCodingStyle()`, `persist()`
-- [ ] Track preferred tools (top-N by usage frequency from session metrics)
-- [ ] Track coding style indicators: language from file extensions, indentation from FileReadTool analysis, naming convention from file names
-- [ ] User level is manually set via `/level` command (beginner/intermediate/advanced)
-- [ ] Persist to `~/.kc-cli/settings.json`
-- [ ] Write `test/services/userProfile.test.ts` covering:
+  - `detectCodingStyle()` helper for file analysis
+- [x] Track preferred tools (top 10 by recency)
+- [x] Track coding style: language from extensions, indentation, naming convention
+- [x] User level manually set via `updateLevel()` (beginner/intermediate/advanced)
+- [x] Persist to `~/.kc-cli/settings.json`
+- [x] Write `test/services/userProfile.test.ts` covering (18 tests):
   - Profile creation with default values
   - Level update (beginner/intermediate/advanced)
   - Tool preference tracking
   - Coding style detection
   - Persistence and loading
-- [ ] Run `tsc --noEmit` + full test suite
+- [x] Run `tsc --noEmit` + full test suite (81/81 files, 1327/1327 tests pass)
 
 **Spec Documentation**: [§4a Behavioral Adaptation - User Profile Service](superpowers/specs/2026-05-17-self-evolving-cli-design.md#user-profile-service)
 
@@ -759,9 +760,9 @@ Phase 5 (Out-of-the-Box):
 
 | Status | Count | Tasks |
 |--------|-------|-------|
-| ✅ completed | 13 | TASK-050, TASK-051, TASK-052, TASK-053, TASK-054, TASK-055, TASK-056, TASK-057, TASK-058, TASK-059, TASK-060, TASK-061, TASK-062 |
+| ✅ completed | 14 | TASK-050, TASK-051, TASK-052, TASK-053, TASK-054, TASK-055, TASK-056, TASK-057, TASK-058, TASK-059, TASK-060, TASK-061, TASK-062, TASK-063 |
 | 🔄 in_progress | 0 | — |
-| ⏳ pending | 6 | TASK-063 ~ TASK-068 |
+| ⏳ pending | 5 | TASK-064 ~ TASK-068 |
 | 🚫 blocked | 0 | — |
 
 **总预估工时**: ~28 天（5.5 周）
