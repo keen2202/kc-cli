@@ -186,6 +186,7 @@ export class QueryEngine {
   /**
    * Phase 1: Auto-compaction check
    * Optimization: Uses cached token estimate to avoid redundant calculations.
+   * Includes retry for transient API errors during full compaction.
    */
   private async *compactingPhase(): AsyncGenerator<StreamEvent | AgentEvent> {
     const config: CompactConfig = {
@@ -228,16 +229,36 @@ export class QueryEngine {
         }
       }
 
-      // Full LLM-based compaction if microcompact wasn't enough
-      const { fullCompact } = await import('../services/compaction');
-      const fullResult = await fullCompact(
-        this.messages,
-        this.apiClient,
-        config,
-        this.config.systemPrompt
-      );
+      // Full LLM-based compaction with retry
+      const maxCompactionRetries = 2;
+      let fullResult: { wasCompacted: boolean; messages: ChatMessage[]; tokensSaved: number } | null = null;
 
-      if (fullResult.wasCompacted) {
+      for (let retryAttempt = 0; retryAttempt <= maxCompactionRetries; retryAttempt++) {
+        try {
+          const { fullCompact } = await import('../services/compaction');
+          fullResult = await fullCompact(
+            this.messages,
+            this.apiClient,
+            config,
+            this.config.systemPrompt
+          );
+          break; // Success, exit retry loop
+        } catch (compactError) {
+          const err = compactError instanceof Error ? compactError : new Error(String(compactError));
+          const classified = classifyApiError(err);
+
+          if (classified.retryable && retryAttempt < maxCompactionRetries) {
+            const delay = classified.retryAfterMs ?? getRetryDelay(retryAttempt);
+            console.warn(`Compaction retry ${retryAttempt + 1}/${maxCompactionRetries} after ${delay}ms: ${err.message}`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+
+          throw compactError; // Re-throw if not retryable or retries exhausted
+        }
+      }
+
+      if (fullResult && fullResult.wasCompacted) {
         this.messages = fullResult.messages;
         this.cachedTokenEstimate = estimateMessageTokensArray(this.messages);
         yield this.createCompactFullEvent(
@@ -257,121 +278,127 @@ export class QueryEngine {
 
   /**
    * Phase 2: Stream response from LLM
+   * Uses loop-based retry to prevent stack overflow
    */
   private async *streamingPhase(): AsyncGenerator<StreamEvent | AgentEvent> {
-    // Build API request
-    const apiMessages = this.buildApiMessages();
-    const toolsDef = this.toolExecutor.getRegisteredTools().map(toolName => {
-      const tool = this.toolExecutor.getTool(toolName);
-      return tool;
-    }).filter((t): t is ToolDefinition => t !== undefined);
+    const maxRetries = 3;
 
-    // Get last user message for memory lookup
-    const lastUserMessage = [...this.messages].reverse().find(m => m.role === 'user');
+    for (let retryAttempt = 0; retryAttempt <= maxRetries; retryAttempt++) {
+      // Build API request
+      const apiMessages = this.buildApiMessages();
+      const toolsDef = this.toolExecutor.getRegisteredTools().map(toolName => {
+        const tool = this.toolExecutor.getTool(toolName);
+        return tool;
+      }).filter((t): t is ToolDefinition => t !== undefined);
 
-    // Load relevant memories (pre-query)
-    let memoryContext = '';
-    if (lastUserMessage && this.memoryIntegration.isEnabled()) {
-      const recentTools = toolsDef.slice(0, 5).map(t => t.name);
-      memoryContext = await this.memoryIntegration.loadRelevantMemories(
-        lastUserMessage.content || '',
-        recentTools
-      );
-    }
+      // Get last user message for memory lookup
+      const lastUserMessage = [...this.messages].reverse().find(m => m.role === 'user');
 
-    // Build system prompt with memory context
-    const systemPrompt = memoryContext
-      ? `${this.config.systemPrompt || ''}\n\n${memoryContext}`
-      : this.config.systemPrompt;
-
-    // Call LLM with streaming
-    const requestConfig: LLMRequestConfig = {
-      model: this.config.model,
-      messages: apiMessages,
-      tools: toolsDef,
-      systemPrompt,
-      stream: true,
-      abortSignal: this.abortController.signal,
-    };
-
-    // Stream response
-    let fullContent = '';
-    const toolCalls: ToolCall[] = [];
-
-    // Check circuit breaker before making API call
-    const apiBreaker = this.circuitBreakers.getBreaker('api');
-    if (!apiBreaker.canExecute()) {
-      console.warn(`API circuit breaker is ${apiBreaker.getState()}, skipping request`);
-      yield this.createErrorEvent(new Error(`API service is temporarily unavailable (circuit breaker ${apiBreaker.getState()})`));
-      return;
-    }
-
-    try {
-      for await (const event of this.apiClient.streamChat(requestConfig)) {
-        if (event.type === 'text_delta') {
-          fullContent += event.text || '';
-          yield this.createTextDeltaEvent(event.text || '');
-        } else if (event.type === 'tool_use') {
-          if (event.toolCall) {
-            toolCalls.push(event.toolCall);
-            yield this.createToolStartedEvent(event.toolCall);
-          }
-        } else if (event.type === 'error') {
-          yield this.createErrorEvent(event.error || new Error('Unknown error'));
-          return;
-        } else if (event.type === 'stop') {
-          // Stream complete
-          break;
-        }
+      // Load relevant memories (pre-query)
+      let memoryContext = '';
+      if (lastUserMessage && this.memoryIntegration.isEnabled()) {
+        const recentTools = toolsDef.slice(0, 5).map(t => t.name);
+        memoryContext = await this.memoryIntegration.loadRelevantMemories(
+          lastUserMessage.content || '',
+          recentTools
+        );
       }
 
-      // Add assistant message
-      const assistantMsg: AssistantMessage = {
-        id: uuidv4(),
-        role: 'assistant',
-        content: fullContent || null,
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        timestamp: Date.now(),
+      // Build system prompt with memory context
+      const systemPrompt = memoryContext
+        ? `${this.config.systemPrompt || ''}\n\n${memoryContext}`
+        : this.config.systemPrompt;
+
+      // Call LLM with streaming
+      const requestConfig: LLMRequestConfig = {
+        model: this.config.model,
+        messages: apiMessages,
+        tools: toolsDef,
+        systemPrompt,
+        stream: true,
+        abortSignal: this.abortController.signal,
       };
-      this.messages.push(assistantMsg);
 
-      // Update state
-      this.stateStore.incrementTurn();
+      // Stream response
+      let fullContent = '';
+      const toolCalls: ToolCall[] = [];
 
-      // Reset retry counter on success
-      this.retryState.reset('streaming');
-
-      // Record success with circuit breaker
-      apiBreaker.recordSuccess();
-
-      yield this.createTurnCompleteEvent(assistantMsg);
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      const classified = classifyApiError(err);
-
-      // Record failure with circuit breaker for transient errors
-      if (classified.retryable) {
-        apiBreaker.recordFailure();
-      }
-
-      // Handle degraded errors: log warning and continue without retrying
-      if (classified.errorClass === 'degraded') {
-        console.warn(`Degraded error in streaming: ${err.message}`);
+      // Check circuit breaker before making API call
+      const apiBreaker = this.circuitBreakers.getBreaker('api');
+      if (!apiBreaker.canExecute()) {
+        console.warn(`API circuit breaker is ${apiBreaker.getState()}, skipping request`);
+        yield this.createErrorEvent(new Error(`API service is temporarily unavailable (circuit breaker ${apiBreaker.getState()})`));
         return;
       }
 
-      if (classified.retryable && this.retryState.canRetry('streaming')) {
-        const attempt = this.retryState.incrementAttempt('streaming');
-        const delay = classified.retryAfterMs ?? getRetryDelay(attempt - 1);
-        yield this.createErrorEvent(new Error(`Retrying (${attempt}/${3}) after ${classified.context}: ${err.message}`));
-        await new Promise(resolve => setTimeout(resolve, delay));
-        // Re-enter streaming phase
-        yield* this.streamingPhase();
+      try {
+        for await (const event of this.apiClient.streamChat(requestConfig)) {
+          if (event.type === 'text_delta') {
+            fullContent += event.text || '';
+            yield this.createTextDeltaEvent(event.text || '');
+          } else if (event.type === 'tool_use') {
+            if (event.toolCall) {
+              toolCalls.push(event.toolCall);
+              yield this.createToolStartedEvent(event.toolCall);
+            }
+          } else if (event.type === 'error') {
+            yield this.createErrorEvent(event.error || new Error('Unknown error'));
+            return;
+          } else if (event.type === 'stop') {
+            // Stream complete
+            break;
+          }
+        }
+
+        // Add assistant message
+        const assistantMsg: AssistantMessage = {
+          id: uuidv4(),
+          role: 'assistant',
+          content: fullContent || null,
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          timestamp: Date.now(),
+        };
+        this.messages.push(assistantMsg);
+
+        // Update state
+        this.stateStore.incrementTurn();
+
+        // Reset retry counter on success
+        this.retryState.reset('streaming');
+
+        // Record success with circuit breaker
+        apiBreaker.recordSuccess();
+
+        yield this.createTurnCompleteEvent(assistantMsg);
+        return; // Success, exit retry loop
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        const classified = classifyApiError(err);
+
+        // Record failure with circuit breaker for transient errors
+        if (classified.retryable) {
+          apiBreaker.recordFailure();
+        }
+
+        // Handle degraded errors: log warning and continue without retrying
+        if (classified.errorClass === 'degraded') {
+          console.warn(`Degraded error in streaming: ${err.message}`);
+          return;
+        }
+
+        // Check if we can retry
+        if (classified.retryable && retryAttempt < maxRetries) {
+          const delay = classified.retryAfterMs ?? getRetryDelay(retryAttempt);
+          yield this.createErrorEvent(new Error(`Retrying (${retryAttempt + 1}/${maxRetries}) after ${classified.context}: ${err.message}`));
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue; // Loop-based retry
+        }
+
+        // Final failure
+        this.retryState.reset('streaming');
+        yield this.createErrorEvent(err);
         return;
       }
-
-      this.retryState.reset('streaming');
-      yield this.createErrorEvent(err);
     }
   }
 
