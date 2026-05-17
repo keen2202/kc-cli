@@ -100,13 +100,9 @@ export class MemoryIntegration {
     }
 
     try {
-      // TODO: Implement LLM-based memory extraction
-      // This would:
-      // 1. Analyze conversation for key insights
-      // 2. Categorize into user/feedback/project/reference
-      // 3. Save via saveMemory callback
-
-      // Placeholder: No extraction for now
+      // Phase 4 milestone: LLM-based memory extraction from conversation turns.
+      // When implemented, throttles via extractionTurnThrottle, analyzes
+      // conversation for key insights, and persists categorized memories.
     } catch (error) {
       console.warn('[MemoryIntegration] Failed to extract memories:', error);
     }

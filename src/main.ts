@@ -14,10 +14,14 @@ import { toolRegistry, registerBuiltInTools } from './tools';
 import { QueryEngine } from './query/QueryEngine';
 import type { AgentEvent } from './state/types';
 import type { StreamEvent } from './types/message';
+import type { LLMProvider } from './api';
+import type { PermissionMode } from './types/permissions';
 import { formatToolResult, formatBanner, formatSeparator, setBareMode } from './ui';
 import { Spinner } from './ui/spinner';
 import { updateStatus, clearStatus } from './ui/statusline';
 import { MCPClientManager, convertMCPTool, loadMCPConfig } from './mcp';
+
+let currentSpinner: Spinner | null = null;
 
 const VERSION = '0.1.0';
 
@@ -188,7 +192,7 @@ async function runAgent(prompt: string | undefined, opts: any) {
   const queryEngine = new QueryEngine(
     {
       model,
-      provider: provider as any,
+      provider: provider as LLMProvider,
       apiKey,
       apiBaseUrl,
       maxTurns: getState().maxTurns || 50,
@@ -261,29 +265,25 @@ function handleStreamEvent(event: AgentEvent | StreamEvent): void {
         break;
 
       case 'agent:tool_started': {
-        const spinner = new Spinner();
-        spinner.start(`${event.toolCall.toolName}`);
-        (globalThis as any).__currentSpinner = spinner;
+        currentSpinner = new Spinner();
+        currentSpinner.start(`${event.toolCall.toolName}`);
         break;
       }
 
       case 'agent:tool_completed': {
-        const spinner = (globalThis as any).__currentSpinner;
-        if (spinner) {
-          spinner.stop(formatToolResult(event.result.output, false));
-          (globalThis as any).__currentSpinner = null;
+        if (currentSpinner) {
+          currentSpinner.stop(formatToolResult(event.result.output, false));
+          currentSpinner = null;
         } else {
           console.log(formatToolResult(event.result.output, false));
         }
-        updateStatus({ turnCount: (getState() as any).turnCount });
         break;
       }
 
       case 'agent:tool_failed': {
-        const spinner = (globalThis as any).__currentSpinner;
-        if (spinner) {
-          spinner.fail(formatToolResult(event.error.message, true));
-          (globalThis as any).__currentSpinner = null;
+        if (currentSpinner) {
+          currentSpinner.fail(formatToolResult(event.error.message, true));
+          currentSpinner = null;
         } else {
           console.log(formatToolResult(event.error.message, true));
         }
@@ -321,21 +321,19 @@ function handleStreamEvent(event: AgentEvent | StreamEvent): void {
         break;
 
       case 'tool_use_start': {
-        const spinner = new Spinner();
-        spinner.start(`${event.toolCall.toolName}`);
-        (globalThis as any).__currentSpinner = spinner;
+        currentSpinner = new Spinner();
+        currentSpinner.start(`${event.toolCall.toolName}`);
         break;
       }
 
       case 'tool_use_end': {
-        const spinner = (globalThis as any).__currentSpinner;
-        if (spinner) {
+        if (currentSpinner) {
           if (event.result.isError) {
-            spinner.fail(formatToolResult(event.result.output, true));
+            currentSpinner.fail(formatToolResult(event.result.output, true));
           } else {
-            spinner.stop(formatToolResult(event.result.output, false));
+            currentSpinner.stop(formatToolResult(event.result.output, false));
           }
-          (globalThis as any).__currentSpinner = null;
+          currentSpinner = null;
         } else {
           console.log(formatToolResult(event.result.output, event.result.isError));
         }
@@ -436,7 +434,7 @@ async function handleCommand(
     case '/mode':
       const mode = parts[1];
       if (mode) {
-        updateState({ permissionMode: mode as any });
+        updateState({ permissionMode: mode as PermissionMode });
         console.log(chalk.green(`✓ Permission mode set to: ${mode}\n`));
       } else {
         console.log(chalk.yellow(`Current mode: ${getState().permissionMode}\n`));

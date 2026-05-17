@@ -14,6 +14,7 @@ import type {
 } from '../types.js';
 import type { ToolUseContext, ToolDefinition, ToolName } from '../../types/tools.js';
 import type { PermissionMode } from '../../types/permissions.js';
+import type { AgentEvent } from '../../state/types.js';
 import { EventBus } from '../event-bus.js';
 import {
   deriveChildPermissions,
@@ -205,28 +206,30 @@ export class InProcessBackend implements SubAgentBackend {
         let lastAssistantMessage = '';
         let hasToolCalls = false;
 
-        for await (const event of eventGenerator) {
+        for await (const rawEvent of eventGenerator) {
           // Check if aborted
           if (abortController.signal.aborted) {
             break;
           }
 
           // Forward event to parent via EventBus
-          this.eventBus.emit(agentId, event as any);
+          this.eventBus.emit(agentId, rawEvent as AgentEvent);
 
-          // Collect final message
+          // Collect final message from agent-prefixed events
+          const event = rawEvent as AgentEvent;
           if (event.type === 'agent:text_delta') {
-            lastAssistantMessage += (event as any).text;
+            lastAssistantMessage += event.text;
           } else if (event.type === 'agent:turn_complete') {
-            if ((event as any).message?.content) {
-              lastAssistantMessage = (event as any).message.content;
+            if (event.message?.content) {
+              lastAssistantMessage = event.message.content;
             }
-            if ((event as any).message?.toolCalls && (event as any).message.toolCalls.length > 0) {
+            if (event.message?.toolCalls && event.message.toolCalls.length > 0) {
               hasToolCalls = true;
-              runtime.toolUseCount += (event as any).message.toolCalls.length;
+              runtime.toolUseCount += event.message.toolCalls.length;
             }
           } else if (event.type === 'agent:tool_completed') {
-            runtime.totalTokensUsed += Number((event as any).result?.metadata?.tokensUsed) || 0;
+            const tokensUsed = Number(event.result?.metadata?.tokensUsed) || 0;
+            runtime.totalTokensUsed += tokensUsed;
           }
         }
 

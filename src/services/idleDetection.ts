@@ -53,8 +53,8 @@ export function startIdleDetection(
   idleDetectionInterval = setInterval(checkIdleState, 30000); // Check every 30 seconds
 
   // Unref the interval so it doesn't keep the process alive
-  if (idleDetectionInterval && typeof (idleDetectionInterval as any).unref === 'function') {
-    (idleDetectionInterval as any).unref();
+  if (idleDetectionInterval && typeof idleDetectionInterval.unref === 'function') {
+    idleDetectionInterval.unref();
   }
 }
 

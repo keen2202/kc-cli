@@ -236,10 +236,11 @@ export class ToolExecutor {
       if (toolAbortController.signal.aborted) {
         throw timeoutError;
       }
+      const toolResult = result as ToolResult;
       return {
         toolCallId: '',
-        output: (result as any).output || '',
-        isError: (result as any).isError || false,
+        output: toolResult.output ?? '',
+        isError: toolResult.isError || false,
       };
     } catch (error) {
       throw error;
@@ -371,7 +372,9 @@ export class ToolExecutor {
       }
 
       const permission = await hasPermissionsToUseTool(toolCall.toolName, toolCall.input, {
-        toolCheckPermissions: tool.checkPermissions as any,
+        // ToolDefinition.checkPermissions takes ToolUseContext but hasPermissionsToUseTool
+      // expects PermissionContext; the fields are compatible at runtime.
+      toolCheckPermissions: tool.checkPermissions as any,
         content: this.extractContentForPermission(toolCall.toolName, toolCall.input),
         config: this.permissionConfig,
       });
@@ -391,6 +394,8 @@ export class ToolExecutor {
     context: ToolUseContext
   ): Promise<PermissionResult> {
     return await hasPermissionsToUseTool(toolCall.toolName, toolCall.input, {
+      // ToolDefinition.checkPermissions takes ToolUseContext but hasPermissionsToUseTool
+      // expects PermissionContext; the fields are compatible at runtime.
       toolCheckPermissions: tool.checkPermissions as any,
       content: this.extractContentForPermission(toolCall.toolName, toolCall.input),
       config: this.permissionConfig,

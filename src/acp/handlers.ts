@@ -7,6 +7,7 @@ import { initializeState, getState } from '../bootstrap/state';
 import { loadConfig } from '../bootstrap/config';
 import type { AgentEvent } from '../state/types';
 import type { StreamEvent } from '../types/message';
+import type { LLMProvider } from '../api';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface ACPHandlerState {
@@ -46,7 +47,7 @@ export async function handleAgentRun(request: ACPRequest, state: ACPHandlerState
 
   const engine = new QueryEngine({
     model: config.model,
-    provider: config.provider as any,
+    provider: config.provider as LLMProvider,
     apiKey: config.apiKey,
     apiBaseUrl: config.apiBaseUrl,
     maxTurns: 50,
@@ -117,24 +118,25 @@ export function handleSessionList(request: ACPRequest, state: ACPHandlerState): 
 }
 
 function serializeEvent(event: AgentEvent | StreamEvent): Record<string, unknown> {
-  if ('type' in event && event.type.startsWith('agent:')) {
+  const eventType = 'type' in event ? event.type : '';
+  if (eventType.startsWith('agent:')) {
     const ae = event as AgentEvent;
     switch (ae.type) {
       case 'agent:text_delta':
-        return { type: 'text', text: (ae as any).text };
+        return { type: 'text', text: ae.text };
       case 'agent:tool_started':
-        return { type: 'tool_start', tool: (ae as any).toolCall?.toolName };
+        return { type: 'tool_start', tool: ae.toolCall?.toolName };
       case 'agent:tool_completed':
-        return { type: 'tool_end', tool: (ae as any).toolCall?.toolName, success: true };
+        return { type: 'tool_end', tool: ae.toolCall?.toolName, success: true };
       case 'agent:tool_failed':
-        return { type: 'tool_end', tool: (ae as any).toolCall?.toolName, success: false, error: (ae as any).error?.message };
+        return { type: 'tool_end', tool: ae.toolCall?.toolName, success: false, error: ae.error?.message };
       case 'agent:error':
-        return { type: 'error', message: (ae as any).error?.message };
+        return { type: 'error', message: ae.error?.message };
       case 'agent:complete':
         return { type: 'complete' };
       default:
         return { type: ae.type };
     }
   }
-  return { type: (event as any).type };
+  return { type: eventType };
 }

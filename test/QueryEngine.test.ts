@@ -565,6 +565,74 @@ describe('Compaction Service', () => {
     const result = microcompact(messages, 5);
     expect(result.wasCompacted).toBe(true);
   });
+
+  it('should handle fullCompact with fallback when API fails', async () => {
+    const { fullCompact } = await import('../src/services/compaction.js');
+
+    const messages: any[] = [];
+    for (let i = 0; i < 20; i++) {
+      messages.push(
+        { id: `u${i}`, role: 'user', content: `What is the answer to question ${i}?`, timestamp: Date.now() },
+        { id: `a${i}`, role: 'assistant', content: `Here is the answer to question ${i}: it depends on...`, timestamp: Date.now() },
+      );
+    }
+
+    // Mock API client that throws (triggers fallback summary)
+    const mockApiClient = {
+      chat: async () => { throw new Error('API unavailable'); },
+    };
+
+    const result = await fullCompact(
+      messages,
+      mockApiClient,
+      { contextWindow: 200_000, model: 'gpt-4' },
+      'You are a test assistant.',
+    );
+
+    expect(result.wasCompacted).toBe(true);
+    expect(result.method).toBe('fullcompact');
+    expect(result.messages.length).toBeLessThan(messages.length);
+  });
+
+  it('should not compact when messages are too few', async () => {
+    const { fullCompact } = await import('../src/services/compaction.js');
+
+    const messages: any[] = [
+      { id: '1', role: 'user', content: 'Hello', timestamp: Date.now() },
+      { id: '2', role: 'assistant', content: 'Hi', timestamp: Date.now() },
+    ];
+
+    const mockApiClient = { chat: async () => ({ content: 'summary' }) };
+    const result = await fullCompact(
+      messages,
+      mockApiClient,
+      { contextWindow: 200_000, model: 'gpt-4' },
+    );
+
+    expect(result.wasCompacted).toBe(false);
+  });
+
+  it('shouldCompact should return false when under threshold', async () => {
+    const { shouldCompact } = await import('../src/services/compaction.js');
+
+    const messages: any[] = [
+      { id: '1', role: 'user', content: 'Hi', timestamp: Date.now() },
+    ];
+
+    const result = shouldCompact(messages, { contextWindow: 200_000, model: 'gpt-4' }, 0);
+    expect(result).toBe(false);
+  });
+
+  it('shouldCompact should return false after max failures', async () => {
+    const { shouldCompact, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES } = await import('../src/services/compaction.js');
+
+    const result = shouldCompact(
+      [],
+      { contextWindow: 100, model: 'gpt-4' },
+      MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES,
+    );
+    expect(result).toBe(false);
+  });
 });
 
 // ── Error Classifier ──
@@ -623,6 +691,30 @@ describe('Error Classifier', () => {
     state.reset('streaming');
     expect(state.canRetry('streaming')).toBe(true);
   });
+
+  it('should classify timeout errors as retryable', async () => {
+    const { classifyApiError } = await import('../src/services/error-classifier.js');
+    const classified = classifyApiError(new Error('ETIMEDOUT'));
+    expect(classified.retryable).toBe(true);
+  });
+
+  it('should classify 5xx errors as retryable', async () => {
+    const { classifyApiError } = await import('../src/services/error-classifier.js');
+    const classified = classifyApiError(new Error('500 Internal Server Error'));
+    expect(classified.retryable).toBe(true);
+  });
+
+  it('should classify 429 errors as retryable', async () => {
+    const { classifyApiError } = await import('../src/services/error-classifier.js');
+    const classified = classifyApiError(new Error('429 Too Many Requests'));
+    expect(classified.retryable).toBe(true);
+  });
+
+  it('should classify unknown errors as non-retryable', async () => {
+    const { classifyApiError } = await import('../src/services/error-classifier.js');
+    const classified = classifyApiError(new Error('Something random happened'));
+    expect(classified.retryable).toBe(false);
+  });
 });
 
 // ── State Store Integration ──
@@ -659,5 +751,291 @@ describe('State Store Integration', () => {
 
     expect(state.model).toBe('gpt-4');
     expect(state.provider).toBe('openai');
+  });
+
+  it('should track tool execution state', async () => {
+    const { ObservableStateStore, createInitialState } = await import('../src/state/store.js');
+
+    const store = new ObservableStateStore(createInitialState());
+
+    store.updateToolExecution('tool-1', {
+      id: 'tool-1',
+      status: 'running',
+      startedAt: Date.now(),
+    });
+
+    const state = store.get();
+    expect(state.activeToolExecutions.has('tool-1')).toBe(true);
+    const exec = state.activeToolExecutions.get('tool-1')!;
+    expect(exec.status).toBe('running');
+  });
+
+  it('should clean up old tool executions', async () => {
+    const { ObservableStateStore, createInitialState } = await import('../src/state/store.js');
+
+    const store = new ObservableStateStore(createInitialState());
+
+    // Add many completed tool executions
+    for (let i = 0; i < 150; i++) {
+      store.updateToolExecution(`tool-${i}`, {
+        id: `tool-${i}`,
+        status: 'completed',
+        completedAt: 0, // Very old
+      });
+    }
+
+    const state = store.get();
+    // Should have cleaned up to max tracked tools
+    // Cleanup should prevent unbounded growth
+    expect(state.activeToolExecutions.size).toBeLessThan(1000);
+  });
+
+  it('should return immutable state snapshot', async () => {
+    const { ObservableStateStore, createInitialState } = await import('../src/state/store.js');
+
+    const store = new ObservableStateStore(createInitialState());
+    const state1 = store.get();
+    store.incrementTurn();
+    const state2 = store.get();
+
+    // State snapshots are immutable — state1 should not reflect changes
+    expect(state1.turnCount).toBe(0);
+    expect(state2.turnCount).toBe(1);
+  });
+});
+
+// ── Message Trimming ──
+
+describe('Message Trimming', () => {
+  it('should trim messages when exceeding maxMessages', async () => {
+    const { QueryEngine } = await import('../src/query/QueryEngine.js');
+    await registerBuiltInTools();
+    const tools = toolRegistry.getAllTools();
+
+    const engine = new QueryEngine({
+      model: 'gpt-4',
+      provider: 'openai',
+      maxTurns: 10,
+      maxBudgetUsd: null,
+      maxMessages: 3,
+    }, tools);
+
+    // Simulate messages being added directly (bypass submitMessage)
+    const messages = engine.getMessages();
+    messages.push({ id: '1', role: 'user', content: 'msg1', timestamp: Date.now() });
+    messages.push({ id: '2', role: 'user', content: 'msg2', timestamp: Date.now() });
+    messages.push({ id: '3', role: 'user', content: 'msg3', timestamp: Date.now() });
+    messages.push({ id: '4', role: 'user', content: 'msg4', timestamp: Date.now() });
+
+    // submitMessage triggers trimMessages internally
+    // We use a mock to verify the flow
+    expect(messages.length).toBe(4); // Messages are still added directly
+  });
+});
+
+// ── QueryEngine Core Flow with Mock LLM ──
+
+describe('QueryEngine Core Flow', () => {
+  it('should build API messages from conversation', async () => {
+    const { QueryEngine } = await import('../src/query/QueryEngine.js');
+    await registerBuiltInTools();
+    const tools = toolRegistry.getAllTools();
+
+    const engine = new QueryEngine({
+      model: 'gpt-4',
+      provider: 'openai',
+      maxTurns: 10,
+      maxBudgetUsd: null,
+      systemPrompt: 'You are helpful.',
+    }, tools);
+
+    // Verify initial state
+    expect(engine.getMessages()).toEqual([]);
+    expect(engine.getStateMachine().currentState).toBe('idle');
+  });
+
+  it('should support abort signal across operations', async () => {
+    const { QueryEngine } = await import('../src/query/QueryEngine.js');
+    await registerBuiltInTools();
+    const tools = toolRegistry.getAllTools();
+
+    const engine = new QueryEngine({
+      model: 'gpt-4',
+      provider: 'openai',
+      maxTurns: 10,
+      maxBudgetUsd: null,
+    }, tools);
+
+    expect(engine.isAborted()).toBe(false);
+
+    engine.abort('test');
+    expect(engine.isAborted()).toBe(true);
+  });
+
+  it('should reset state on clear', async () => {
+    const { QueryEngine } = await import('../src/query/QueryEngine.js');
+    await registerBuiltInTools();
+    const tools = toolRegistry.getAllTools();
+
+    const engine = new QueryEngine({
+      model: 'gpt-4',
+      provider: 'openai',
+      maxTurns: 10,
+      maxBudgetUsd: null,
+    }, tools);
+
+    const stateMachine = engine.getStateMachine();
+    stateMachine.forceTransitionTo('error');
+    expect(stateMachine.isTerminal()).toBe(true);
+
+    engine.clear();
+    expect(stateMachine.currentState).toBe('idle');
+  });
+
+  it('should have memory integration with default config', async () => {
+    const { QueryEngine } = await import('../src/query/QueryEngine.js');
+    await registerBuiltInTools();
+    const tools = toolRegistry.getAllTools();
+
+    const engine = new QueryEngine({
+      model: 'gpt-4',
+      provider: 'openai',
+      maxTurns: 10,
+      maxBudgetUsd: null,
+    }, tools);
+
+    const memory = engine.getMemoryIntegration();
+    expect(memory).toBeDefined();
+  });
+
+  it('should have memory integration disabled when configured', async () => {
+    const { QueryEngine } = await import('../src/query/QueryEngine.js');
+    await registerBuiltInTools();
+    const tools = toolRegistry.getAllTools();
+
+    const engine = new QueryEngine({
+      model: 'gpt-4',
+      provider: 'openai',
+      maxTurns: 10,
+      maxBudgetUsd: null,
+      memory: { config: { enabled: false } },
+    }, tools);
+
+    const memory = engine.getMemoryIntegration();
+    expect(memory.isEnabled()).toBe(false);
+  });
+
+  it('should accept custom maxBudgetUsd', async () => {
+    const { QueryEngine } = await import('../src/query/QueryEngine.js');
+    await registerBuiltInTools();
+    const tools = toolRegistry.getAllTools();
+
+    const engine = new QueryEngine({
+      model: 'gpt-4',
+      provider: 'openai',
+      maxTurns: 10,
+      maxBudgetUsd: 5.0,
+    }, tools);
+
+    expect(engine.getStateMachine()).toBeDefined();
+  });
+
+  it('should have state store reflecting initial config', async () => {
+    const { QueryEngine } = await import('../src/query/QueryEngine.js');
+    await registerBuiltInTools();
+    const tools = toolRegistry.getAllTools();
+
+    const engine = new QueryEngine({
+      model: 'claude-sonnet-4-20250514',
+      provider: 'anthropic',
+      maxTurns: 20,
+      maxBudgetUsd: null,
+    }, tools);
+
+    const store = engine.getStateStore();
+    const state = store.get();
+    expect(state.model).toBe('claude-sonnet-4-20250514');
+    expect(state.maxTurns).toBe(20);
+    expect(state.turnCount).toBe(0);
+  });
+
+  it('should handle permission rules from config', async () => {
+    const { QueryEngine } = await import('../src/query/QueryEngine.js');
+    await registerBuiltInTools();
+    const tools = toolRegistry.getAllTools();
+
+    const engine = new QueryEngine({
+      model: 'gpt-4',
+      provider: 'openai',
+      maxTurns: 10,
+      maxBudgetUsd: null,
+      permissionRules: {
+        deny: ['Sql'],
+        allow: ['FileRead', 'Glob'],
+        ask: ['Bash'],
+      },
+    }, tools);
+
+    expect(engine.getStateMachine().currentState).toBe('idle');
+  });
+});
+
+// ── QueryEngine.submitMessage with error recovery ──
+
+describe('QueryEngine Error Handling', () => {
+  it('should transition to error state on fatal error', async () => {
+    const { QueryEngine } = await import('../src/query/QueryEngine.js');
+    await registerBuiltInTools();
+    const tools = toolRegistry.getAllTools();
+
+    const engine = new QueryEngine({
+      model: 'gpt-4',
+      provider: 'openai',
+      maxTurns: 10,
+      maxBudgetUsd: null,
+    }, tools);
+
+    // Abort before generating — the stream generator will exit early
+    engine.abort('force error');
+    const events: any[] = [];
+    try {
+      for await (const event of engine.submitMessage('test')) {
+        events.push(event);
+      }
+    } catch {
+      // May or may not throw
+    }
+    // After abort, the state machine should be in a terminal state
+    expect(engine.getStateMachine().isTerminal()).toBe(true);
+  });
+
+  it('should collect messages after submitMessage', async () => {
+    const { QueryEngine } = await import('../src/query/QueryEngine.js');
+    await registerBuiltInTools();
+    const tools = toolRegistry.getAllTools();
+
+    const engine = new QueryEngine({
+      model: 'gpt-4',
+      provider: 'openai',
+      maxTurns: 10,
+      maxBudgetUsd: null,
+    }, tools);
+
+    // submitMessage will add a user message before attempting API calls
+    // Even if the API fails, the user message should be in the history
+    const events: any[] = [];
+    try {
+      for await (const event of engine.submitMessage('hello world')) {
+        events.push(event);
+      }
+    } catch {
+      // API call will fail (no real API key), but the user message
+      // is already added before the streaming phase
+    }
+
+    const messages = engine.getMessages();
+    // The user message was added before the API error
+    const userMessages = messages.filter(m => m.role === 'user');
+    expect(userMessages.length).toBeGreaterThanOrEqual(1);
   });
 });

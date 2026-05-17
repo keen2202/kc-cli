@@ -363,7 +363,11 @@ export class QueryEngine {
       return;
     }
 
-    // Create tool execution context
+    // Tool execution context. Permission decisions are made by
+    // ToolExecutor.checkPermission() using ToolExecutor.permissionConfig
+    // (populated from the same config at construction time). The arrays
+    // below are empty because this context object's permission fields
+    // are not used for authorization; they exist for interface compliance.
     const context: ToolUseContext = {
       cwd: getState().cwd,
       abortController: this.abortController,

@@ -69,12 +69,12 @@ function matchWildcardPattern(pattern: string, text: string): boolean {
  * Create permission rules from configuration
  */
 export function createRulesFromConfig(
-  source: string,
+  source: import('../types/permissions').PermissionRuleSource,
   behavior: PermissionBehavior,
   rules: string[]
 ): PermissionRule[] {
   return rules.map(ruleString => ({
-    source: source as any,
+    source,
     ruleBehavior: behavior,
     ruleValue: parseRuleString(ruleString),
   }));
