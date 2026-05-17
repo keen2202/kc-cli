@@ -17,6 +17,7 @@ export interface MemoryHeader {
   type: MemoryType;
   createdAt?: number;
   updatedAt?: number;
+  confidence?: 'low' | 'high';
 }
 
 /**

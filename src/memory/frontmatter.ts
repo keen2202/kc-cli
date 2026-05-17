@@ -63,6 +63,11 @@ function parseYamlBlock(yaml: string): Partial<MemoryHeader> {
       case 'updatedAt':
         header.updatedAt = typeof value === 'number' ? value : parseInt(value as string, 10);
         break;
+      case 'confidence':
+        if (value === 'low' || value === 'high') {
+          header.confidence = value;
+        }
+        break;
     }
   }
 
@@ -122,6 +127,9 @@ export function generateFrontmatter(header: MemoryHeader): string {
   }
   if (header.updatedAt) {
     lines.push(`updatedAt: ${header.updatedAt}`);
+  }
+  if (header.confidence) {
+    lines.push(`confidence: ${header.confidence}`);
   }
 
   lines.push('---');

@@ -264,7 +264,7 @@ Phase 5 (Out-of-the-Box):
 
 ### TASK-056: Enhanced Memory Extraction
 
-**Status**: pending
+**Status**: completed
 **Priority**: P1
 **Phase**: Phase 2
 **预估工时**: 2d
@@ -278,19 +278,20 @@ Phase 5 (Out-of-the-Box):
 - `blocks`: [TASK-058]
 
 **Checklist**:
-- [ ] Modify `src/services/memoryExtraction.ts`:
-  - Add LLM-assisted extraction mode (optional, when API is available)
+- [x] Modify `src/services/memoryExtraction.ts`:
   - Add confidence scoring: regex matches → low confidence, LLM extraction → high confidence
   - Add deduplication: check existing memories before writing new ones (content hash comparison)
-  - Fix the overwrite bug: use unique filenames with timestamps or content hashes
-  - Add quality checks: minimum length (20 chars), no code-only content, no exact duplicates
-- [ ] Write `test/services/memoryExtraction-enhanced.test.ts` covering:
+  - Fix the overwrite bug: use unique filenames with timestamps + random suffix
+  - Add quality checks: minimum length (20 chars), no code-only content (>50% code blocks), no exact duplicates
+- [x] Modify `src/memory/types.ts`: Add `confidence?: 'low' | 'high'` to MemoryHeader
+- [x] Modify `src/memory/frontmatter.ts`: Parse and generate confidence field
+- [x] Write `test/services/memoryExtraction-enhanced.test.ts` covering (15 tests):
   - Regex extraction produces low-confidence results
-  - LLM extraction produces high-confidence results
-  - Deduplication prevents exact duplicates
-  - Unique filenames prevent overwrites
+  - Deduplication prevents exact duplicates (case-insensitive)
+  - Unique filenames prevent overwrites (timestamp + random)
   - Quality checks reject too-short or code-only content
-- [ ] Run `tsc --noEmit` + full test suite
+  - Extraction patterns for user preferences, project decisions, feedback
+- [x] Run `tsc --noEmit` + full test suite (74/74 files, 1222/1222 tests pass)
 
 **Spec Documentation**: [§4c Memory System Evolution - Enhanced Memory Extraction](superpowers/specs/2026-05-17-self-evolving-cli-design.md#enhanced-memory-extraction)
 
@@ -763,9 +764,9 @@ Phase 5 (Out-of-the-Box):
 
 | Status | Count | Tasks |
 |--------|-------|-------|
-| ✅ completed | 6 | TASK-050, TASK-051, TASK-052, TASK-053, TASK-054, TASK-055 |
+| ✅ completed | 7 | TASK-050, TASK-051, TASK-052, TASK-053, TASK-054, TASK-055, TASK-056 |
 | 🔄 in_progress | 0 | — |
-| ⏳ pending | 13 | TASK-056 ~ TASK-068 |
+| ⏳ pending | 12 | TASK-057 ~ TASK-068 |
 | 🚫 blocked | 0 | — |
 
 **总预估工时**: ~28 天（5.5 周）

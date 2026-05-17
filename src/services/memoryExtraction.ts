@@ -1,5 +1,6 @@
 // Memory extraction service - background extraction with cursor-based throttling
 
+import { createHash } from 'crypto';
 import type { ChatMessage } from '../types/message';
 import type { AgentState } from '../state/types';
 import type { PostTurnHookContext } from '../hooks/postTurnHooks';
@@ -29,6 +30,65 @@ const state: ExtractionState = {
 let memoryService: FileMemoryService | null = null;
 let projectHash: string | null = null;
 let turnThrottle: number = 3; // Extract every 3 turns
+
+// Content hash cache for deduplication within a session
+const contentHashCache = new Set<string>();
+
+// Quality thresholds
+const MIN_CONTENT_LENGTH = 20;
+const CODE_BLOCK_RATIO_THRESHOLD = 0.5;
+
+/**
+ * Generate a content hash for deduplication
+ */
+function hashContent(content: string): string {
+  return createHash('sha256').update(content.trim().toLowerCase()).digest('hex').slice(0, 16);
+}
+
+/**
+ * Check if content passes quality checks
+ */
+function passesQualityCheck(content: string): { pass: boolean; reason?: string } {
+  const trimmed = content.trim();
+
+  // Minimum length check
+  if (trimmed.length < MIN_CONTENT_LENGTH) {
+    return { pass: false, reason: 'too_short' };
+  }
+
+  // Code-only content check
+  const codeBlockMatches = trimmed.match(/```[\s\S]*?```/g) || [];
+  const codeBlockLength = codeBlockMatches.reduce((sum, block) => sum + block.length, 0);
+  if (trimmed.length > 0 && codeBlockLength / trimmed.length > CODE_BLOCK_RATIO_THRESHOLD) {
+    return { pass: false, reason: 'code_only' };
+  }
+
+  return { pass: true };
+}
+
+/**
+ * Check if content is a duplicate of an already-seen memory
+ */
+function isDuplicate(content: string): boolean {
+  const hash = hashContent(content);
+  return contentHashCache.has(hash);
+}
+
+/**
+ * Register content hash in the dedup cache
+ */
+function registerContentHash(content: string): void {
+  contentHashCache.add(hashContent(content));
+}
+
+/**
+ * Generate a unique filename for a memory to prevent overwrites
+ */
+function uniqueFileName(baseName: string): string {
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).slice(2, 6);
+  return `${baseName}_${timestamp}_${random}.md`;
+}
 
 /**
  * Initialize the memory extraction service
@@ -219,6 +279,11 @@ function extractUserPreferences(content: string): MemoryEntry | null {
     const match = content.match(pattern);
     if (match) {
       const extracted = match[1].trim();
+      const quality = passesQualityCheck(extracted);
+      if (!quality.pass) continue;
+      if (isDuplicate(extracted)) continue;
+
+      registerContentHash(extracted);
       return {
         header: {
           name: 'user_preferences',
@@ -226,10 +291,11 @@ function extractUserPreferences(content: string): MemoryEntry | null {
           type: 'user',
           createdAt: Date.now(),
           updatedAt: Date.now(),
+          confidence: 'low',
         },
         content: extracted,
         filePath: '',
-        fileName: 'user_preferences.md',
+        fileName: uniqueFileName('user_preferences'),
         mtime: Date.now(),
       };
     }
@@ -252,6 +318,11 @@ function extractProjectDecisions(content: string): MemoryEntry | null {
     const match = content.match(pattern);
     if (match) {
       const extracted = match[1].trim();
+      const quality = passesQualityCheck(extracted);
+      if (!quality.pass) continue;
+      if (isDuplicate(extracted)) continue;
+
+      registerContentHash(extracted);
       return {
         header: {
           name: 'project_decisions',
@@ -259,10 +330,11 @@ function extractProjectDecisions(content: string): MemoryEntry | null {
           type: 'project',
           createdAt: Date.now(),
           updatedAt: Date.now(),
+          confidence: 'low',
         },
         content: extracted,
         filePath: '',
-        fileName: 'project_decisions.md',
+        fileName: uniqueFileName('project_decisions'),
         mtime: Date.now(),
       };
     }
@@ -286,6 +358,11 @@ function extractFeedback(content: string): MemoryEntry | null {
     const match = content.match(pattern);
     if (match) {
       const extracted = match[1].trim();
+      const quality = passesQualityCheck(extracted);
+      if (!quality.pass) continue;
+      if (isDuplicate(extracted)) continue;
+
+      registerContentHash(extracted);
       return {
         header: {
           name: 'feedback_lessons',
@@ -293,10 +370,11 @@ function extractFeedback(content: string): MemoryEntry | null {
           type: 'feedback',
           createdAt: Date.now(),
           updatedAt: Date.now(),
+          confidence: 'low',
         },
         content: extracted,
         filePath: '',
-        fileName: 'feedback_lessons.md',
+        fileName: uniqueFileName('feedback_lessons'),
         mtime: Date.now(),
       };
     }
@@ -339,4 +417,5 @@ export function resetExtractionState(): void {
   state.turnsSinceLastExtraction = 0;
   state.inProgress = false;
   state.pendingContext = null;
+  contentHashCache.clear();
 }
