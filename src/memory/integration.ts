@@ -6,6 +6,7 @@ import type { MemoryConfig, MemoryEntry } from '../memory/types';
 import { DEFAULT_MEMORY_CONFIG } from '../memory/types';
 import { findRelevantMemories } from '../memory/relevanceSearch';
 import type { MemoryManifestEntry } from '../memory/types';
+import { extractMemoriesFromMessages as extractHeuristic } from '../services/memoryExtraction';
 
 export interface MemoryIntegrationConfig {
   config?: Partial<MemoryConfig>;
@@ -90,9 +91,9 @@ export class MemoryIntegration {
   }
 
   /**
-   * Post-query: Extract and save memories from conversation
-   * This would typically use an LLM to extract key insights
-   * For now, this is a placeholder for future implementation
+   * Post-query: Extract and save memories from conversation.
+   * Uses heuristic-based extraction to find user preferences, project decisions,
+   * and feedback/lessons from conversation messages.
    */
   async extractMemoriesFromConversation(messages: ChatMessage[]): Promise<void> {
     if (!this.config.enabled || !this.config.autoExtract) {
@@ -100,9 +101,35 @@ export class MemoryIntegration {
     }
 
     try {
-      // Phase 4 milestone: LLM-based memory extraction from conversation turns.
-      // When implemented, throttles via extractionTurnThrottle, analyzes
-      // conversation for key insights, and persists categorized memories.
+      // Extract memories using heuristic patterns
+      const extracted = await extractHeuristic(messages);
+
+      if (extracted.length === 0) {
+        return;
+      }
+
+      // Deduplicate: check if similar memories already exist
+      const manifest = await this.getMemoryManifest();
+      const existingNames = new Set(manifest.map(m => m.fileName));
+
+      let savedCount = 0;
+      for (const memory of extracted) {
+        // Skip if a memory with this name already exists
+        if (existingNames.has(memory.fileName)) {
+          continue;
+        }
+
+        try {
+          await this.saveMemory(memory);
+          savedCount++;
+        } catch (err) {
+          console.warn('[MemoryIntegration] Failed to save extracted memory:', err);
+        }
+      }
+
+      if (savedCount > 0) {
+        console.log(`[MemoryIntegration] Extracted and saved ${savedCount} memories`);
+      }
     } catch (error) {
       console.warn('[MemoryIntegration] Failed to extract memories:', error);
     }

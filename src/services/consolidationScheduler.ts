@@ -2,7 +2,7 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { getProjectMemoryPath, getConsolidateLockPath } from '../memory/paths';
+import { getProjectMemoryPath, getConsolidateLockPath, getSessionBasePath } from '../memory/paths';
 
 interface ConsolidationSchedulerState {
   lastScanAt: number;
@@ -86,14 +86,43 @@ function checkScanThrottle(minMinutes: number): boolean {
  * Gate 3: Check if enough new sessions exist since last consolidation
  */
 async function checkSessionGate(projectHash: string, minSessions: number): Promise<boolean> {
-  // In the full implementation, this would:
-  // 1. Scan session directory for sessions touched since last consolidation
-  // 2. Count unique sessions (excluding current session)
-  // 3. Return true if count >= minSessions
+  const lockPath = getConsolidateLockPath(projectHash);
 
-  // For now, return true to allow consolidation
-  // This can be enhanced with actual session counting
-  return true;
+  // Determine the timestamp to check against
+  let sinceTimestamp: number;
+  try {
+    const stat = await fs.stat(lockPath);
+    sinceTimestamp = stat.mtimeMs;
+  } catch {
+    // No lock file = never consolidated, count all sessions
+    sinceTimestamp = 0;
+  }
+
+  // Scan session directory for sessions modified since last consolidation
+  const sessionDir = getSessionBasePath();
+  try {
+    const files = await fs.readdir(sessionDir);
+    let count = 0;
+
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue;
+
+      const filePath = path.join(sessionDir, file);
+      try {
+        const stat = await fs.stat(filePath);
+        if (stat.mtimeMs > sinceTimestamp) {
+          count++;
+        }
+      } catch {
+        // Skip files we can't stat
+      }
+    }
+
+    return count >= minSessions;
+  } catch {
+    // Session directory doesn't exist or can't be read
+    return false;
+  }
 }
 
 /**

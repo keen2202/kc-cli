@@ -365,13 +365,83 @@ async function deleteMemory(projectHash: string, fileName: string): Promise<void
 async function mergeRelatedMemories(
   projectHash: string
 ): Promise<{ merged: number }> {
-  // In the full implementation, this would:
-  // 1. Group memories by type and topic similarity
-  // 2. Merge memories with overlapping content
-  // 3. Update MEMORY.md index
+  if (!memoryServiceRef) {
+    return { merged: 0 };
+  }
 
-  // For now, return no merges
-  return { merged: 0 };
+  const memories = await memoryServiceRef.listMemories(projectHash);
+  let merged = 0;
+
+  // Group memories by type
+  const byType = new Map<string, typeof memories>();
+  for (const memory of memories) {
+    const type = memory.header.type || 'unknown';
+    if (!byType.has(type)) {
+      byType.set(type, []);
+    }
+    byType.get(type)!.push(memory);
+  }
+
+  // Within each type, find and merge duplicates (same name or very similar content)
+  for (const [type, group] of byType) {
+    if (group.length < 2) continue;
+
+    // Find memories with the same name (duplicates)
+    const byName = new Map<string, typeof group>();
+    for (const memory of group) {
+      const name = memory.header.name;
+      if (!byName.has(name)) {
+        byName.set(name, []);
+      }
+      byName.get(name)!.push(memory);
+    }
+
+    // Merge duplicates: keep the newest, delete the rest
+    for (const [name, duplicates] of byName) {
+      if (duplicates.length < 2) continue;
+
+      // Sort by update time, newest first
+      duplicates.sort((a, b) => (b.header.updatedAt || 0) - (a.header.updatedAt || 0));
+
+      // Keep the first (newest), merge content from others
+      const keeper = duplicates[0];
+      const additionalContent: string[] = [];
+
+      for (let i = 1; i < duplicates.length; i++) {
+        const dup = duplicates[i];
+        // Only merge if content is different
+        if (dup.content.trim() !== keeper.content.trim()) {
+          additionalContent.push(dup.content.trim());
+        }
+        // Delete the duplicate
+        try {
+          await deleteMemory(projectHash, dup.fileName);
+          merged++;
+        } catch (err) {
+          console.warn(`[Consolidation:Merge] Failed to delete duplicate ${dup.fileName}:`, err);
+        }
+      }
+
+      // If we collected additional content, append it to the keeper
+      if (additionalContent.length > 0) {
+        const updatedContent = [keeper.content.trim(), ...additionalContent].join('\n\n');
+        try {
+          await memoryServiceRef!.addMemory(projectHash, {
+            ...keeper,
+            content: updatedContent,
+            header: {
+              ...keeper.header,
+              updatedAt: Date.now(),
+            },
+          });
+        } catch (err) {
+          console.warn(`[Consolidation:Merge] Failed to update merged memory ${keeper.fileName}:`, err);
+        }
+      }
+    }
+  }
+
+  return { merged };
 }
 
 /**

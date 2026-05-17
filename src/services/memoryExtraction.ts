@@ -170,7 +170,7 @@ function checkIfMainAgentWroteMemories(messages: ChatMessage[]): boolean {
  * In the full implementation, this would use a forked LLM agent
  * For now, we implement a heuristic-based extraction
  */
-async function extractMemoriesFromMessages(
+export async function extractMemoriesFromMessages(
   messages: ChatMessage[]
 ): Promise<MemoryEntry[]> {
   const memories: MemoryEntry[] = [];
