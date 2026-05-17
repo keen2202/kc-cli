@@ -16,6 +16,7 @@ export interface AutoConfigResult {
   project: ProjectDetection;
   lspEnabled: boolean;
   sandboxConfigured: boolean;
+  sandboxPolicy: SandboxPolicy;
   summary: string;
 }
 
@@ -41,6 +42,56 @@ const LSP_SERVERS: Record<ProjectType, string | null> = {
   ruby: 'solargraph',
   cpp: 'clangd',
   unknown: null,
+};
+
+// Sandbox policies for each project type
+export interface SandboxPolicy {
+  allowedCommands: string[];
+  allowedPaths: string[];
+  deniedPaths: string[];
+}
+
+const SANDBOX_POLICIES: Record<ProjectType, SandboxPolicy> = {
+  node: {
+    allowedCommands: ['npm', 'npx', 'yarn', 'pnpm', 'node', 'tsc', 'vitest', 'jest'],
+    allowedPaths: ['.', 'node_modules/.bin'],
+    deniedPaths: ['node_modules', '.env', '.env.*'],
+  },
+  python: {
+    allowedCommands: ['python', 'python3', 'pip', 'pip3', 'poetry', 'pytest', 'mypy', 'ruff'],
+    allowedPaths: ['.', '.venv/bin'],
+    deniedPaths: ['.venv', '__pycache__', '.env', '.env.*'],
+  },
+  go: {
+    allowedCommands: ['go', 'gofmt', 'golangci-lint'],
+    allowedPaths: ['.', 'vendor'],
+    deniedPaths: ['vendor', '.env'],
+  },
+  rust: {
+    allowedCommands: ['cargo', 'rustc', 'rustfmt', 'clippy'],
+    allowedPaths: ['.', 'target'],
+    deniedPaths: ['target', '.env'],
+  },
+  java: {
+    allowedCommands: ['mvn', 'gradle', 'java', 'javac'],
+    allowedPaths: ['.', 'target', 'build'],
+    deniedPaths: ['target', 'build', '.env'],
+  },
+  ruby: {
+    allowedCommands: ['ruby', 'gem', 'bundle', 'rake', 'rspec'],
+    allowedPaths: ['.'],
+    deniedPaths: ['vendor', '.env'],
+  },
+  cpp: {
+    allowedCommands: ['gcc', 'g++', 'clang', 'clang++', 'make', 'cmake', 'ninja'],
+    allowedPaths: ['.', 'build'],
+    deniedPaths: ['build', '.env'],
+  },
+  unknown: {
+    allowedCommands: [],
+    allowedPaths: ['.'],
+    deniedPaths: ['.env'],
+  },
 };
 
 /**
@@ -114,6 +165,7 @@ export async function autoConfigure(projectDir: string): Promise<AutoConfigResul
 
   const lspEnabled = project.lspServer !== null;
   const sandboxConfigured = project.type !== 'unknown';
+  const sandboxPolicy = SANDBOX_POLICIES[project.type];
 
   let summary = '';
   if (project.type !== 'unknown') {
@@ -122,7 +174,7 @@ export async function autoConfigure(projectDir: string): Promise<AutoConfigResul
       summary += ` LSP enabled (${project.lspServer}).`;
     }
     if (sandboxConfigured) {
-      summary += ' Sandbox configured.';
+      summary += ` Sandbox configured (${sandboxPolicy.allowedCommands.length} allowed commands).`;
     }
   } else {
     summary = 'No specific project type detected. Using default configuration.';
@@ -132,6 +184,7 @@ export async function autoConfigure(projectDir: string): Promise<AutoConfigResul
     project,
     lspEnabled,
     sandboxConfigured,
+    sandboxPolicy,
     summary,
   };
 }
@@ -148,4 +201,11 @@ export function getRecommendedLsp(type: ProjectType): string | null {
  */
 export function getSupportedProjectTypes(): ProjectType[] {
   return Object.keys(PROJECT_INDICATORS).filter(t => t !== 'unknown') as ProjectType[];
+}
+
+/**
+ * Get sandbox policy for a project type
+ */
+export function getSandboxPolicy(type: ProjectType): SandboxPolicy {
+  return SANDBOX_POLICIES[type];
 }

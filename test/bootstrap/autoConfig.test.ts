@@ -4,6 +4,7 @@ import {
   autoConfigure,
   getRecommendedLsp,
   getSupportedProjectTypes,
+  getSandboxPolicy,
 } from '../../src/bootstrap/autoConfig';
 
 // Mock fs
@@ -159,6 +160,38 @@ describe('Auto-Configuration', () => {
       expect(types).toContain('ruby');
       expect(types).toContain('cpp');
       expect(types).not.toContain('unknown');
+    });
+  });
+
+  describe('getSandboxPolicy', () => {
+    it('should return sandbox policy for Node.js', () => {
+      const policy = getSandboxPolicy('node');
+      expect(policy.allowedCommands).toContain('npm');
+      expect(policy.allowedCommands).toContain('node');
+      expect(policy.deniedPaths).toContain('node_modules');
+    });
+
+    it('should return sandbox policy for Python', () => {
+      const policy = getSandboxPolicy('python');
+      expect(policy.allowedCommands).toContain('python');
+      expect(policy.allowedCommands).toContain('pytest');
+    });
+
+    it('should return sandbox policy for unknown', () => {
+      const policy = getSandboxPolicy('unknown');
+      expect(policy.allowedCommands).toEqual([]);
+    });
+
+    it('should include sandbox policy in autoConfigure result', async () => {
+      (fs.access as any).mockImplementation(async (p: string) => {
+        if (p.includes('package.json')) return undefined;
+        throw new Error('ENOENT');
+      });
+
+      const result = await autoConfigure('/test');
+      expect(result.sandboxPolicy).toBeDefined();
+      expect(result.sandboxPolicy.allowedCommands).toContain('npm');
+      expect(result.sandboxConfigured).toBe(true);
     });
   });
 });

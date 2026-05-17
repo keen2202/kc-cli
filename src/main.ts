@@ -20,6 +20,7 @@ import { formatToolResult, formatBanner, formatSeparator, setBareMode } from './
 import { Spinner } from './ui/spinner';
 import { updateStatus, clearStatus } from './ui/statusline';
 import { MCPClientManager, convertMCPTool, loadMCPConfig } from './mcp';
+import { UserProfileService } from './services/userProfile';
 
 let currentSpinner: Spinner | null = null;
 
@@ -310,6 +311,10 @@ function handleStreamEvent(event: AgentEvent | StreamEvent): void {
         console.error(chalk.red(`\nError: ${event.error.message}`));
         break;
 
+      case 'agent:tool_hint':
+        console.log(chalk.cyan(`  💡 ${event.hint}`));
+        break;
+
       case 'agent:complete':
         console.log();
         break;
@@ -422,6 +427,7 @@ async function handleCommand(
       console.log(chalk.gray('  /clear         - Clear conversation'));
       console.log(chalk.gray('  /mode <mode>   - Set permission mode'));
       console.log(chalk.gray('  /tools         - List available tools'));
+      console.log(chalk.gray('  /level [level] - Show/set user level (beginner|intermediate|advanced)'));
       console.log(chalk.gray('  /status        - Show current status'));
       console.log(chalk.gray('  /exit          - Exit\n'));
       break;
@@ -451,20 +457,40 @@ async function handleCommand(
       console.log();
       break;
 
-    case '/status':
+    case '/status': {
       const state = getState();
+      const profileService = new UserProfileService();
+      await profileService.load();
       console.log(chalk.bold('\n📊 Status:'));
       console.log(chalk.gray(`  CWD: ${state.cwd}`));
       console.log(chalk.gray(`  Mode: ${state.permissionMode}`));
+      console.log(chalk.gray(`  Level: ${profileService.getLevel()}`));
       console.log(chalk.gray(`  Session: ${state.sessionId}`));
       console.log();
       break;
+    }
 
     case '/exit':
       console.log(chalk.yellow('\n👋 Goodbye!'));
       rl.close();
       process.exit(0);
       break;
+
+    case '/level': {
+      const profileService = new UserProfileService();
+      await profileService.load();
+      const levelArg = parts[1];
+      if (levelArg && ['beginner', 'intermediate', 'advanced'].includes(levelArg)) {
+        profileService.updateLevel(levelArg as any);
+        await profileService.persist();
+        console.log(chalk.green(`✓ Level set to: ${levelArg}\n`));
+      } else {
+        const current = profileService.getLevel();
+        console.log(chalk.gray(`Current level: ${current}\n`));
+        console.log(chalk.gray('Usage: /level beginner|intermediate|advanced\n'));
+      }
+      break;
+    }
 
     default:
       console.log(chalk.yellow(`Unknown command: ${cmd}. Type /help for available commands.\n`));

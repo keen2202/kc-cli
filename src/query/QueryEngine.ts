@@ -18,6 +18,8 @@ import type { MemoryIntegrationConfig } from '../memory/integration';
 import { classifyApiError, getRetryDelay, RetryState } from '../services/error-classifier';
 import { CircuitBreakerRegistry } from '../services/circuitBreaker';
 import { StateValidator } from '../services/stateValidator';
+import { UserProfileService } from '../services/userProfile';
+import { getSystemPromptAdaptation, getToolHints } from '../services/behavioralAdapter';
 
 import { v4 as uuidv4 } from 'uuid';
 
@@ -61,6 +63,7 @@ export class QueryEngine {
   private retryState = new RetryState();
   private circuitBreakers = new CircuitBreakerRegistry();
   private stateValidator = new StateValidator();
+  private userProfile: UserProfileService;
 
   // Conversation state
   private messages: ChatMessage[] = [];
@@ -109,6 +112,9 @@ export class QueryEngine {
       alwaysAskRules: rules.ask || [],
       alwaysAllowRules: rules.allow || [],
     });
+
+    // Initialize user profile (level-based adaptation)
+    this.userProfile = new UserProfileService();
   }
 
   /**
@@ -304,10 +310,16 @@ export class QueryEngine {
         );
       }
 
-      // Build system prompt with memory context
-      const systemPrompt = memoryContext
-        ? `${this.config.systemPrompt || ''}\n\n${memoryContext}`
-        : this.config.systemPrompt;
+      // Build system prompt with memory context and level adaptation
+      const level = this.userProfile.getLevel();
+      const levelAdaptation = getSystemPromptAdaptation(level, toolsDef);
+      let systemPrompt = this.config.systemPrompt || '';
+      if (levelAdaptation) {
+        systemPrompt += levelAdaptation;
+      }
+      if (memoryContext) {
+        systemPrompt += `\n\n${memoryContext}`;
+      }
 
       // Call LLM with streaming
       const requestConfig: LLMRequestConfig = {
@@ -460,6 +472,13 @@ export class QueryEngine {
         yield this.createToolCompletedEvent(toolCall, result);
       }
 
+      // Level-based tool hints
+      const level = this.userProfile.getLevel();
+      const hint = getToolHints(toolCall.toolName, level, !result.isError);
+      if (hint) {
+        yield this.createToolHintEvent(toolCall.toolName, hint.hint);
+      }
+
       // Add tool result to messages
       this.messages.push({
         id: uuidv4(),
@@ -605,6 +624,15 @@ export class QueryEngine {
   private createCompleteEvent(): AgentEvent {
     return {
       type: 'agent:complete',
+      timestamp: Date.now(),
+    };
+  }
+
+  private createToolHintEvent(toolName: string, hint: string): AgentEvent {
+    return {
+      type: 'agent:tool_hint',
+      toolName,
+      hint,
       timestamp: Date.now(),
     };
   }

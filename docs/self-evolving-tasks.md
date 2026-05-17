@@ -19,24 +19,24 @@ Phase 1 (Self-Healing Core):
   TASK-053 (Timeout Fix) ───────┤         │
   TASK-054 (Anchor Protection)──┘         │
                                           ↓
-Phase 2 (Memory System):           TASK-060 (Retry Expansion)
+Phase 2 (Memory System):           TASK-059 (Retry Expansion)
   TASK-055 (Wire Up Stubs) ──────────────→ TASK-056 (Enhanced Extraction)
   TASK-057 (Relevance Scoring)            TASK-058 (Quality Pipeline)
 
 Phase 3 (Observability):
-  TASK-061 (Health Check) ←── TASK-051
+  TASK-060 (Health Check) ←── TASK-051
   TASK-062 (Session Metrics)
-  TASK-063 (Auto-Reconnect) ←── TASK-061
+  TASK-061 (Auto-Reconnect) ←── TASK-060
 
 Phase 4 (Behavioral Adaptation):
-  TASK-064 (User Profile) ←── TASK-062
-  TASK-065 (Behavioral Adapter) ←── TASK-064
-  TASK-066 (Param Tuning) ←── TASK-062
+  TASK-063 (User Profile) ←── TASK-062
+  TASK-064 (Behavioral Adapter) ←── TASK-063
+  TASK-065 (Param Tuning) ←── TASK-062
 
 Phase 5 (Out-of-the-Box):
-  TASK-067 (First-Run) ←── TASK-064
-  TASK-068 (Auto-Config)
-  TASK-069 (Tool Hints + Prompt Adapt) ←── TASK-064, TASK-065
+  TASK-066 (First-Run) ←── TASK-063
+  TASK-067 (Auto-Config)
+  TASK-068 (Tool Hints + Prompt Adapt) ←── TASK-063, TASK-064
 ```
 
 ---

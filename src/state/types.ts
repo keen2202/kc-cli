@@ -95,6 +95,7 @@ export type AgentEvent =
   | { type: 'agent:compact_full'; originalTokens: number; compactedTokens: number; timestamp: number }
   | { type: 'agent:error'; error: Error; recoverable: boolean; timestamp: number }
   | { type: 'agent:complete'; timestamp: number }
+  | { type: 'agent:tool_hint'; toolName: string; hint: string; timestamp: number }
   | MultiAgentEvent;
 
 /**
