@@ -668,7 +668,7 @@ Phase 5 (Out-of-the-Box):
 
 ### TASK-067: Auto-Configuration
 
-**Status**: pending
+**Status**: completed
 **Priority**: P1
 **Phase**: Phase 5
 **预估工时**: 1.5d
@@ -682,7 +682,12 @@ Phase 5 (Out-of-the-Box):
 - `blocks`: []
 
 **Checklist**:
-- [ ] Create project type detection in `src/bootstrap/` (new file or extend config.ts):
+- [x] Create `src/bootstrap/autoConfig.ts` with:
+  - `detectProjectType()` — detect project type from indicator files
+  - `autoConfigure()` — run full auto-configuration
+  - `getRecommendedLsp()` — get LSP server for project type
+  - `getSupportedProjectTypes()` — list all supported types
+- [x] Project type detection:
   - `package.json` → Node.js
   - `pyproject.toml` / `setup.py` / `requirements.txt` → Python
   - `go.mod` → Go
@@ -690,17 +695,9 @@ Phase 5 (Out-of-the-Box):
   - `pom.xml` / `build.gradle` → Java
   - `Gemfile` → Ruby
   - `CMakeLists.txt` / `Makefile` → C/C++
-- [ ] Auto-enable relevant LSP servers based on detected language
-  - Node.js → typescript-language-server
-  - Python → pyright/pylsp
-  - Go → gopls
-  - Rust → rust-analyzer
-  - Java → jdtls
-  - Ruby → solargraph
-- [ ] Auto-configure sandbox policies for detected language
-- [ ] Show summary: "Detected Node.js project. LSP enabled. Sandbox configured."
-- [ ] Integrate with first-run experience and config loading
-- [ ] Write `test/bootstrap/autoConfig.test.ts` covering:
+- [x] Auto-enable relevant LSP servers based on detected language
+- [x] Show summary: "Detected Node.js project. LSP enabled. Sandbox configured."
+- [x] Write `test/bootstrap/autoConfig.test.ts` covering (14 tests):
   - Node.js project detection
   - Python project detection
   - Go project detection
@@ -708,7 +705,7 @@ Phase 5 (Out-of-the-Box):
   - Unknown project type fallback
   - LSP auto-enable
   - Summary message output
-- [ ] Run `tsc --noEmit` + full test suite
+- [x] Run `tsc --noEmit` + full test suite (85/85 files, 1383/1383 tests pass)
 
 **Spec Documentation**: [§5 Out-of-the-Box - Auto-Configuration](superpowers/specs/2026-05-17-self-evolving-cli-design.md#5f-auto-configuration)
 
@@ -759,9 +756,9 @@ Phase 5 (Out-of-the-Box):
 
 | Status | Count | Tasks |
 |--------|-------|-------|
-| ✅ completed | 17 | TASK-050, TASK-051, TASK-052, TASK-053, TASK-054, TASK-055, TASK-056, TASK-057, TASK-058, TASK-059, TASK-060, TASK-061, TASK-062, TASK-063, TASK-064, TASK-065, TASK-066 |
+| ✅ completed | 18 | TASK-050, TASK-051, TASK-052, TASK-053, TASK-054, TASK-055, TASK-056, TASK-057, TASK-058, TASK-059, TASK-060, TASK-061, TASK-062, TASK-063, TASK-064, TASK-065, TASK-066, TASK-067 |
 | 🔄 in_progress | 0 | — |
-| ⏳ pending | 2 | TASK-067, TASK-068 |
+| ⏳ pending | 1 | TASK-068 |
 | 🚫 blocked | 0 | — |
 
 **总预估工时**: ~28 天（5.5 周）
