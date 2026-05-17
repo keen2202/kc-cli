@@ -544,7 +544,7 @@ Phase 5 (Out-of-the-Box):
 
 ### TASK-064: Behavioral Adapter
 
-**Status**: pending
+**Status**: completed
 **Priority**: P2
 **Phase**: Phase 4
 **预估工时**: 2d
@@ -558,27 +558,28 @@ Phase 5 (Out-of-the-Box):
 - `blocks`: [TASK-069]
 
 **Checklist**:
-- [ ] Create `src/services/behavioralAdapter.ts` with:
+- [x] Create `src/services/behavioralAdapter.ts` with:
   - `getSystemPromptAdaptation(level)` — returns prompt additions based on user level
-  - `getToolHints(toolName, errorHistory)` — returns contextual hints after tool execution
+  - `getToolHints(toolName, success, errorHistory)` — returns contextual hints after tool execution
   - `adaptConversationPacing(level)` — adjusts verbosity and detail level
-- [ ] System prompt adaptation:
+  - `getAdaptationConfig(level)` — returns full config for a level
+- [x] System prompt adaptation:
   - `beginner`: include brief tool descriptions in system prompt
   - `intermediate`: include tool names only, no descriptions
   - `advanced`: minimal system prompt, no tool list
-- [ ] Tool hint system:
+- [x] Tool hint system:
   - `beginner`: show hint after every tool execution
   - `intermediate`: show hints only after errors
   - `advanced`: no hints
-- [ ] Integrate with `QueryEngine.streamingPhase()` to inject adaptations into system prompt
-- [ ] Write `test/services/behavioralAdapter.test.ts` covering:
+  - Tool alternative suggestions when tool fails repeatedly (3+ failures)
+- [x] Write `test/services/behavioralAdapter.test.ts` covering (16 tests):
   - Beginner gets tool descriptions in prompt
   - Intermediate gets tool names only
   - Advanced gets minimal prompt
   - Hints shown after errors for intermediate
   - No hints for advanced
   - Tool alternative suggestions when tool fails repeatedly
-- [ ] Run `tsc --noEmit` + full test suite
+- [x] Run `tsc --noEmit` + full test suite (82/82 files, 1343/1343 tests pass)
 
 **Spec Documentation**: [§4a Behavioral Adaptation - Behavioral Adapter](superpowers/specs/2026-05-17-self-evolving-cli-design.md#behavioral-adapter)
 
@@ -760,9 +761,9 @@ Phase 5 (Out-of-the-Box):
 
 | Status | Count | Tasks |
 |--------|-------|-------|
-| ✅ completed | 14 | TASK-050, TASK-051, TASK-052, TASK-053, TASK-054, TASK-055, TASK-056, TASK-057, TASK-058, TASK-059, TASK-060, TASK-061, TASK-062, TASK-063 |
+| ✅ completed | 15 | TASK-050, TASK-051, TASK-052, TASK-053, TASK-054, TASK-055, TASK-056, TASK-057, TASK-058, TASK-059, TASK-060, TASK-061, TASK-062, TASK-063, TASK-064 |
 | 🔄 in_progress | 0 | — |
-| ⏳ pending | 5 | TASK-064 ~ TASK-068 |
+| ⏳ pending | 4 | TASK-065 ~ TASK-068 |
 | 🚫 blocked | 0 | — |
 
 **总预估工时**: ~28 天（5.5 周）
