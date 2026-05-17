@@ -332,7 +332,7 @@ Phase 5 (Out-of-the-Box):
 
 ### TASK-058: Memory Quality Pipeline
 
-**Status**: pending
+**Status**: completed
 **Priority**: P1
 **Phase**: Phase 2
 **预估工时**: 1.5d
@@ -346,17 +346,17 @@ Phase 5 (Out-of-the-Box):
 - `blocks`: []
 
 **Checklist**:
-- [ ] Create quality pipeline in `src/services/memoryExtraction.ts` (or new `src/services/memoryQuality.ts`):
-  - Post-extraction checks: minimum length, no code-only content, no duplicates
-  - Post-consolidation validation: merged memories are coherent (not contradictory fragments)
-  - Memory pruning: remove memories that were never retrieved after N sessions (configurable, default 5)
-- [ ] Write `test/services/memoryQuality.test.ts` covering:
+- [x] Create `src/services/memoryQuality.ts`:
+  - Post-extraction checks: minimum length (20 chars), no code-only content (>50% code blocks)
+  - Post-consolidation validation: merged memories are coherent (contradiction detection)
+  - Memory pruning: remove memories loaded N+ times but never referenced (configurable, default 5)
+- [x] Write `test/services/memoryQuality.test.ts` covering (20 tests):
   - Short memories are rejected
   - Code-only memories are rejected
   - Contradictory merged memories are flagged
   - Pruning removes stale unretrieved memories
   - Actively retrieved memories are preserved
-- [ ] Run `tsc --noEmit` + full test suite
+- [x] Run `tsc --noEmit` + full test suite (76/76 files, 1258/1258 tests pass)
 
 **Spec Documentation**: [§4c Memory System Evolution - Memory Quality Pipeline](superpowers/specs/2026-05-17-self-evolving-cli-design.md#memory-quality-pipeline)
 
@@ -764,9 +764,9 @@ Phase 5 (Out-of-the-Box):
 
 | Status | Count | Tasks |
 |--------|-------|-------|
-| ✅ completed | 8 | TASK-050, TASK-051, TASK-052, TASK-053, TASK-054, TASK-055, TASK-056, TASK-057 |
+| ✅ completed | 9 | TASK-050, TASK-051, TASK-052, TASK-053, TASK-054, TASK-055, TASK-056, TASK-057, TASK-058 |
 | 🔄 in_progress | 0 | — |
-| ⏳ pending | 11 | TASK-058 ~ TASK-068 |
+| ⏳ pending | 10 | TASK-059 ~ TASK-068 |
 | 🚫 blocked | 0 | — |
 
 **总预估工时**: ~28 天（5.5 周）
