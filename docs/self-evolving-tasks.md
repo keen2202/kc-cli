@@ -713,7 +713,7 @@ Phase 5 (Out-of-the-Box):
 
 ### TASK-068: Level-Based Tool Hints and System Prompt Adaptation
 
-**Status**: pending
+**Status**: completed
 **Priority**: P1
 **Phase**: Phase 5
 **预估工时**: 1d
@@ -727,17 +727,17 @@ Phase 5 (Out-of-the-Box):
 - `blocks`: []
 
 **Checklist**:
-- [ ] Modify `src/query/QueryEngine.ts`:
+- [x] Modify `src/query/QueryEngine.ts`:
   - Load user profile at session start
   - Inject system prompt adaptation from `BehavioralAdapter` into streaming phase
   - After tool execution, append level-appropriate hints from `BehavioralAdapter`
-- [ ] Modify `src/main.ts`:
+- [x] Modify `src/main.ts`:
   - Add `/level beginner|intermediate|advanced` REPL command
   - Show current level on `/status`
-- [ ] Modify `src/bootstrap/config.ts`:
+- [x] Modify `src/bootstrap/config.ts`:
   - Add `userLevel` field to config schema
   - Default to `beginner`
-- [ ] Write `test/query/level-adaptation.test.ts` covering:
+- [x] Write `test/query/level-adaptation.test.ts` covering:
   - Beginner gets tool descriptions in system prompt
   - Intermediate gets tool names only
   - Advanced gets minimal prompt
@@ -746,7 +746,7 @@ Phase 5 (Out-of-the-Box):
   - Tool hints appear for beginner after every tool
   - Tool hints appear for intermediate only after errors
   - No tool hints for advanced
-- [ ] Run `tsc --noEmit` + full test suite
+- [x] Run `tsc --noEmit` + full test suite
 
 **Spec Documentation**: [§5 Out-of-the-Box - Tool Hints + System Prompt Adaptation](superpowers/specs/2026-05-17-self-evolving-cli-design.md#5b-tool-hint-system-level-based)
 
@@ -756,9 +756,9 @@ Phase 5 (Out-of-the-Box):
 
 | Status | Count | Tasks |
 |--------|-------|-------|
-| ✅ completed | 18 | TASK-050, TASK-051, TASK-052, TASK-053, TASK-054, TASK-055, TASK-056, TASK-057, TASK-058, TASK-059, TASK-060, TASK-061, TASK-062, TASK-063, TASK-064, TASK-065, TASK-066, TASK-067 |
+| ✅ completed | 19 | TASK-050, TASK-051, TASK-052, TASK-053, TASK-054, TASK-055, TASK-056, TASK-057, TASK-058, TASK-059, TASK-060, TASK-061, TASK-062, TASK-063, TASK-064, TASK-065, TASK-066, TASK-067, TASK-068 |
 | 🔄 in_progress | 0 | — |
-| ⏳ pending | 1 | TASK-068 |
+| ⏳ pending | 0 | — |
 | 🚫 blocked | 0 | — |
 
 **总预估工时**: ~28 天（5.5 周）
