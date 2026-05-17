@@ -3,6 +3,15 @@
 import type { MemoryManifestEntry, MemoryEntry } from './types';
 import { getAgeText } from '../utils/format';
 
+// Feedback tracking: maps memory fileName to reference count
+const feedbackMap = new Map<string, { loaded: number; referenced: number }>();
+
+// Score cache within a session: key = `${query}:${fileName}`, value = score
+const scoreCache = new Map<string, number>();
+
+// Configurable stale threshold (default 30 days)
+let staleThresholdDays = 30;
+
 /**
  * Find relevant memories using heuristic keyword matching
  * Returns up to `limit` most relevant memory file names
@@ -25,7 +34,45 @@ export function findRelevantMemories(
   scored.sort((a, b) => b.score - a.score);
 
   // Return top N
-  return scored.slice(0, limit).map((s) => s.fileName);
+  const result = scored.slice(0, limit).map((s) => s.fileName);
+
+  // Track loaded memories for feedback
+  for (const fileName of result) {
+    const entry = feedbackMap.get(fileName) || { loaded: 0, referenced: 0 };
+    entry.loaded++;
+    feedbackMap.set(fileName, entry);
+  }
+
+  return result;
+}
+
+/**
+ * Mark memories as referenced in the conversation (feedback signal)
+ * Call this when the assistant's response clearly uses information from a memory
+ */
+export function markMemoriesReferenced(fileNames: string[]): void {
+  for (const fileName of fileNames) {
+    const entry = feedbackMap.get(fileName) || { loaded: 0, referenced: 0 };
+    entry.referenced++;
+    feedbackMap.set(fileName, entry);
+  }
+}
+
+/**
+ * Get feedback score adjustment for a memory
+ * Returns a multiplier: referenced memories get a boost, unreferenced get a penalty
+ */
+function getFeedbackMultiplier(fileName: string): number {
+  const entry = feedbackMap.get(fileName);
+  if (!entry || entry.loaded === 0) return 1.0;
+
+  const referenceRate = entry.referenced / entry.loaded;
+
+  // High reference rate → boost, low reference rate → penalty
+  if (referenceRate >= 0.7) return 1.3;  // Frequently referenced: 30% boost
+  if (referenceRate >= 0.3) return 1.0;  // Sometimes referenced: neutral
+  if (entry.loaded >= 3) return 0.7;     // Loaded 3+ times but rarely referenced: 30% penalty
+  return 1.0;
 }
 
 /**
@@ -36,6 +83,13 @@ export function calculateRelevanceScore(
   memory: MemoryManifestEntry,
   recentTools?: string[]
 ): number {
+  // Check cache first
+  const cacheKey = `${query}:${memory.fileName}`;
+  const cached = scoreCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+
   let score = 0;
 
   const queryLower = query.toLowerCase();
@@ -95,22 +149,65 @@ export function calculateRelevanceScore(
     score += 1; // Within a month
   }
 
+  // Apply feedback multiplier
+  score *= getFeedbackMultiplier(memory.fileName);
+
+  // Cache the score
+  scoreCache.set(cacheKey, score);
+
   return score;
 }
 
 /**
  * Get freshness warning text for a memory file
- * Returns a warning if the memory is stale (>1 day old)
+ * Returns a warning if the memory is stale (older than staleThresholdDays)
  */
 export function getMemoryFreshnessText(mtime: number): string | null {
   const ageDays = (Date.now() - mtime) / (1000 * 60 * 60 * 24);
 
-  if (ageDays < 1) {
-    return null; // Fresh, no warning needed
+  if (ageDays < staleThresholdDays) {
+    return null; // Fresh enough, no warning needed
   }
 
   const ageText = getAgeText(mtime);
   return `(Last updated: ${ageText}. Verify against current state before relying on this information.)`;
+}
+
+/**
+ * Set the stale threshold in days
+ */
+export function setStaleThreshold(days: number): void {
+  staleThresholdDays = days;
+}
+
+/**
+ * Get the current stale threshold in days
+ */
+export function getStaleThreshold(): number {
+  return staleThresholdDays;
+}
+
+/**
+ * Invalidate score cache (call when new memories are written)
+ */
+export function invalidateScoreCache(): void {
+  scoreCache.clear();
+}
+
+/**
+ * Reset all adaptive state (for testing)
+ */
+export function resetRelevanceState(): void {
+  feedbackMap.clear();
+  scoreCache.clear();
+  staleThresholdDays = 30;
+}
+
+/**
+ * Get feedback stats for a memory (for testing/debugging)
+ */
+export function getFeedbackStats(fileName: string): { loaded: number; referenced: number } | null {
+  return feedbackMap.get(fileName) || null;
 }
 
 /**

@@ -299,7 +299,7 @@ Phase 5 (Out-of-the-Box):
 
 ### TASK-057: Adaptive Relevance Scoring
 
-**Status**: pending
+**Status**: completed
 **Priority**: P1
 **Phase**: Phase 2
 **预估工时**: 1.5d
@@ -313,18 +313,18 @@ Phase 5 (Out-of-the-Box):
 - `blocks`: [TASK-058]
 
 **Checklist**:
-- [ ] Modify `src/memory/relevanceSearch.ts`:
+- [x] Modify `src/memory/relevanceSearch.ts`:
   - Track which loaded memories were actually referenced in the conversation (feedback signal)
   - Adjust scoring weights based on feedback: memories that were loaded but never referenced get lower future scores
   - Fix stale threshold: change from 1 day to configurable (default 30 days)
   - Add caching of computed scores within a session (invalidate on new memory write)
-- [ ] Write `test/memory/relevanceSearch-enhanced.test.ts` covering:
+- [x] Write `test/memory/relevanceSearch-enhanced.test.ts` covering (16 tests):
   - Referenced memories get score boost in future searches
   - Unreferenced memories get score penalty
   - Stale threshold uses configurable value (not hardcoded 1 day)
   - Score caching works within session
   - Cache invalidation on new memory
-- [ ] Run `tsc --noEmit` + full test suite
+- [x] Run `tsc --noEmit` + full test suite (75/75 files, 1238/1238 tests pass)
 
 **Spec Documentation**: [§4c Memory System Evolution - Adaptive Relevance Scoring](superpowers/specs/2026-05-17-self-evolving-cli-design.md#adaptive-relevance-scoring)
 
@@ -764,9 +764,9 @@ Phase 5 (Out-of-the-Box):
 
 | Status | Count | Tasks |
 |--------|-------|-------|
-| ✅ completed | 7 | TASK-050, TASK-051, TASK-052, TASK-053, TASK-054, TASK-055, TASK-056 |
+| ✅ completed | 8 | TASK-050, TASK-051, TASK-052, TASK-053, TASK-054, TASK-055, TASK-056, TASK-057 |
 | 🔄 in_progress | 0 | — |
-| ⏳ pending | 12 | TASK-057 ~ TASK-068 |
+| ⏳ pending | 11 | TASK-058 ~ TASK-068 |
 | 🚫 blocked | 0 | — |
 
 **总预估工时**: ~28 天（5.5 周）
