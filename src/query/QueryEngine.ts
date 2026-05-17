@@ -16,6 +16,8 @@ import type { BaseApiClient, LLMStreamEvent as APIStreamEvent, LLMRequestConfig 
 import { MemoryIntegration, createMemoryIntegration } from '../memory/integration';
 import type { MemoryIntegrationConfig } from '../memory/integration';
 import { classifyApiError, getRetryDelay, RetryState } from '../services/error-classifier';
+import { CircuitBreakerRegistry } from '../services/circuitBreaker';
+import { StateValidator } from '../services/stateValidator';
 
 import { v4 as uuidv4 } from 'uuid';
 
@@ -57,6 +59,8 @@ export class QueryEngine {
   private toolExecutor: ToolExecutor;
   private compactFailureCount = 0;
   private retryState = new RetryState();
+  private circuitBreakers = new CircuitBreakerRegistry();
+  private stateValidator = new StateValidator();
 
   // Conversation state
   private messages: ChatMessage[] = [];
@@ -199,6 +203,14 @@ export class QueryEngine {
     }
 
     try {
+      // Validate state before compaction
+      const validation = this.stateValidator.validate(this.messages);
+      if (!validation.valid) {
+        console.warn(`State validation found ${validation.issues.length} issues before compaction, repairing...`);
+        this.messages = this.stateValidator.repair(this.messages, validation.issues);
+        this.cachedTokenEstimate = null; // Invalidate cache after repair
+      }
+
       // Try microcompact first (cheap, no LLM)
       const result = microcompact(this.messages);
 
@@ -286,6 +298,14 @@ export class QueryEngine {
     let fullContent = '';
     const toolCalls: ToolCall[] = [];
 
+    // Check circuit breaker before making API call
+    const apiBreaker = this.circuitBreakers.getBreaker('api');
+    if (!apiBreaker.canExecute()) {
+      console.warn(`API circuit breaker is ${apiBreaker.getState()}, skipping request`);
+      yield this.createErrorEvent(new Error(`API service is temporarily unavailable (circuit breaker ${apiBreaker.getState()})`));
+      return;
+    }
+
     try {
       for await (const event of this.apiClient.streamChat(requestConfig)) {
         if (event.type === 'text_delta') {
@@ -318,14 +338,31 @@ export class QueryEngine {
       // Update state
       this.stateStore.incrementTurn();
 
+      // Reset retry counter on success
+      this.retryState.reset('streaming');
+
+      // Record success with circuit breaker
+      apiBreaker.recordSuccess();
+
       yield this.createTurnCompleteEvent(assistantMsg);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       const classified = classifyApiError(err);
 
+      // Record failure with circuit breaker for transient errors
+      if (classified.retryable) {
+        apiBreaker.recordFailure();
+      }
+
+      // Handle degraded errors: log warning and continue without retrying
+      if (classified.errorClass === 'degraded') {
+        console.warn(`Degraded error in streaming: ${err.message}`);
+        return;
+      }
+
       if (classified.retryable && this.retryState.canRetry('streaming')) {
         const attempt = this.retryState.incrementAttempt('streaming');
-        const delay = getRetryDelay(attempt - 1);
+        const delay = classified.retryAfterMs ?? getRetryDelay(attempt - 1);
         yield this.createErrorEvent(new Error(`Retrying (${attempt}/${3}) after ${classified.context}: ${err.message}`));
         await new Promise(resolve => setTimeout(resolve, delay));
         // Re-enter streaming phase
@@ -647,18 +684,61 @@ export class QueryEngine {
    * Enforce message history limit to prevent unbounded memory growth.
    * Removes oldest messages when limit is exceeded.
    */
+  /**
+   * Trim messages to stay within the max limit.
+   * Protects anchor messages (system prompt + first user message) from being trimmed.
+   */
   private trimMessages(): void {
     const maxMessages = this.config.maxMessages ?? QueryEngine.DEFAULT_MAX_MESSAGES;
 
-    if (this.messages.length > maxMessages) {
-      // Remove only the excess messages, keep most recent
-      const excess = this.messages.length - maxMessages;
-      this.messages = this.messages.slice(excess);
-
-      // Invalidate cached estimate after trim
-      this.cachedTokenEstimate = null;
-
-      console.warn(`[QueryEngine] Message history exceeded ${maxMessages} limit, trimmed ${excess} messages`);
+    if (this.messages.length <= maxMessages) {
+      return;
     }
+
+    // Find anchor indices: system prompt and first user message
+    const anchorIndices = new Set<number>();
+    for (let i = 0; i < this.messages.length; i++) {
+      if (this.messages[i].role === 'system') {
+        anchorIndices.add(i);
+        break; // Only the first system message is an anchor
+      }
+    }
+    for (let i = 0; i < this.messages.length; i++) {
+      if (this.messages[i].role === 'user') {
+        anchorIndices.add(i);
+        break; // Only the first user message is an anchor
+      }
+    }
+
+    const excess = this.messages.length - maxMessages;
+
+    if (anchorIndices.size === 0) {
+      // No anchors, trim from the front
+      this.messages = this.messages.slice(excess);
+    } else {
+      // Trim non-anchor messages from oldest first, skipping anchors
+      const toRemove = new Set<number>();
+      let removed = 0;
+
+      for (let i = 0; i < this.messages.length && removed < excess; i++) {
+        if (!anchorIndices.has(i)) {
+          toRemove.add(i);
+          removed++;
+        }
+      }
+
+      // If we couldn't remove enough non-anchor messages, we have to trim anyway
+      // (this shouldn't happen in practice as anchors are at the start)
+      if (removed < excess) {
+        this.messages = this.messages.slice(excess);
+      } else {
+        this.messages = this.messages.filter((_, idx) => !toRemove.has(idx));
+      }
+    }
+
+    // Invalidate cached estimate after trim
+    this.cachedTokenEstimate = null;
+
+    console.warn(`[QueryEngine] Message history exceeded ${maxMessages} limit, trimmed ${excess} messages`);
   }
 }

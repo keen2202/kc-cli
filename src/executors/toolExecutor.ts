@@ -157,7 +157,7 @@ export class ToolExecutor {
         ...context,
         sandbox: this.sandboxManager,
       };
-      const result = await this.executeWithTimeout(tool, effectiveInputWithWrap, enrichedContext, timeoutMs, toolCall.toolName);
+      const result = await this.executeWithTimeout(tool, effectiveInputWithWrap, enrichedContext, timeoutMs, toolCall.toolName, toolCall.id);
 
       // 4b. Add sandbox metadata to result
       if (result.metadata) {
@@ -190,14 +190,16 @@ export class ToolExecutor {
   }
 
   /**
-   * Execute tool with timeout protection using AbortSignal
+   * Execute tool with timeout protection using AbortSignal.
+   * Returns a timeout result with the original toolCallId and timedOut flag.
    */
   private async executeWithTimeout(
     tool: ToolDefinition,
     input: Record<string, unknown>,
     context: ToolUseContext,
     timeoutMs: number,
-    toolName: string
+    toolName: string,
+    toolCallId?: string
   ): Promise<ToolResult> {
     // Create abort controller for this tool execution
     const toolAbortController = new AbortController();
@@ -238,11 +240,20 @@ export class ToolExecutor {
       }
       const toolResult = result as ToolResult;
       return {
-        toolCallId: '',
+        toolCallId: toolCallId || '',
         output: toolResult.output ?? '',
         isError: toolResult.isError || false,
       };
     } catch (error) {
+      // If timed out, return a timeout result instead of throwing
+      if (timedOut) {
+        return {
+          toolCallId: toolCallId || '',
+          output: `Tool '${toolName}' timed out after ${timeoutMs / 1000}s`,
+          isError: true,
+          timedOut: true,
+        };
+      }
       throw error;
     }
   }

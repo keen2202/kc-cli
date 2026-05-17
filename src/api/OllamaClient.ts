@@ -1,6 +1,6 @@
 // Ollama API Client (Local LLM Server)
 
-import { BaseApiClient } from './BaseApiClient';
+import { BaseApiClient, ApiError } from './BaseApiClient';
 import type { LLMStreamEvent, LLMRequestConfig, LLMResponse, TokenUsage } from './BaseApiClient';
 import type { ToolCall } from '../types/message';
 
@@ -36,7 +36,7 @@ export class OllamaClient extends BaseApiClient {
 
       if (!response.ok) {
         const errorText = await response.text();
-        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'Ollama API error');
+        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'Ollama API error', response);
       }
 
       const data = await response.json();
@@ -64,7 +64,7 @@ export class OllamaClient extends BaseApiClient {
 
       if (!response.ok) {
         const errorText = await response.text();
-        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'Ollama API error');
+        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'Ollama API error', response);
       }
 
       if (!response.body) {
@@ -285,20 +285,20 @@ export class OllamaClient extends BaseApiClient {
   /**
    * Handle API errors with Ollama-specific handling
    */
-  protected handleApiError(error: unknown, context: string): never {
+  protected handleApiError(error: unknown, context: string, response?: Response): never {
     if (error instanceof Error) {
       const message = error.message;
 
       // Connection refused - Ollama not running
       if (message.includes('ECONNREFUSED') || message.includes('fetch failed')) {
-        throw new Error(`${context}: Cannot connect to Ollama at ${this.baseUrl}. Is Ollama running?`);
+        throw new ApiError(`${context}: Cannot connect to Ollama at ${this.baseUrl}. Is Ollama running?`);
       }
 
       if (message.includes('model') && message.includes('not found')) {
-        throw new Error(`${context}: Model '${this.model}' not found. Run 'ollama pull ${this.model}' first`);
+        throw new ApiError(`${context}: Model '${this.model}' not found. Run 'ollama pull ${this.model}' first`, 404);
       }
     }
 
-    super.handleApiError(error, context);
+    super.handleApiError(error, context, response);
   }
 }

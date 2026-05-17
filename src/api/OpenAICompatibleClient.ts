@@ -1,7 +1,7 @@
 // OpenAI Compatible API Client
 // Supports: OpenAI (GPT), Qwen (DashScope), GLM (Zhipu AI), and other OpenAI-compatible APIs
 
-import { BaseApiClient } from './BaseApiClient';
+import { BaseApiClient, ApiError } from './BaseApiClient';
 import type { LLMStreamEvent, LLMRequestConfig, LLMResponse, TokenUsage } from './BaseApiClient';
 import type { ToolCall } from '../types/message';
 
@@ -44,7 +44,7 @@ export class OpenAICompatibleClient extends BaseApiClient {
 
       if (!response.ok) {
         const errorText = await response.text();
-        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'OpenAI Compatible API error');
+        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'OpenAI Compatible API error', response);
       }
 
       const data = await response.json();
@@ -76,7 +76,7 @@ export class OpenAICompatibleClient extends BaseApiClient {
 
       if (!response.ok) {
         const errorText = await response.text();
-        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'OpenAI Compatible API error');
+        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'OpenAI Compatible API error', response);
       }
 
       if (!response.body) {
@@ -328,28 +328,28 @@ export class OpenAICompatibleClient extends BaseApiClient {
   /**
    * Handle API errors with provider-specific handling
    */
-  protected handleApiError(error: unknown, context: string): never {
+  protected handleApiError(error: unknown, context: string, response?: Response): never {
     if (error instanceof Error) {
       const message = error.message;
 
       // Common error patterns
       if (message.includes('401') || message.includes('Unauthorized')) {
-        throw new Error(`${context}: Invalid API key`);
+        throw new ApiError(`${context}: Invalid API key`, 401);
       }
 
       if (message.includes('429') || message.includes('rate limit')) {
-        throw new Error(`${context}: Rate limit exceeded`);
+        throw new ApiError(`${context}: Rate limit exceeded`, 429);
       }
 
       if (message.includes('403') || message.includes('Forbidden')) {
-        throw new Error(`${context}: Access forbidden. Check API key permissions`);
+        throw new ApiError(`${context}: Access forbidden. Check API key permissions`, 403);
       }
 
       if (message.includes('model_not_found') || message.includes('invalid_model')) {
-        throw new Error(`${context}: Model '${this.model}' not found`);
+        throw new ApiError(`${context}: Model '${this.model}' not found`, 404);
       }
     }
 
-    super.handleApiError(error, context);
+    super.handleApiError(error, context, response);
   }
 }

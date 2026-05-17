@@ -34,6 +34,7 @@ export interface ToolResult<T = unknown> {
   isError: boolean;
   message?: string;
   metadata?: Record<string, unknown>;
+  timedOut?: boolean; // True if the tool execution timed out
 }
 
 export interface ToolDefinition<Input = Record<string, unknown>, Output = unknown, Progress = unknown> {

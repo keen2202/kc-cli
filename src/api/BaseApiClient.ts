@@ -37,6 +37,21 @@ export interface LLMResponse {
 }
 
 /**
+ * Structured API error with HTTP metadata for error classification.
+ */
+export class ApiError extends Error {
+  statusCode?: number;
+  responseHeaders?: Record<string, string>;
+
+  constructor(message: string, statusCode?: number, responseHeaders?: Record<string, string>) {
+    super(message);
+    this.name = 'ApiError';
+    this.statusCode = statusCode;
+    this.responseHeaders = responseHeaders;
+  }
+}
+
+/**
  * Abstract base class for all LLM API clients.
  * Provides a unified interface for streaming and non-streaming responses.
  */
@@ -181,12 +196,21 @@ export abstract class BaseApiClient {
 
   /**
    * Handle API errors
-   * Subclasses can override for provider-specific error handling
+   * When a Response is provided, extracts status code and headers into ApiError.
+   * Subclasses can override for provider-specific error handling.
    */
-  protected handleApiError(error: unknown, context: string): never {
-    if (error instanceof Error) {
-      throw new Error(`${context}: ${error.message}`);
+  protected handleApiError(error: unknown, context: string, response?: Response): never {
+    const headers: Record<string, string> = {};
+    let statusCode: number | undefined;
+
+    if (response) {
+      statusCode = response.status;
+      response.headers.forEach((value, key) => {
+        headers[key.toLowerCase()] = value;
+      });
     }
-    throw new Error(`${context}: Unknown error`);
+
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ApiError(`${context}: ${message}`, statusCode, headers);
   }
 }

@@ -1,6 +1,6 @@
 // Anthropic Claude API Client
 
-import { BaseApiClient } from './BaseApiClient';
+import { BaseApiClient, ApiError } from './BaseApiClient';
 import type { LLMStreamEvent, LLMRequestConfig, LLMResponse, TokenUsage } from './BaseApiClient';
 import type { ToolCall } from '../types/message';
 
@@ -40,7 +40,7 @@ export class AnthropicClient extends BaseApiClient {
 
       if (!response.ok) {
         const errorText = await response.text();
-        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'Anthropic API error');
+        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'Anthropic API error', response);
       }
 
       const data = await response.json();
@@ -70,7 +70,7 @@ export class AnthropicClient extends BaseApiClient {
 
       if (!response.ok) {
         const errorText = await response.text();
-        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'Anthropic API error');
+        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'Anthropic API error', response);
       }
 
       if (!response.body) {
@@ -456,23 +456,23 @@ export class AnthropicClient extends BaseApiClient {
   /**
    * Handle API errors with Anthropic-specific handling
    */
-  protected handleApiError(error: unknown, context: string): never {
+  protected handleApiError(error: unknown, context: string, response?: Response): never {
     if (error instanceof Error) {
       const message = error.message;
 
       if (message.includes('401') || message.includes('invalid_api_key')) {
-        throw new Error(`${context}: Invalid API key`);
+        throw new ApiError(`${context}: Invalid API key`, 401);
       }
 
       if (message.includes('429') || message.includes('rate_limit')) {
-        throw new Error(`${context}: Rate limit exceeded`);
+        throw new ApiError(`${context}: Rate limit exceeded`, 429);
       }
 
       if (message.includes('overloaded_error')) {
-        throw new Error(`${context}: Anthropic API is currently overloaded, please try again`);
+        throw new ApiError(`${context}: Anthropic API is currently overloaded, please try again`, 529);
       }
     }
 
-    super.handleApiError(error, context);
+    super.handleApiError(error, context, response);
   }
 }

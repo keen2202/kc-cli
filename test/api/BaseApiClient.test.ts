@@ -227,7 +227,7 @@ describe('BaseApiClient', () => {
     });
 
     it('should throw for non-Error', () => {
-      expect(() => client.testHandleApiError('string error', 'Stream')).toThrow('Stream: Unknown error');
+      expect(() => client.testHandleApiError('string error', 'Stream')).toThrow('Stream: string error');
     });
   });
 

@@ -1,7 +1,7 @@
 // API Client Factory and Index
 // Creates appropriate client based on provider configuration
 
-export { BaseApiClient } from './BaseApiClient';
+export { BaseApiClient, ApiError } from './BaseApiClient';
 export type {
   LLMStreamEvent,
   TokenUsage,
