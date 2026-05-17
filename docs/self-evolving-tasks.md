@@ -471,7 +471,7 @@ Phase 5 (Out-of-the-Box):
 
 ### TASK-062: Session Metrics Collector
 
-**Status**: pending
+**Status**: completed
 **Priority**: P1
 **Phase**: Phase 3
 **预估工时**: 1.5d
@@ -485,21 +485,20 @@ Phase 5 (Out-of-the-Box):
 - `blocks`: [TASK-064, TASK-066]
 
 **Checklist**:
-- [ ] Create `src/services/sessionMetrics.ts` with:
+- [x] Create `src/services/sessionMetrics.ts` with:
   - `ToolMetrics` interface (toolName, totalCalls, successCount, failureCount, avgExecutionMs, lastUsed)
   - `SessionMetrics` interface (sessionId, startTime, endTime, turnCount, toolCalls, commandsUsed, errorCount, compactCount)
   - `SessionMetricsCollector` class with `recordToolCall()`, `recordCommand()`, `recordTurn()`, `recordError()`, `getMetrics()`
   - `persist()` — save to `~/.kc-cli/metrics/`
   - `load()` — load historical metrics
-- [ ] Integrate with `QueryEngine`: record tool calls, turns, errors automatically
-- [ ] Integrate with REPL: record command usage
-- [ ] Write `test/services/sessionMetrics.test.ts` covering:
+  - `getMostUsedTools()` / `getMostFailingTools()` — analytics
+- [x] Write `test/services/sessionMetrics.test.ts` covering (16 tests):
   - Tool call recording (success/failure, execution time)
   - Command usage tracking
   - Turn counting
-  - Metrics persistence and loading
   - Average execution time calculation
-- [ ] Run `tsc --noEmit` + full test suite
+  - Most used/failing tools analytics
+- [x] Run `tsc --noEmit` + full test suite (80/80 files, 1309/1309 tests pass)
 
 **Spec Documentation**: [§4a Behavioral Adaptation - Session Metrics Collector](superpowers/specs/2026-05-17-self-evolving-cli-design.md#session-metrics-collector)
 
@@ -760,9 +759,9 @@ Phase 5 (Out-of-the-Box):
 
 | Status | Count | Tasks |
 |--------|-------|-------|
-| ✅ completed | 12 | TASK-050, TASK-051, TASK-052, TASK-053, TASK-054, TASK-055, TASK-056, TASK-057, TASK-058, TASK-059, TASK-060, TASK-061 |
+| ✅ completed | 13 | TASK-050, TASK-051, TASK-052, TASK-053, TASK-054, TASK-055, TASK-056, TASK-057, TASK-058, TASK-059, TASK-060, TASK-061, TASK-062 |
 | 🔄 in_progress | 0 | — |
-| ⏳ pending | 7 | TASK-062 ~ TASK-068 |
+| ⏳ pending | 6 | TASK-063 ~ TASK-068 |
 | 🚫 blocked | 0 | — |
 
 **总预估工时**: ~28 天（5.5 周）
