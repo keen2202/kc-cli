@@ -43,9 +43,13 @@ tmp/
 temp/
 *.tmp
 
-# Superpowers plans/specs (local only)
-docs/superpowers/
+# Documentation (generated/internal docs)
+docs/
 
 # Memory and session data (contains conversation transcripts)
-~/.kc-cli/memory/
-~/.kc-cli/sessions/
+.kc-cli/memory/
+.kc-cli/sessions/
+
+# Generated reports (one-off review/audit documents)
+REVIEW-REPORT.md
+*-REPORT.md
