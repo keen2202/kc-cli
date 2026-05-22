@@ -7,6 +7,9 @@
 
 import chalk from 'chalk';
 
+// Pre-compiled regex for ANSI escape stripping (reused across render calls)
+const ANSI_STRIP_REGEX = /\x1B\[[0-9;]*m/g;
+
 // ─── Types ───
 
 export interface ModelInfo {
@@ -179,7 +182,7 @@ export function renderModelSelector(
     const desc = isSelected ? chalk.gray(` — ${provider.description}`) : '';
 
     const row = `${marker}${label}${desc}`;
-    const plainRow = row.replace(/\x1B\[[0-9;]*m/g, '');
+    const plainRow = row.replace(ANSI_STRIP_REGEX, '');
     const padding = Math.max(0, maxWidth - plainRow.length + 1);
 
     lines.push(chalk.gray('│') + ' ' + row + ' '.repeat(padding) + chalk.gray('│'));
@@ -196,7 +199,7 @@ export function renderModelSelector(
         const mContext = chalk.gray.dim(` [${model.contextWindow / 1000}K ctx]`);
 
         const mRow = `${mMarker}${mLabel}${mDesc}${mContext}`;
-        const mPlain = mRow.replace(/\x1B\[[0-9;]*m/g, '');
+        const mPlain = mRow.replace(ANSI_STRIP_REGEX, '');
         const mPad = Math.max(0, maxWidth - mPlain.length - 1);
 
         lines.push(chalk.gray('│') + ' ' + mRow + ' '.repeat(mPad) + chalk.gray('│'));

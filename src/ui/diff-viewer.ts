@@ -118,8 +118,13 @@ export function renderMultiFileDiff(
   if (!activeDiff) return '';
 
   const diffData = computeDiff(activeDiff.oldContent || '', activeDiff.newContent);
-  const adds = diffData.filter(l => l.type === 'add').length;
-  const removes = diffData.filter(l => l.type === 'remove').length;
+  // Single-pass count instead of two filter() calls
+  let adds = 0;
+  let removes = 0;
+  for (let i = 0; i < diffData.length; i++) {
+    if (diffData[i].type === 'add') adds++;
+    else if (diffData[i].type === 'remove') removes++;
+  }
 
   // ── Header ──
   lines.push(

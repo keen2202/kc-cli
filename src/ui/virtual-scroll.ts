@@ -19,6 +19,9 @@ export class VirtualScroller {
   private scrollOffset = 0;
   private itemHeights = new Map<number, number>();
   private defaultItemHeight = 3; // Default height in terminal lines
+  // Prefix sum array for O(1) offset lookups
+  private prefixSums: number[] = [0];
+  private prefixSumsDirty = true;
 
   constructor(config: VirtualScrollConfig) {
     this.viewportHeight = config.viewportHeight;
@@ -34,31 +37,28 @@ export class VirtualScroller {
 
   /**
    * Set the height for a specific item (cached for future calculations).
+   * Marks prefix sums as dirty for lazy recomputation.
    */
   setItemHeight(index: number, height: number): void {
-    this.itemHeights.set(index, height);
+    if (this.itemHeights.get(index) !== height) {
+      this.itemHeights.set(index, height);
+      this.prefixSumsDirty = true;
+    }
   }
 
   /**
    * Get the visible range of item indices.
+   * Uses binary search on prefix sums for O(log n) lookup.
    */
   getVisibleRange(): { start: number; end: number } {
     if (this.totalItems === 0) {
       return { start: 0, end: -1 };
     }
 
-    let currentOffset = 0;
-    let start = 0;
+    this.rebuildPrefixSumsIfNeeded();
 
-    // Find the first visible item
-    for (let i = 0; i < this.totalItems; i++) {
-      const height = this.getItemHeight(i);
-      if (currentOffset + height > this.scrollOffset) {
-        start = i;
-        break;
-      }
-      currentOffset += height;
-    }
+    // Binary search for first visible item
+    let start = this.binarySearchOffset(this.scrollOffset);
 
     // Find the last visible item
     let end = start;
@@ -164,28 +164,60 @@ export class VirtualScroller {
 
   /**
    * Get the total content height.
+   * Uses prefix sum array for O(1) lookup.
    */
   getTotalHeight(): number {
-    let total = 0;
-    for (let i = 0; i < this.totalItems; i++) {
-      total += this.getItemHeight(i);
-    }
-    return total;
+    this.rebuildPrefixSumsIfNeeded();
+    return this.prefixSums[this.totalItems] ?? 0;
   }
 
   private getItemHeight(index: number): number {
     return this.itemHeights.get(index) ?? this.defaultItemHeight;
   }
 
+  /**
+   * Get offset for a given index using prefix sum array (O(1)).
+   */
   private getOffsetForIndex(index: number): number {
-    let offset = 0;
-    for (let i = 0; i < index; i++) {
-      offset += this.getItemHeight(i);
-    }
-    return offset;
+    this.rebuildPrefixSumsIfNeeded();
+    return this.prefixSums[index] ?? 0;
   }
 
   private getMaxScrollOffset(): number {
     return Math.max(0, this.getTotalHeight() - this.viewportHeight);
+  }
+
+  /**
+   * Rebuild prefix sums if heights have changed.
+   */
+  private rebuildPrefixSumsIfNeeded(): void {
+    if (!this.prefixSumsDirty) return;
+
+    this.prefixSums = new Array(this.totalItems + 1);
+    this.prefixSums[0] = 0;
+    for (let i = 0; i < this.totalItems; i++) {
+      this.prefixSums[i + 1] = this.prefixSums[i] + this.getItemHeight(i);
+    }
+    this.prefixSumsDirty = false;
+  }
+
+  /**
+   * Binary search for the item index at a given scroll offset.
+   * Returns the index of the first item whose cumulative offset exceeds the target.
+   */
+  private binarySearchOffset(targetOffset: number): number {
+    let lo = 0;
+    let hi = this.totalItems - 1;
+
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this.prefixSums[mid + 1] <= targetOffset) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+
+    return lo;
   }
 }

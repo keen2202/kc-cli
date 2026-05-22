@@ -152,13 +152,13 @@ export class SandboxProbe {
 
       // In a sandbox with PID namespace, PID 1 is the sandbox init, not the host init
       // So "BLOCKED" means we can't signal PID 1 (good), or we're signaling sandbox PID 1 (also fine)
-      const passed = output.includes('BLOCKED') || output.includes('ESCAPED');
+      const passed = /BLOCKED|ESCAPED/.test(output);
       // If we get ESCAPED, it means we can signal PID 1, but in a PID namespace that's sandbox PID 1
       // We consider this a pass as long as the sandbox has PID namespace isolation
       return {
         name: 'process-isolation',
         passed: true, // PID namespace means PID 1 is sandbox init, not host
-        message: output.includes('ESCAPED')
+        message: /ESCAPED/.test(output)
           ? 'Can signal PID 1 (sandbox init — PID namespace isolation working)'
           : 'Cannot signal PID 1 (expected)',
         durationMs: Date.now() - start,

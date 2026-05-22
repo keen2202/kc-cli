@@ -3,6 +3,7 @@
 import { spawn, type ChildProcess } from 'child_process';
 import * as path from 'path';
 import type { LSPDiagnostic, LSPHover, LSPLocation, LanguageId } from './types';
+import { getCacheManager } from '../services/cache';
 
 interface LSPMessage {
   jsonrpc: '2.0';
@@ -45,7 +46,9 @@ export function detectLanguage(filePath: string): LanguageId {
 
 export class LSPClientManager {
   private servers = new Map<LanguageId, ServerProcess>();
-  private diagnosticCache = new Map<string, LSPDiagnostic[]>();
+  private diagnosticCache = getCacheManager().getOrCreate<LSPDiagnostic[]>(
+    'lsp-diagnostics', 'lsp', { maxSize: 500 }
+  );
   private pendingDiagnostics = new Map<string, { resolve: (d: LSPDiagnostic[]) => void; timer: ReturnType<typeof setTimeout> }>();
 
   async connect(languageId: LanguageId, rootUri: string): Promise<boolean> {

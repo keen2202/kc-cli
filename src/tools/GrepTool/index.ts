@@ -36,6 +36,12 @@ export const tool = buildTool<GrepInput, string>({
       }
       const results: Array<{ file: string; line: number; match: string; context?: string }> = [];
 
+      // Pre-compile glob pattern once (not per-file in recursion)
+      let globRegex: RegExp | null = null;
+      if (input.file_pattern) {
+        globRegex = new RegExp(input.file_pattern.replace(/\*/g, '.*').replace(/\?/g, '.'));
+      }
+
       // Recursively search files
       async function searchDir(dir: string) {
         if (results.length >= input.max_results) return;
@@ -54,10 +60,7 @@ export const tool = buildTool<GrepInput, string>({
             }
           } else if (entry.isFile()) {
             // Check file pattern filter
-            if (input.file_pattern) {
-              const globPattern = new RegExp(input.file_pattern.replace(/\*/g, '.*').replace(/\?/g, '.'));
-              if (!globPattern.test(entry.name)) continue;
-            }
+            if (globRegex && !globRegex.test(entry.name)) continue;
 
             try {
               const content = await fs.promises.readFile(fullPath, 'utf-8');

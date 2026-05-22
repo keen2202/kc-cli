@@ -12,6 +12,9 @@
 
 import chalk from 'chalk';
 
+// Pre-compiled regex for ANSI escape stripping (reused across render calls)
+const ANSI_STRIP_REGEX = /\x1B\[[0-9;]*m/g;
+
 // ─── Types ───
 
 /** A single palette command. */
@@ -117,17 +120,10 @@ export function filterCommands(commands: PaletteCommand[], query: string): Palet
   const terms = lowerQuery.split(/\s+/);
 
   return commands.filter(cmd => {
-    const label = cmd.label.toLowerCase();
-    const desc = cmd.description.toLowerCase();
-    const category = cmd.category.toLowerCase();
+    // Single haystack string for all searchable fields (one allocation per command)
+    const haystack = `${cmd.label} ${cmd.description} ${cmd.category} ${cmd.id}`.toLowerCase();
 
-    return terms.every(
-      term =>
-        label.includes(term) ||
-        desc.includes(term) ||
-        category.includes(term) ||
-        cmd.id.toLowerCase().includes(term)
-    );
+    return terms.every(term => haystack.includes(term));
   });
 }
 
@@ -191,7 +187,7 @@ export function renderCommandPalette(
       const desc = isSelected ? chalk.gray(` — ${cmd.description}`) : '';
 
       const row = `${marker}${label}${desc}${shortcut}`;
-      const plainRow = row.replace(/\x1B\[[0-9;]*m/g, '');
+      const plainRow = row.replace(ANSI_STRIP_REGEX, '');
       const padding = Math.max(0, maxWidth - plainRow.length + 1);
 
       lines.push(chalk.gray('│') + ' ' + row + ' '.repeat(padding) + chalk.gray('│'));

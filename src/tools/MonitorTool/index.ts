@@ -61,11 +61,12 @@ export const tool = buildTool<MonitorInput, string>({
 
       if (input.metric === 'all' || input.metric === 'network') {
         const networkInterfaces = os.networkInterfaces();
+        // Single-pass: filter + map combined into flatMap
         const interfaces = Object.entries(networkInterfaces)
-          .filter(([_, ifaces]) => ifaces && ifaces.length > 0)
-          .map(([name, ifaces]) => {
-            const iface = ifaces?.[0];
-            return `  ${name}: ${iface?.address} (${iface?.mac})`;
+          .flatMap(([name, ifaces]) => {
+            if (!ifaces || ifaces.length === 0) return [];
+            const iface = ifaces[0];
+            return [`  ${name}: ${iface?.address} (${iface?.mac})`];
           })
           .join('\n');
         results.push(`Network Interfaces:\n${interfaces}`);

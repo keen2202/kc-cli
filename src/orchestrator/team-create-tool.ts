@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { buildTool, toolResult, toolError } from '../Tool.js';
 import type { ToolResult as ToolResultType } from '../types/tools.js';
 import type { PermissionResult } from '../types/permissions.js';
+import type { SubAgentResult } from '../types/orchestrator.js';
 import { getOrchestrator } from './agent-orchestrator.js';
 import { createAgentConfig } from './agent-definitions.js';
 import type { ToolName } from '../types/tools.js';
@@ -150,8 +151,8 @@ export const tool = buildTool<TeamCreateInput, string>({
       const outputLines = [
         `Team execution completed\n`,
         `Agents: ${aggregatedResult.results.length}`,
-        `Success: ${aggregatedResult.results.filter((r: any) => r.success).length}`,
-        `Failed: ${aggregatedResult.results.filter((r: any) => !r.success).length}`,
+        `Success: ${aggregatedResult.results.filter((r: SubAgentResult) => r.success).length}`,
+        `Failed: ${aggregatedResult.results.filter((r: SubAgentResult) => !r.success).length}`,
         `Total tokens: ${aggregatedResult.totalTokensUsed.toLocaleString()}`,
         `Total time: ${(aggregatedResult.totalDuration / 1000).toFixed(1)}s\n`,
         `=== Individual Results ===\n`,
@@ -175,8 +176,8 @@ export const tool = buildTool<TeamCreateInput, string>({
         metadata: {
           agent_ids: agentIds,
           total: aggregatedResult.results.length,
-          success: aggregatedResult.results.filter((r: any) => r.success).length,
-          failed: aggregatedResult.results.filter((r: any) => !r.success).length,
+          success: aggregatedResult.results.filter((r: SubAgentResult) => r.success).length,
+          failed: aggregatedResult.results.filter((r: SubAgentResult) => !r.success).length,
           total_tokens: aggregatedResult.totalTokensUsed,
           total_duration: aggregatedResult.totalDuration,
           wait_for_all: true,

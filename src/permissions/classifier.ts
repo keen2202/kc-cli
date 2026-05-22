@@ -4,6 +4,11 @@ import type { PermissionResult, PermissionContext } from '../types/permissions';
 import { LOW_RISK_BASH_PATTERNS, MEDIUM_RISK_BASH_PATTERNS } from './readonlyCommands';
 import { containsProtectedPath } from './protectedPaths';
 
+// Module-level constants (avoid allocation per call)
+const SAFE_TOOLS = new Set(['FileRead', 'Glob', 'Grep', 'Monitor']);
+const RM_RF_REGEX = /\brm\s+-rf/;
+const DESTRUCTIVE_REGEX = /\b(mkfs|dd|Format)\b/;
+
 export interface ClassifierDecision {
   behavior: 'allow' | 'deny' | 'ask';
   confidence: number; // 0-1
@@ -44,9 +49,8 @@ export class PermissionClassifier {
     toolName: string,
     input: Record<string, unknown>
   ): ClassifierDecision | null {
-    // Always allow safe read-only tools
-    const safeTools = ['FileRead', 'Glob', 'Grep', 'Monitor'];
-    if (safeTools.includes(toolName)) {
+    // Always allow safe read-only tools (O(1) Set lookup)
+    if (SAFE_TOOLS.has(toolName)) {
       return {
         behavior: 'allow',
         confidence: 0.95,
@@ -54,10 +58,10 @@ export class PermissionClassifier {
       };
     }
 
-    // Always deny known dangerous patterns
+    // Always deny known dangerous patterns (pre-compiled regex)
     const command = (input.command as string) || '';
 
-    if (command.match(/\brm\s+-rf/)) {
+    if (RM_RF_REGEX.test(command)) {
       return {
         behavior: 'deny',
         confidence: 0.99,
@@ -65,7 +69,7 @@ export class PermissionClassifier {
       };
     }
 
-    if (command.match(/\b(mkfs|dd|Format)\b/)) {
+    if (DESTRUCTIVE_REGEX.test(command)) {
       return {
         behavior: 'deny',
         confidence: 0.99,

@@ -480,7 +480,7 @@ async function handleCommand(
       const profileService = new UserProfileService();
       await profileService.load();
       const levelArg = parts[1];
-      if (levelArg && ['beginner', 'intermediate', 'advanced'].includes(levelArg)) {
+      if (levelArg && (levelArg === 'beginner' || levelArg === 'intermediate' || levelArg === 'advanced')) {
         profileService.updateLevel(levelArg as any);
         await profileService.persist();
         console.log(chalk.green(`✓ Level set to: ${levelArg}\n`));

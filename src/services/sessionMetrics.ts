@@ -38,6 +38,7 @@ export class SessionMetricsCollector {
   private session: SessionMetrics;
   private tools = new Map<string, ToolMetrics>();
   private toolTimers = new Map<string, number>();
+  private commandsSet = new Set<string>();
 
   constructor(sessionId: string) {
     this.session = {
@@ -104,10 +105,11 @@ export class SessionMetricsCollector {
   }
 
   /**
-   * Record a command usage
+   * Record a command usage (O(1) Set lookup instead of O(n) Array.includes)
    */
   recordCommand(command: string): void {
-    if (!this.session.commandsUsed.includes(command)) {
+    if (!this.commandsSet.has(command)) {
+      this.commandsSet.add(command);
       this.session.commandsUsed.push(command);
     }
   }
@@ -263,5 +265,6 @@ export class SessionMetricsCollector {
     };
     this.tools.clear();
     this.toolTimers.clear();
+    this.commandsSet.clear();
   }
 }

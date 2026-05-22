@@ -165,13 +165,12 @@ export async function loadConfig(cwd: string): Promise<{ config: Config; layers:
 
 export async function loadConfigFile(filePath: string): Promise<Partial<Config> | null> {
   try {
-    if (!fs.existsSync(filePath)) {
-      return null;
-    }
+    // Direct async read instead of sync existsSync + async readFile (eliminates TOCTOU race and extra syscall)
     const content = await fs.promises.readFile(filePath, 'utf-8');
     const parsed = JSON.parse(content);
     return parsed;
   } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
     console.warn(`Failed to load config from ${filePath}:`, error);
     return null;
   }

@@ -25,6 +25,13 @@ export default defineConfig({
         'src/utils/**/*.ts',
         'src/state/**/*.ts',
         'src/executors/**/*.ts',
+        'src/memory/**/*.ts',
+        'src/lsp/**/*.ts',
+        'src/mcp/**/*.ts',
+        'src/acp/**/*.ts',
+        'src/hooks/**/*.ts',
+        'src/plugins/**/*.ts',
+        'src/ui/**/*.ts',
       ],
       exclude: [
         'src/**/*.test.ts',

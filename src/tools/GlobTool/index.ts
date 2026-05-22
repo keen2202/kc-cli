@@ -27,10 +27,13 @@ export const tool = buildTool<GlobInput, string>({
       const searchPath = path.resolve(context.cwd, input.path);
       const results: string[] = [];
 
+      // Pre-compiled regex for escaping special chars in glob patterns
+      const GLOB_ESCAPE_REGEX = /[.+^${}()|[\]\\]/g;
+
       // Convert glob pattern to regex
       function globToRegex(pattern: string): RegExp {
         const regex = pattern
-          .replace(/[.+^${}()|[\]\\]/g, '\\$&') // Escape special regex chars (except * and ?)
+          .replace(GLOB_ESCAPE_REGEX, '\\$&') // Escape special regex chars (except * and ?)
           .replace(/\*\*/g, '___DOUBLE___')
           .replace(/\*/g, '___SINGLE___')
           .replace(/___DOUBLE___/g, '.*')

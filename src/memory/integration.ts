@@ -69,14 +69,10 @@ export class MemoryIntegration {
         return '';
       }
 
-      // Load memory content
-      const memoryContents: string[] = [];
-      for (const fileName of relevantFiles) {
-        const content = await this.getMemoryContent(fileName);
-        if (content) {
-          memoryContents.push(content);
-        }
-      }
+      // Load memory content in parallel
+      const contentPromises = relevantFiles.map(fileName => this.getMemoryContent(fileName));
+      const contents = await Promise.all(contentPromises);
+      const memoryContents = contents.filter((content): content is string => content !== null);
 
       if (memoryContents.length === 0) {
         return '';

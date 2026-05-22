@@ -100,22 +100,31 @@ const SANDBOX_POLICIES: Record<ProjectType, SandboxPolicy> = {
 export async function detectProjectType(projectDir: string): Promise<ProjectDetection> {
   const detectedTypes: { type: ProjectType; indicators: string[] }[] = [];
 
-  for (const [type, indicators] of Object.entries(PROJECT_INDICATORS)) {
-    if (type === 'unknown') continue;
-
-    const foundIndicators: string[] = [];
-    for (const indicator of indicators) {
-      try {
-        const filePath = path.join(projectDir, indicator);
-        await fs.access(filePath);
-        foundIndicators.push(indicator);
-      } catch {
-        // File doesn't exist, continue
+  // Check all project types in parallel (each indicator is independent I/O)
+  const typeChecks = Object.entries(PROJECT_INDICATORS)
+    .filter(([type]) => type !== 'unknown')
+    .map(async ([type, indicators]) => {
+      const checks = indicators.map(async (indicator) => {
+        try {
+          const filePath = path.join(projectDir, indicator);
+          await fs.access(filePath);
+          return indicator;
+        } catch {
+          return null;
+        }
+      });
+      const results = await Promise.all(checks);
+      const foundIndicators = results.filter((r): r is string => r !== null);
+      if (foundIndicators.length > 0) {
+        return { type: type as ProjectType, indicators: foundIndicators };
       }
-    }
+      return null;
+    });
 
-    if (foundIndicators.length > 0) {
-      detectedTypes.push({ type: type as ProjectType, indicators: foundIndicators });
+  const typeResults = await Promise.all(typeChecks);
+  for (const result of typeResults) {
+    if (result) {
+      detectedTypes.push(result);
     }
   }
 

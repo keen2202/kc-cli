@@ -342,5 +342,181 @@ describe('CompletionProvider', () => {
       expect(CompletionItemKind.Keyword).toBe(14);
       expect(CompletionItemKind.Snippet).toBe(15);
     });
+
+    it('should define all standard kinds', () => {
+      expect(CompletionItemKind.Constructor).toBe(4);
+      expect(CompletionItemKind.Field).toBe(5);
+      expect(CompletionItemKind.Interface).toBe(8);
+      expect(CompletionItemKind.Module).toBe(9);
+      expect(CompletionItemKind.Property).toBe(10);
+      expect(CompletionItemKind.Unit).toBe(11);
+      expect(CompletionItemKind.Value).toBe(12);
+      expect(CompletionItemKind.Enum).toBe(13);
+      expect(CompletionItemKind.Color).toBe(16);
+      expect(CompletionItemKind.File).toBe(17);
+      expect(CompletionItemKind.Reference).toBe(18);
+      expect(CompletionItemKind.Folder).toBe(19);
+      expect(CompletionItemKind.EnumMember).toBe(20);
+      expect(CompletionItemKind.Constant).toBe(21);
+      expect(CompletionItemKind.Struct).toBe(22);
+      expect(CompletionItemKind.Event).toBe(23);
+      expect(CompletionItemKind.Operator).toBe(24);
+      expect(CompletionItemKind.TypeParameter).toBe(25);
+    });
+  });
+
+  describe('sortAndFilter edge cases', () => {
+    it('should default kind to Text when not provided', async () => {
+      const doc = { uri: 'file:///test/file.ts', content: '', languageId: 'typescript' };
+      const mockClient = {
+        request: vi.fn().mockResolvedValue([{
+          label: 'noKind',
+          sortText: '0001',
+        }]),
+      } as any;
+      const mockDocManager = {
+        get: vi.fn().mockReturnValue(doc),
+        isOpen: vi.fn().mockReturnValue(true),
+      } as any;
+
+      const result = await provider.getCompletions(
+        mockClient,
+        mockDocManager,
+        '/test/file.ts',
+        { line: 0, character: 0 }
+      );
+
+      expect(result.items[0].kind).toBe(CompletionItemKind.Text);
+    });
+
+    it('should default insertText to label when not provided', async () => {
+      const doc = { uri: 'file:///test/file.ts', content: '', languageId: 'typescript' };
+      const mockClient = {
+        request: vi.fn().mockResolvedValue([{
+          label: 'myLabel',
+          kind: CompletionItemKind.Function,
+          sortText: '0001',
+        }]),
+      } as any;
+      const mockDocManager = {
+        get: vi.fn().mockReturnValue(doc),
+        isOpen: vi.fn().mockReturnValue(true),
+      } as any;
+
+      const result = await provider.getCompletions(
+        mockClient,
+        mockDocManager,
+        '/test/file.ts',
+        { line: 0, character: 0 }
+      );
+
+      expect(result.items[0].insertText).toBe('myLabel');
+    });
+
+    it('should use label as sort fallback when sortText is missing', async () => {
+      const doc = { uri: 'file:///test/file.ts', content: '', languageId: 'typescript' };
+      const mockClient = {
+        request: vi.fn().mockResolvedValue([
+          { label: 'beta', kind: CompletionItemKind.Function },
+          { label: 'alpha', kind: CompletionItemKind.Function },
+        ]),
+      } as any;
+      const mockDocManager = {
+        get: vi.fn().mockReturnValue(doc),
+        isOpen: vi.fn().mockReturnValue(true),
+      } as any;
+
+      const result = await provider.getCompletions(
+        mockClient,
+        mockDocManager,
+        '/test/file.ts',
+        { line: 0, character: 0 }
+      );
+
+      expect(result.items[0].label).toBe('alpha');
+      expect(result.items[1].label).toBe('beta');
+    });
+  });
+
+  describe('resolveCompletionItem edge cases', () => {
+    it('should use provided filePath', async () => {
+      const mockClient = {
+        request: vi.fn().mockResolvedValue({ documentation: 'docs' }),
+      } as any;
+
+      const item = { label: 'log', kind: CompletionItemKind.Method };
+      await provider.resolveCompletionItem(mockClient, item, '/specific/file.ts');
+
+      expect(mockClient.request).toHaveBeenCalledWith('/specific/file.ts', 'completionItem/resolve', expect.anything());
+    });
+
+    it('should use empty string when no filePath provided', async () => {
+      const mockClient = {
+        request: vi.fn().mockResolvedValue(null),
+      } as any;
+
+      const item = { label: 'log', kind: CompletionItemKind.Method };
+      await provider.resolveCompletionItem(mockClient, item);
+
+      expect(mockClient.request).toHaveBeenCalledWith('', 'completionItem/resolve', expect.anything());
+    });
+
+    it('should return original item when resolved is null', async () => {
+      const mockClient = {
+        request: vi.fn().mockResolvedValue(null),
+      } as any;
+
+      const item = { label: 'log', kind: CompletionItemKind.Method, detail: 'original' };
+      const resolved = await provider.resolveCompletionItem(mockClient, item);
+
+      expect(resolved).toEqual(item);
+    });
+  });
+
+  describe('isIncomplete flag', () => {
+    it('should propagate isIncomplete from CompletionList', async () => {
+      const doc = { uri: 'file:///test/file.ts', content: '', languageId: 'typescript' };
+      const mockClient = {
+        request: vi.fn().mockResolvedValue({
+          isIncomplete: true,
+          items: [{ label: 'item', kind: CompletionItemKind.Function, sortText: '0001' }],
+        }),
+      } as any;
+      const mockDocManager = {
+        get: vi.fn().mockReturnValue(doc),
+        isOpen: vi.fn().mockReturnValue(true),
+      } as any;
+
+      const result = await provider.getCompletions(
+        mockClient,
+        mockDocManager,
+        '/test/file.ts',
+        { line: 0, character: 0 }
+      );
+
+      expect(result.isIncomplete).toBe(true);
+    });
+
+    it('should default isIncomplete to false for CompletionItem[]', async () => {
+      const doc = { uri: 'file:///test/file.ts', content: '', languageId: 'typescript' };
+      const mockClient = {
+        request: vi.fn().mockResolvedValue([
+          { label: 'item', kind: CompletionItemKind.Function, sortText: '0001' },
+        ]),
+      } as any;
+      const mockDocManager = {
+        get: vi.fn().mockReturnValue(doc),
+        isOpen: vi.fn().mockReturnValue(true),
+      } as any;
+
+      const result = await provider.getCompletions(
+        mockClient,
+        mockDocManager,
+        '/test/file.ts',
+        { line: 0, character: 0 }
+      );
+
+      expect(result.isIncomplete).toBe(false);
+    });
   });
 });

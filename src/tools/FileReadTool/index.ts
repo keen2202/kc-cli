@@ -47,6 +47,7 @@ export const tool = buildTool<FileReadInput, string>({
 
       // Read file
       let content = await fs.promises.readFile(filePath, 'utf-8');
+      let lineCount: number;
 
       // Apply range if specified
       if (input.range) {
@@ -54,13 +55,20 @@ export const tool = buildTool<FileReadInput, string>({
         const start = input.range.start ?? 0;
         const end = input.range.end ?? lines.length;
         content = lines.slice(start, end).join('\n');
+        lineCount = end - start;
+      } else {
+        // Count lines without a second split by counting newlines
+        lineCount = 1;
+        for (let i = 0; i < content.length; i++) {
+          if (content.charCodeAt(i) === 10) lineCount++;
+        }
       }
 
       return toolResult(content, {
         metadata: {
           path: filePath,
           size: stat.size,
-          lines: content.split('\n').length,
+          lines: lineCount,
         },
       });
     } catch (error) {

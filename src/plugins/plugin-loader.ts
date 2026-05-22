@@ -2,6 +2,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { Plugin, PluginManifest } from './types';
+import { createLogger } from '../services/logger';
+
+const logger = createLogger('plugins:loader');
 
 const KC_PLUGIN_PREFIX = 'kc-plugin-';
 
@@ -30,12 +33,12 @@ export async function discoverPlugins(projectDir: string): Promise<string[]> {
     }
   }
 
-  // npm package discovery: scan node_modules/ for kc-plugin-* packages
-  const npmPluginDirs = await discoverNpmPlugins(projectDir);
+  // npm package discovery and package.json check in parallel (independent reads)
+  const [npmPluginDirs, packageJsonPlugins] = await Promise.all([
+    discoverNpmPlugins(projectDir),
+    discoverPackageJsonPlugins(projectDir),
+  ]);
   pluginDirs.push(...npmPluginDirs);
-
-  // Also check project package.json dependencies for kc-plugin-*
-  const packageJsonPlugins = await discoverPackageJsonPlugins(projectDir);
   pluginDirs.push(...packageJsonPlugins);
 
   // Deduplicate
@@ -69,13 +72,13 @@ async function discoverNpmPlugins(projectDir: string): Promise<string[]> {
               pluginDirs.push(path.join(scopeDir, scopedEntry.name));
             }
           }
-        } catch {
-          // Ignore errors reading scoped directories
+        } catch (error) {
+          logger.debug('Failed to read scoped directory', { scopeDir, error: String(error) });
         }
       }
     }
-  } catch {
-    // Ignore errors reading node_modules
+  } catch (error) {
+    logger.debug('Failed to read node_modules', { nodeModulesDir, error: String(error) });
   }
 
   return pluginDirs;
@@ -106,8 +109,8 @@ async function discoverPackageJsonPlugins(projectDir: string): Promise<string[]>
         }
       }
     }
-  } catch {
-    // Ignore errors reading package.json
+  } catch (error) {
+    logger.debug('Failed to read package.json', { packageJsonPath, error: String(error) });
   }
 
   return pluginDirs;
@@ -134,7 +137,8 @@ export async function loadPlugin(pluginDir: string): Promise<Plugin | null> {
     if (!plugin.name || !plugin.version) return null;
 
     return plugin;
-  } catch {
+  } catch (error) {
+    logger.warn('Failed to load plugin', { pluginDir, error: String(error) });
     return null;
   }
 }

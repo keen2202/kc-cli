@@ -80,11 +80,12 @@ export const tool = buildTool<RunInput, string>({
           sandboxBackend,
         },
       });
-    } catch (error: any) {
-      const output = error.stdout || error.stderr || error.message;
-      return toolError(`Command failed: ${output.trim()}`, {
+    } catch (error) {
+      const err = error as Record<string, unknown>;
+      const output = String(err.stdout || err.stderr || (error instanceof Error ? error.message : '') || '').trim();
+      return toolError(`Command failed: ${output}`, {
         command: input.command,
-        exit_code: error.code,
+        exit_code: err.code,
       });
     }
   },

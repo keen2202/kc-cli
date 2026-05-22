@@ -15,6 +15,18 @@ export interface ClassifiedError {
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
 
+// Pre-compiled regex patterns for error classification (single test instead of multiple includes())
+const RATE_LIMIT_REGEX = /429|rate.?limit/;
+const SERVER_ERROR_REGEX = /500|502|503|529/;
+const OVERLOADED_REGEX = /overloaded/;
+const TIMEOUT_REGEX = /timeout|timed\s*out|etimedout/;
+const NETWORK_ERROR_REGEX = /econnreset|econnrefused|fetch\s*failed/;
+const AUTH_ERROR_REGEX = /401|403|invalid_api_key|unauthorized/;
+const BAD_REQUEST_REGEX = /400|invalid_request/;
+const TOOL_ERROR_REGEX = /tool.*(error|failed)|(error|failed).*tool/;
+const TOOL_TIMEOUT_REGEX = /timeout|timed\s*out/;
+const PERMISSION_DENIED_REGEX = /permission.*denied|denied.*permission/;
+
 /**
  * Extract retry-after delay in milliseconds from Retry-After header value.
  * Supports both seconds (e.g., "2") and HTTP-date formats.
@@ -70,42 +82,42 @@ export function classifyApiError(error: Error): ClassifiedError {
   const message = error.message.toLowerCase();
 
   // Transient: rate limit
-  if (message.includes('429') || message.includes('rate_limit') || message.includes('rate limit')) {
+  if (RATE_LIMIT_REGEX.test(message)) {
     return { error, errorClass: 'transient', retryable: true, retryAfterMs: 2000, context: 'rate_limit' };
   }
 
   // Transient: server error
-  if (message.includes('500') || message.includes('502') || message.includes('503') || message.includes('529')) {
+  if (SERVER_ERROR_REGEX.test(message)) {
     return { error, errorClass: 'transient', retryable: true, retryAfterMs: 1000, context: 'server_error' };
   }
 
   // Transient: overloaded
-  if (message.includes('overloaded')) {
+  if (OVERLOADED_REGEX.test(message)) {
     return { error, errorClass: 'transient', retryable: true, retryAfterMs: 3000, context: 'overloaded' };
   }
 
   // Transient: timeout
-  if (message.includes('timeout') || message.includes('timed out') || message.includes('etimedout')) {
+  if (TIMEOUT_REGEX.test(message)) {
     return { error, errorClass: 'transient', retryable: true, retryAfterMs: 1000, context: 'timeout' };
   }
 
   // Transient: network errors
-  if (message.includes('econnreset') || message.includes('econnrefused') || message.includes('fetch failed')) {
+  if (NETWORK_ERROR_REGEX.test(message)) {
     return { error, errorClass: 'transient', retryable: true, retryAfterMs: 1000, context: 'network' };
   }
 
   // Permanent: auth errors
-  if (message.includes('401') || message.includes('403') || message.includes('invalid_api_key') || message.includes('unauthorized')) {
+  if (AUTH_ERROR_REGEX.test(message)) {
     return { error, errorClass: 'permanent', retryable: false, context: 'auth' };
   }
 
   // Permanent: bad request
-  if (message.includes('400') || message.includes('invalid_request')) {
+  if (BAD_REQUEST_REGEX.test(message)) {
     return { error, errorClass: 'permanent', retryable: false, context: 'bad_request' };
   }
 
   // Degraded: tool errors (continue execution, mark tool as failed)
-  if (message.includes('tool') && (message.includes('error') || message.includes('failed'))) {
+  if (TOOL_ERROR_REGEX.test(message)) {
     return { error, errorClass: 'degraded', retryable: false, context: 'tool_error' };
   }
 
@@ -117,12 +129,12 @@ export function classifyToolError(error: Error, toolName: string): ClassifiedErr
   const message = error.message.toLowerCase();
 
   // Degraded: tool timeout
-  if (message.includes('timeout') || message.includes('timed out')) {
+  if (TOOL_TIMEOUT_REGEX.test(message)) {
     return { error, errorClass: 'degraded', retryable: false, context: `tool_timeout:${toolName}` };
   }
 
   // Permanent: permission denied
-  if (message.includes('permission') && message.includes('denied')) {
+  if (PERMISSION_DENIED_REGEX.test(message)) {
     return { error, errorClass: 'permanent', retryable: false, context: `permission_denied:${toolName}` };
   }
 

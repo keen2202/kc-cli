@@ -1,6 +1,7 @@
 // Permission rule matching and management
 
 import type { PermissionRule, PermissionRuleValue, PermissionBehavior } from '../types/permissions';
+import { getCacheManager } from '../services/cache';
 
 /**
  * Parse rule string into PermissionRuleValue
@@ -54,14 +55,21 @@ export function matchRuleContent(pattern: string, content: string): boolean {
 
 /**
  * Match wildcard pattern (supports * and ?)
+ * Caches compiled regex patterns for repeated use.
  */
+const wildcardRegexCache = getCacheManager().getOrCreate<RegExp>(
+  'wildcard-regex', 'permission', { maxSize: 500 }
+);
+
 function matchWildcardPattern(pattern: string, text: string): boolean {
+  const cached = wildcardRegexCache.get(pattern);
+  if (cached) return cached.test(text);
   const regexPattern = pattern
     .replace(/[.+^${}()|[\]\\]/g, '\\$&')
     .replace(/\*/g, '.*')
     .replace(/\?/g, '.');
-
   const regex = new RegExp(`^${regexPattern}$`, 'i');
+  wildcardRegexCache.set(pattern, regex);
   return regex.test(text);
 }
 

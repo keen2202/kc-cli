@@ -9,6 +9,10 @@ import { getAgeText } from '../utils/format';
 
 const MAX_MEMORY_FILES = 200;
 
+// Reusable encoder/decoder instances (avoid per-call allocation)
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
 /**
  * Scan memory directory and return indexed memory files
  */
@@ -34,8 +38,10 @@ export async function scanMemoryFiles(
   for (const file of mdFiles) {
     try {
       const filePath = path.join(projectPath, file);
-      const stat = await fs.stat(filePath);
-      const content = await fs.readFile(filePath, 'utf-8');
+      const [stat, content] = await Promise.all([
+        fs.stat(filePath),
+        fs.readFile(filePath, 'utf-8'),
+      ]);
       const { header } = parseFrontmatter(content);
 
       if (!header.name || !header.type) continue;
@@ -116,14 +122,17 @@ export async function updateMemoryEntrypoint(
   const entrypointPath = path.join(projectPath, 'MEMORY.md');
 
   // Build index content
-  const lines = ['# Memory Index', ''];
+  const lines: string[] = ['# Memory Index', ''];
 
   // Group by type
   const byType = new Map<MemoryType, MemoryManifestEntry[]>();
   for (const entry of entries) {
-    const existing = byType.get(entry.type) || [];
-    existing.push(entry);
-    byType.set(entry.type, existing);
+    const existing = byType.get(entry.type);
+    if (existing) {
+      existing.push(entry);
+    } else {
+      byType.set(entry.type, [entry]);
+    }
   }
 
   const typeOrder: MemoryType[] = ['user', 'feedback', 'project', 'reference'];
@@ -160,13 +169,11 @@ export async function updateMemoryEntrypoint(
   let content = lines.join('\n');
 
   // Truncate by bytes if needed
-  const encoder = new TextEncoder();
-  const bytes = encoder.encode(content);
+  const bytes = textEncoder.encode(content);
   if (bytes.length > maxBytes) {
     // Truncate and decode back
     const truncated = bytes.slice(0, maxBytes);
-    const decoder = new TextDecoder();
-    content = decoder.decode(truncated);
+    content = textDecoder.decode(truncated);
 
     // Remove partial line
     const lastNewline = content.lastIndexOf('\n');

@@ -2,12 +2,13 @@
 
 import type { MemoryManifestEntry, MemoryEntry } from './types';
 import { getAgeText } from '../utils/format';
+import { getCacheManager } from '../services/cache';
 
 // Feedback tracking: maps memory fileName to reference count
 const feedbackMap = new Map<string, { loaded: number; referenced: number }>();
 
-// Score cache within a session: key = `${query}:${fileName}`, value = score
-const scoreCache = new Map<string, number>();
+// Score cache with TieredCache for LRU eviction and hit rate tracking
+const scoreCache = getCacheManager().getOrCreate<number>('memory-relevance', 'memory', { maxSize: 1000 });
 
 // Configurable stale threshold (default 30 days)
 let staleThresholdDays = 30;
@@ -24,10 +25,15 @@ export function findRelevantMemories(
 ): string[] {
   if (memories.length === 0) return [];
 
-  // Calculate relevance scores
+  // Pre-compute query words once (shared across all memories)
+  const queryLower = query.toLowerCase();
+  const queryWords = queryLower.split(/\s+/).filter((w) => w.length > 2);
+  const recentToolsLower = recentTools?.map(t => t.toLowerCase());
+
+  // Calculate relevance scores (using internal function to avoid re-computing query words)
   const scored = memories.map((memory) => ({
     fileName: memory.fileName,
-    score: calculateRelevanceScore(query, memory, recentTools),
+    score: calculateRelevanceScoreInner(queryLower, queryWords, memory, recentToolsLower),
   }));
 
   // Sort by score descending
@@ -76,15 +82,49 @@ function getFeedbackMultiplier(fileName: string): number {
 }
 
 /**
- * Calculate relevance score for a memory entry against a query
+ * Calculate relevance score for a memory entry against a query.
+ * Accepts either raw query string or pre-computed values.
  */
 export function calculateRelevanceScore(
-  query: string,
+  queryOrLower: string,
+  memoryOrWords: MemoryManifestEntry | string[],
+  memoryOrRecent?: MemoryManifestEntry | string[],
+  recentToolsOrUndefined?: string[]
+): number {
+  // Support both old signature (query, memory, recentTools) and new (queryLower, queryWords, memory, recentToolsLower)
+  let queryLower: string;
+  let queryWords: string[];
+  let memory: MemoryManifestEntry;
+  let recentToolsLower: string[] | undefined;
+
+  if (Array.isArray(memoryOrWords)) {
+    // New signature: (queryLower, queryWords, memory, recentToolsLower)
+    queryLower = queryOrLower;
+    queryWords = memoryOrWords;
+    memory = memoryOrRecent as MemoryManifestEntry;
+    recentToolsLower = recentToolsOrUndefined;
+  } else {
+    // Old signature: (query, memory, recentTools)
+    queryLower = queryOrLower.toLowerCase();
+    queryWords = queryLower.split(/\s+/).filter((w) => w.length > 2);
+    memory = memoryOrWords;
+    recentToolsLower = (memoryOrRecent as string[] | undefined)?.map(t => t.toLowerCase());
+  }
+
+  return calculateRelevanceScoreInner(queryLower, queryWords, memory, recentToolsLower);
+}
+
+/**
+ * Internal relevance score calculation with pre-computed values.
+ */
+function calculateRelevanceScoreInner(
+  queryLower: string,
+  queryWords: string[],
   memory: MemoryManifestEntry,
-  recentTools?: string[]
+  recentToolsLower?: string[]
 ): number {
   // Check cache first
-  const cacheKey = `${query}:${memory.fileName}`;
+  const cacheKey = `${queryLower}:${memory.fileName}`;
   const cached = scoreCache.get(cacheKey);
   if (cached !== undefined) {
     return cached;
@@ -92,8 +132,6 @@ export function calculateRelevanceScore(
 
   let score = 0;
 
-  const queryLower = query.toLowerCase();
-  const queryWords = queryLower.split(/\s+/).filter((w) => w.length > 2);
   const description = memory.description.toLowerCase();
   const fileName = memory.fileName.toLowerCase();
 
@@ -131,9 +169,9 @@ export function calculateRelevanceScore(
   }
 
   // Recent tools boost (if memory relates to recently used tools)
-  if (recentTools) {
-    for (const tool of recentTools) {
-      if (description.includes(tool.toLowerCase()) || fileName.includes(tool.toLowerCase())) {
+  if (recentToolsLower) {
+    for (const tool of recentToolsLower) {
+      if (description.includes(tool) || fileName.includes(tool)) {
         score += 10;
       }
     }
@@ -201,6 +239,14 @@ export function resetRelevanceState(): void {
   feedbackMap.clear();
   scoreCache.clear();
   staleThresholdDays = 30;
+}
+
+/**
+ * Get score cache hit rate for monitoring
+ */
+export function getScoreCacheHitRate(): number {
+  const stats = scoreCache.getStats();
+  return stats.hitRate;
 }
 
 /**

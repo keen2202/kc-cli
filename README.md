@@ -2,13 +2,15 @@
 
 An AI-powered intelligent CLI assistant for software development, inspired by Claude Code's architecture.
 
-## v2 Highlights
+## v3 Highlights
 
-- 🔒 **Sandbox Security**: All shell commands run in isolated sandboxes (Docker/Bubblewrap/seccomp) with network isolation and resource limits
-- 🎨 **Redesigned UI**: Sidebar with file tree (LSP markers), diff preview, command palette, model selector
-- 🔌 **LSP Integration**: Code completions, diagnostics, go-to-definition, find references, rename, quick fixes
+- 🔒 **Sandbox Security**: All shell commands run in isolated sandboxes (Docker/Bubblewrap/seccomp) with network isolation, resource limits, and escape detection
+- 🎨 **Redesigned UI**: Sidebar with file tree (LSP markers), diff preview, command palette, model selector, theme system, mouse support, multi-panel layout
+- 🔌 **LSP Integration**: Code completions, diagnostics, go-to-definition, find references, rename, quick fixes for 9 languages
 - 🧠 **Smart Model Adaptation**: Provider-specific prompts, dynamic parameter tuning, tiktoken-based token estimation
-- 🧪 **874 Tests**: Comprehensive test suite across 54 files
+- 🧪 **3131 Tests**: Comprehensive test suite across 152 files with 92.9% line coverage
+- 🛡️ **Runtime Monitoring**: Sandbox resource monitoring (Docker stats, /proc), image management, and probe-based isolation verification
+- 🪟 **Windows Sandbox**: Native Windows sandbox support via job objects
 
 ## Features
 
@@ -16,7 +18,7 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 - **Multi-LLM Support**: Anthropic Claude, OpenAI GPT, Qwen (DashScope), GLM (Zhipu AI), Google Gemini, DeepSeek, and Ollama (local)
 - **Permission System**: 6-step deny-first security with bypass-immune safety checks, protected paths, and auto-classifier
 - **Sandbox Isolation**: Docker/Bubblewrap/seccomp backends with per-tool policies, seccomp profiles, and resource limits
-- **LSP Code Intelligence**: Language server integration for TypeScript, Go, Python, Rust, Java, C++
+- **LSP Code Intelligence**: Language server integration for TypeScript, Go, Python, Rust, Java, C++, Ruby
 - **Multi-Agent Orchestration**: Spawn sub-agents with isolated QueryEngine instances, permission cascading, and event bus coordination
 - **Memory System**: File-based persistent memory with YAML frontmatter, relevance search, and 4 discrete types (user/feedback/project/reference)
 - **Auto-Compaction**: Micro-compact (clear old tool results) and full-compact (LLM summarization) to manage context windows
@@ -44,7 +46,10 @@ npm run kc  # Interactive mode
 ### Configuration
 
 ```bash
-# Anthropic (default)
+# DeepSeek (default)
+export KC_API_KEY=sk-xxx
+
+# Anthropic
 export KC_API_KEY=sk-ant-xxx
 export KC_PROVIDER=anthropic
 
@@ -65,6 +70,8 @@ export KC_PROVIDER=glm
 export KC_PROVIDER=ollama
 export KC_API_BASE_URL=http://localhost:11434
 ```
+
+See `.env.example` for all available environment variables.
 
 ## Usage
 
@@ -129,70 +136,59 @@ src/
 ├── Tool.ts                         # Tool factory (buildTool) and result helpers
 ├── tools.ts                        # Tool registry, assembly, deny-rule filtering
 │
-├── bootstrap/                      # Initialization
-│   ├── state.ts                    # GlobalState (session, cwd, permission mode)
-│   ├── config.ts                   # 4-layer config loading (defaults < user < project < env)
-│   └── profiler.ts                 # Startup performance tracking
-│
-├── state/                          # Query loop state machine
-│   ├── types.ts                    # AgentStateName, AgentEvent discriminated union, transitions
-│   ├── store.ts                    # ObservableStateStore (immutable updates + listeners)
-│   └── machine.ts                  # AgentStateMachine with transition validation
-│
-├── query/                          # Core agent loop
-│   └── QueryEngine.ts              # idle→compact→stream→decide→execute loop + memory integration
+├── acp/                            # Agent Communication Protocol
+│   ├── handlers.ts                 # ACP request handlers
+│   ├── server.ts                   # ACP server implementation
+│   ├── types.ts                    # ACP type definitions
+│   └── index.ts                    # ACP module entry
 │
 ├── api/                            # LLM API clients
 │   ├── BaseApiClient.ts            # Abstract base (streamChat, chat, formatMessages, formatTools)
 │   ├── AnthropicClient.ts          # Anthropic SSE streaming with stateful content block parser
-│   ├── OpenAICompatibleClient.ts   # OpenAI-compatible (used for OpenAI, Qwen, GLM)
+│   ├── OpenAICompatibleClient.ts   # OpenAI-compatible (used for OpenAI, Qwen, GLM, DeepSeek)
 │   ├── OllamaClient.ts             # Local Ollama client
-│   └── index.ts                    # Factory function + provider config defaults
+│   ├── capabilities.ts             # Provider capability detection
+│   ├── param-tuner.ts              # Dynamic parameter tuning per model
+│   ├── index.ts                    # Factory function + provider config defaults
+│   └── prompts/
+│       ├── prompt-builder.ts       # System prompt construction
+│       ├── provider-prompts.ts     # Provider-specific prompt templates
+│       ├── task-prompts.ts         # Task-specific prompt templates
+│       └── types.ts                # Prompt type definitions
 │
-├── permissions/                    # Security system
-│   ├── engine.ts                   # 6-step deny-first decision flow
-│   ├── rules.ts                    # Rule parsing/matching with wildcard support
-│   ├── classifier.ts               # Rule-based auto classifier (quick path + heuristics)
-│   ├── readonlyCommands.ts         # Shared read-only command patterns (bash + git)
-│   ├── protectedPaths.ts           # Bypass-immune protected path definitions
-│   └── interaction.ts              # Interactive user permission handler
+├── bootstrap/                      # Initialization
+│   ├── state.ts                    # GlobalState (session, cwd, permission mode)
+│   ├── config.ts                   # 4-layer config loading (defaults < user < project < env)
+│   ├── autoConfig.ts               # Auto-configuration with project type detection
+│   └── profiler.ts                 # Startup performance tracking
 │
 ├── executors/                      # Tool execution
 │   └── toolExecutor.ts             # Single/parallel execution with timeout + permission checks
 │
-├── tools/                          # 21 built-in tool implementations
-│   ├── BashTool/                   # Shell execution with dangerous-command detection
-│   ├── FileReadTool/               # File reading with size limits
-│   ├── FileWriteTool/              # File writing with path validation
-│   ├── FileEditTool/               # Exact string replacement in files
-│   ├── GrepTool/                   # Content search in files
-│   ├── GlobTool/                   # File pattern matching
-│   ├── WebSearchTool/              # Web search via configurable providers
-│   ├── WebFetchTool/               # URL content fetching
-│   ├── GitTool/                    # Git operations
-│   ├── RunTool/                    # Program compilation and execution
-│   ├── SqlTool/                    # Database queries
-│   ├── DockerTool/                 # Docker operations
-│   ├── MonitorTool/                # System monitoring
-│   ├── ConfigTool/                 # Configuration management
-│   ├── TodoWriteTool/              # Task list management
-│   ├── TaskCreateTool/             # Task creation
-│   ├── TaskGetTool/                # Task retrieval
-│   ├── AskUserTool/                # Interactive user prompts
-│   ├── AgentTool/                  # Sub-agent spawning
-│   ├── DeployTool/                 # Application deployment
-│   └── TaskStore.ts                # Shared task state storage
+├── hooks/                          # Post-turn hook system
+│   └── postTurnHooks.ts           # Fire-and-forget hooks executed after each turn
 │
-├── orchestrator/                   # Multi-agent coordination
-│   ├── types.ts                    # SubAgentIdentity, SpawnConfig, Runtime, Error types
-│   ├── agent-orchestrator.ts       # Central coordinator (spawn, batch, wait, cancel, shutdown)
-│   ├── event-bus.ts               # In-memory pub/sub with async iterators and Agent scoping
-│   ├── permission-cascader.ts      # Child permission derivation (child ≤ parent)
-│   ├── result-aggregator.ts        # Multi-agent result collection and summary generation
-│   ├── agent-definitions.ts        # Pre-defined agent types
-│   └── backends/
-│       ├── types.ts               # SubAgentBackend interface
-│       └── in-process.ts          # AsyncLocalStorage-based process isolation
+├── lsp/                            # Language Server Protocol integration
+│   ├── client.ts                   # LSP client manager
+│   ├── code-actions.ts             # Code action provider (quick fixes)
+│   ├── completion.ts               # Completion provider with snippet expansion
+│   ├── diagnostics.ts              # Diagnostic collection and publishing
+│   ├── document-manager.ts         # Document lifecycle management
+│   ├── language-registry.ts        # Language server registry (TS, Go, Python, Rust, Java, C++, Ruby)
+│   ├── navigation.ts               # Go-to-definition, references, rename
+│   ├── tool.ts                     # LSP tool exposing completions/diagnostics/definitions
+│   ├── types.ts                    # LSP type definitions
+│   └── index.ts                    # LSP module entry
+│
+├── mcp/                            # Model Context Protocol
+│   ├── client-manager.ts           # MCP client lifecycle management
+│   ├── config-loader.ts            # MCP server configuration loading
+│   ├── tool-bridge.ts              # MCP tool bridging to internal tool system
+│   ├── types.ts                    # MCP type definitions
+│   ├── index.ts                    # MCP module entry
+│   └── transports/
+│       ├── http.ts                 # HTTP/SSE transport
+│       └── stdio.ts                # stdio transport
 │
 ├── memory/                         # Persistent memory system
 │   ├── types.ts                    # MemoryEntry, MemoryHeader, SessionSnapshot, MemoryConfig
@@ -203,8 +199,36 @@ src/
 │   ├── paths.ts                   # Safe file paths with directory traversal prevention
 │   ├── scanner.ts                 # Directory scanning for memory files
 │   ├── promptBuilder.ts           # Memory context formatting for system prompt
-│   ├── telemetry.ts               # Memory usage tracking
-│   └── MEMORY.md                  # Memory index file
+│   └── telemetry.ts               # Memory usage tracking
+│
+├── orchestrator/                   # Multi-agent coordination
+│   ├── types.ts                    # SubAgentIdentity, SpawnConfig, Runtime, Error types
+│   ├── agent-orchestrator.ts       # Central coordinator (spawn, batch, wait, cancel, shutdown)
+│   ├── agent-definitions.ts        # Pre-defined agent types
+│   ├── event-bus.ts               # In-memory pub/sub with async iterators and Agent scoping
+│   ├── permission-cascader.ts      # Child permission derivation (child ≤ parent)
+│   ├── result-aggregator.ts        # Multi-agent result collection and summary generation
+│   ├── team-create-tool.ts         # Team creation tool
+│   └── backends/
+│       ├── types.ts               # SubAgentBackend interface
+│       └── in-process.ts          # AsyncLocalStorage-based process isolation
+│
+├── permissions/                    # Security system
+│   ├── engine.ts                   # 6-step deny-first decision flow
+│   ├── rules.ts                    # Rule parsing/matching with wildcard support
+│   ├── classifier.ts               # Rule-based auto classifier (quick path + heuristics)
+│   ├── readonlyCommands.ts         # Shared read-only command patterns (bash + git)
+│   ├── protectedPaths.ts           # Bypass-immune protected path definitions
+│   └── interaction.ts              # Interactive user permission handler
+│
+├── plugins/                        # Plugin system
+│   ├── plugin-loader.ts            # Plugin discovery and loading
+│   ├── plugin-manager.ts           # Plugin lifecycle management
+│   ├── types.ts                    # Plugin type definitions
+│   └── index.ts                    # Plugin module entry
+│
+├── query/                          # Core agent loop
+│   └── QueryEngine.ts              # idle→compact→stream→decide→execute loop + memory integration
 │
 ├── services/                       # System services
 │   ├── compaction.ts               # Micro-compact + full-compact (LLM summarization)
@@ -213,11 +237,62 @@ src/
 │   ├── consolidationScheduler.ts   # Scheduled memory consolidation
 │   ├── memoryConsolidation.ts      # Consolidation execution logic
 │   ├── memoryExtraction.ts         # Memory extraction from conversations
+│   ├── memoryQuality.ts            # Memory quality assessment
 │   ├── extractionPrompts.ts        # LLM prompts for memory extraction
-│   └── consolidationPrompts.ts     # LLM prompts for consolidation
+│   ├── consolidationPrompts.ts     # LLM prompts for consolidation
+│   ├── error-classifier.ts         # Error classification for retry decisions
+│   ├── paramTuner.ts               # Parameter auto-tuning service
+│   ├── behavioralAdapter.ts        # Behavioral adaptation based on patterns
+│   ├── sessionMetrics.ts           # Session metrics collection
+│   ├── stateValidator.ts           # State validation service
+│   ├── userProfile.ts              # User profile management
+│   ├── firstRun.ts                 # First-run experience with guided tour
+│   ├── healthCheck.ts              # System health monitoring
+│   ├── logger.ts                   # Structured logging
+│   ├── autoReconnect.ts            # Auto-reconnect for LSP/MCP connections
+│   ├── circuitBreaker.ts           # Circuit breaker for external services
+│   ├── sandbox.ts                  # Sandbox manager (backend selection + fallback chain)
+│   ├── sandbox-docker.ts           # Docker sandbox backend
+│   ├── sandbox-probe.ts            # Sandbox escape detection probes
+│   ├── sandbox-monitor.ts          # Runtime resource monitoring (Docker stats, /proc)
+│   ├── sandbox-images.ts           # Docker image management
+│   ├── sandbox-windows.ts          # Windows sandbox backend (job objects)
+│   ├── sandbox-policy.ts           # Per-tool sandbox policies
+│   ├── sandbox-profiles.ts         # Seccomp profiles and shell escaping
+│   └── cache/
+│       ├── CacheManager.ts         # Cache management
+│       ├── TieredCache.ts          # Multi-tier cache (memory + disk)
+│       ├── compression.ts          # Cache compression
+│       ├── consistency.ts          # Cache consistency checks
+│       └── index.ts                # Cache module entry
 │
-├── hooks/                          # Post-turn hook system
-│   └── postTurnHooks.ts           # Fire-and-forget hooks executed after each turn
+├── state/                          # Query loop state machine
+│   ├── types.ts                    # AgentStateName, AgentEvent discriminated union, transitions
+│   ├── store.ts                    # ObservableStateStore (immutable updates + listeners)
+│   └── machine.ts                  # AgentStateMachine with transition validation
+│
+├── tools/                          # 21 built-in tool implementations
+│   ├── AgentTool/                  # Sub-agent spawning
+│   ├── AskUserTool/                # Interactive user prompts
+│   ├── BashTool/                   # Shell execution with dangerous-command detection
+│   ├── ConfigTool/                 # Configuration management
+│   ├── DeployTool/                 # Application deployment
+│   ├── DockerTool/                 # Docker operations
+│   ├── FileEditTool/               # Exact string replacement in files
+│   ├── FileReadTool/               # File reading with size limits
+│   ├── FileWriteTool/              # File writing with path validation
+│   ├── GitTool/                    # Git operations
+│   ├── GlobTool/                   # File pattern matching
+│   ├── GrepTool/                   # Content search in files
+│   ├── MonitorTool/                # System monitoring
+│   ├── RunTool/                    # Program compilation and execution
+│   ├── SqlTool/                    # Database queries
+│   ├── TaskCreateTool/             # Task creation
+│   ├── TaskGetTool/                # Task retrieval
+│   ├── TodoWriteTool/              # Task list management
+│   ├── WebFetchTool/               # URL content fetching
+│   ├── WebSearchTool/              # Web search via configurable providers
+│   └── TaskStore.ts                # Shared task state storage
 │
 ├── types/                          # Shared type definitions
 │   ├── tools.ts                    # ToolDefinition, ToolUseContext, ToolRegistry, ToolName
@@ -225,20 +300,33 @@ src/
 │   ├── permissions.ts              # PermissionResult, PermissionMode, PermissionContext
 │   └── orchestrator.ts             # SubAgentResult, MultiAgentEvent (shared types)
 │
+├── ui/                             # Terminal UI components
+│   ├── components/
+│   │   ├── App.ts                  # Main application component
+│   │   ├── ChatView.ts             # Chat message display
+│   │   ├── CommandPalette.ts       # Fuzzy-search command palette
+│   │   ├── InputBox.ts             # User input component
+│   │   ├── ModelSelector.ts        # Interactive model/provider switcher
+│   │   ├── Sidebar.ts              # Sidebar with Tools/Files/Tasks/Memory panels
+│   │   ├── StatusBar.ts            # Status bar component
+│   │   └── ToolCallCard.ts         # Tool call display card
+│   ├── diff-viewer.ts              # Multi-file diff viewer
+│   ├── formatter.ts                # Text formatting utilities
+│   ├── layout.ts                   # Multi-panel layout manager (4 modes)
+│   ├── mouse.ts                    # Mouse event handler (SGR parsing)
+│   ├── renderer.ts                 # Terminal renderer
+│   ├── spinner.ts                  # Loading spinner
+│   ├── statusline.ts               # Status line display
+│   ├── theme.ts                    # Theme system (5 built-in themes)
+│   ├── virtual-scroll.ts           # Virtual scrolling for long conversations
+│   └── index.ts                    # UI module entry
+│
 └── utils/                          # Shared utilities
-    ├── tokenEstimation.ts          # Character-based token estimation (characters/4 * 4/3)
+    ├── tokenEstimation.ts          # tiktoken-based token estimation
     ├── format.ts                   # Date/time formatting (getAgeText)
-    └── path.ts                     # Path validation helpers
+    ├── path.ts                     # Path validation helpers
+    └── zodToJsonSchema.ts          # Zod schema to JSON Schema converter
 ```
-
-### Placeholder Directories
-
-The following directories are reserved for future development and currently contain only `.gitkeep` files:
-
-- `src/server/` — HTTP/WebSocket server for remote access
-- `src/terminal/` — Advanced terminal UI (ink-based)
-- `src/services/skills/` — Skill system for specialized workflows
-- `src/services/tools/` — Service-level tool implementations
 
 ## Available Tools
 

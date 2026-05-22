@@ -6,6 +6,7 @@ import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
 import * as path from 'path';
 import * as fs from 'fs';
+import { getCacheManager } from '../../services/cache';
 
 const ConfigInputSchema = z.object({
   action: z.enum(['get', 'set', 'list', 'delete']).describe('Action to perform'),
@@ -16,10 +17,13 @@ const ConfigInputSchema = z.object({
 
 type ConfigInput = z.infer<typeof ConfigInputSchema>;
 
-// Session config storage with size limits
+// Session config storage with TieredCache for LRU eviction and hit rate tracking
 const MAX_SESSION_CONFIG_ENTRIES = 100;
 const MAX_SESSION_VALUE_SIZE = 10 * 1024; // 10KB per value
-const sessionConfig = new Map<string, string>();
+const sessionConfig = getCacheManager().getOrCreate<string>('session-config', 'session', {
+  maxSize: MAX_SESSION_CONFIG_ENTRIES,
+  maxBytes: MAX_SESSION_CONFIG_ENTRIES * MAX_SESSION_VALUE_SIZE,
+});
 
 export const tool = buildTool<ConfigInput, string>({
   name: 'Config',

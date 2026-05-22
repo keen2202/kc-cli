@@ -5,6 +5,7 @@ import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
 import { getState } from '../../bootstrap/state';
+import { getCacheManager } from '../../services/cache';
 
 const SqlInputSchema = z.object({
   query: z.string().describe('SQL query to execute'),
@@ -17,13 +18,34 @@ type SqlInput = z.infer<typeof SqlInputSchema>;
 
 const MAX_ROWS = 1000;
 
-// Cache open database connections
-const dbCache = new Map<string, any>();
+// TieredCache for database connections with LRU eviction and cleanup on evict
+const dbCache = getCacheManager().getOrCreate<any>('sql-connections', 'tool', {
+  maxSize: 20,
+  onEvict: (_key, entry) => {
+    // Close database connection when evicted from cache
+    try {
+      if (entry.value && typeof entry.value.close === 'function') {
+        entry.value.close();
+      }
+    } catch {}
+  },
+});
 
-function getDb(databasePath: string): any {
-  if (dbCache.has(databasePath)) {
-    return dbCache.get(databasePath);
-  }
+interface SqliteDatabase {
+  prepare(sql: string): SqliteStatement;
+  pragma(pragma: string): void;
+  close(): void;
+}
+
+interface SqliteStatement {
+  run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
+  all(...params: unknown[]): Record<string, unknown>[];
+  get(...params: unknown[]): Record<string, unknown> | undefined;
+}
+
+function getDb(databasePath: string): SqliteDatabase {
+  const cached = dbCache.get(databasePath);
+  if (cached) return cached;
 
   try {
     const Database = require('better-sqlite3');
@@ -57,13 +79,15 @@ function isDestructiveQuery(query: string): boolean {
   );
 }
 
+// Pre-compiled regex for error sanitization (single-pass instead of 3 chained replaces)
+const SANITIZE_ERROR_REGEX = /\/[^\s]+\.(?:db|sqlite)|\/tmp\/[^\s]+/gi;
+
 function sanitizeError(error: unknown): string {
   const msg = error instanceof Error ? error.message : String(error);
-  // Remove file paths from error messages for security
-  return msg
-    .replace(/\/[^\s]+\.db/gi, '[database]')
-    .replace(/\/[^\s]+\.sqlite/gi, '[database]')
-    .replace(/\/tmp\/[^\s]+/g, '[temp]');
+  // Remove file paths from error messages for security (single regex)
+  return msg.replace(SANITIZE_ERROR_REGEX, (match) =>
+    match.startsWith('/tmp/') ? '[temp]' : '[database]'
+  );
 }
 
 export const tool = buildTool<SqlInput, string>({
@@ -157,7 +181,7 @@ export const tool = buildTool<SqlInput, string>({
         const params = input.params || [];
         const stmt = db.prepare(input.query);
 
-        let result: any;
+        let result: { changes: number; lastInsertRowid: number | bigint };
         try {
           result = stmt.run(...params);
         } catch (e) {

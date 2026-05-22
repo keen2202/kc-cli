@@ -193,20 +193,17 @@ export async function executeMemoryExtraction(context: PostTurnHookContext): Pro
   }
 }
 
+// Pre-compiled regex for memory-related keywords (single test instead of 4 sequential includes)
+const MEMORY_WRITE_REGEX = /memory file|wrote to memory|saved memory|updated memory/;
+
 /**
  * Check if the main agent already wrote memories in these messages
  */
 function checkIfMainAgentWroteMemories(messages: ChatMessage[]): boolean {
   for (const msg of messages) {
     if (msg.role === 'assistant' && msg.content) {
-      // Check for memory-related keywords in the response
-      const content = msg.content.toLowerCase();
-      if (
-        content.includes('memory file') ||
-        content.includes('wrote to memory') ||
-        content.includes('saved memory') ||
-        content.includes('updated memory')
-      ) {
+      // Single regex test instead of 4 sequential includes() calls
+      if (MEMORY_WRITE_REGEX.test(msg.content.toLowerCase())) {
         return true;
       }
     }
@@ -215,7 +212,6 @@ function checkIfMainAgentWroteMemories(messages: ChatMessage[]): boolean {
     if (msg.role === 'tool' && msg.toolResults) {
       for (const result of msg.toolResults) {
         if (result.output.toLowerCase().includes('memory') && !result.isError) {
-          // Could be a successful memory write
           return true;
         }
       }

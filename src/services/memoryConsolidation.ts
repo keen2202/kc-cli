@@ -16,6 +16,11 @@ import { FileMemoryService } from '../memory/FileMemoryService';
 // Module-level memory service reference (set during initialization)
 let memoryServiceRef: FileMemoryService | null = null;
 
+// Pre-compiled regex for transcript keyword detection (single test instead of multiple includes())
+const PREFERENCE_REGEX = /prefer|i\s+like/;
+const DECISION_REGEX = /decided|we\s+should/;
+const FEEDBACK_REGEX = /don't|avoid/;
+
 /**
  * Initialize the consolidation service with a memory service reference
  */
@@ -71,13 +76,12 @@ export async function executeConsolidation(
   };
 
   try {
-    // Stage 1: Orient
-    const orientResult = await stage_orient(projectHash);
-    result.memoriesProcessed += orientResult.count;
-
-    // Stage 2: Collect
-    const collectResult = await stage_collect(projectHash, sessionTranscripts);
-    result.memoriesProcessed += collectResult.count;
+    // Stage 1 & 2: Orient and Collect in parallel (both are read-only)
+    const [orientResult, collectResult] = await Promise.all([
+      stage_orient(projectHash),
+      stage_collect(projectHash, sessionTranscripts),
+    ]);
+    result.memoriesProcessed += orientResult.count + collectResult.count;
 
     // Stage 3: Integrate
     const integrateResult = await stage_integrate(projectHash, collectResult.insights);
@@ -155,15 +159,15 @@ async function stage_collect(
       // Simple keyword-based extraction
       const lowerTranscript = transcript.toLowerCase();
 
-      if (lowerTranscript.includes('prefer') || lowerTranscript.includes('i like')) {
+      if (PREFERENCE_REGEX.test(lowerTranscript)) {
         insights.push('POTENTIAL_USER_PREFERENCE: Found user preference in recent session');
       }
 
-      if (lowerTranscript.includes('decided') || lowerTranscript.includes('we should')) {
+      if (DECISION_REGEX.test(lowerTranscript)) {
         insights.push('POTENTIAL_PROJECT_DECISION: Found project decision in recent session');
       }
 
-      if (lowerTranscript.includes("don't") || lowerTranscript.includes('avoid')) {
+      if (FEEDBACK_REGEX.test(lowerTranscript)) {
         insights.push('POTENTIAL_FEEDBACK: Found feedback/lesson in recent session');
       }
     }

@@ -23,6 +23,11 @@ interface ServerConnection {
 const MAX_RECONNECT_ATTEMPTS = 3;
 const BASE_RECONNECT_DELAY_MS = 1000;
 
+// Pre-compiled regex for MCP error classification (single test instead of multiple includes())
+const MCP_ERROR_REGEX = /MCP error/;
+const TIMED_OUT_REGEX = /timed out/;
+const DISCONNECTED_REGEX = /exited|not connected/;
+
 export class MCPClientManager {
   private connections = new Map<string, ServerConnection>();
 
@@ -145,13 +150,13 @@ export class MCPClientManager {
       const msg = error instanceof Error ? error.message : String(error);
 
       // Classify SDK error types
-      if (msg.includes('MCP error')) {
+      if (MCP_ERROR_REGEX.test(msg)) {
         throw error;
       }
-      if (msg.includes('timed out')) {
+      if (TIMED_OUT_REGEX.test(msg)) {
         throw new Error(`MCP tool "${toolName}" timed out on server ${serverId}`);
       }
-      if (msg.includes('exited') || msg.includes('not connected')) {
+      if (DISCONNECTED_REGEX.test(msg)) {
         // Server crashed, attempt reconnect
         await this.attemptReconnect(serverId);
         throw new Error(`MCP server ${serverId} disconnected during tool call "${toolName}"`);

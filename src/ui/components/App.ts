@@ -36,6 +36,11 @@ const RENDER_THROTTLE_MS = 16;
 /** Debounce interval for keyboard input */
 const INPUT_DEBOUNCE_MS = 50;
 
+// Pre-built Sets for O(1) membership checks (replaces repeated array literal allocation)
+const DIFF_TOOLS_SET = new Set(['FileWrite', 'FileEdit']);
+const SIDEBAR_SECTIONS_SET = new Set(['tools', 'files', 'tasks', 'memory']);
+const VALID_PERMISSION_MODES_SET = new Set(['default', 'bypassPermissions', 'dontAsk', 'plan', 'acceptEdits']);
+
 interface AppOptions {
   queryEngine: QueryEngine;
   provider?: string;
@@ -762,8 +767,7 @@ export class App {
   private captureDiffFromToolResult(toolName: string, metadata: any): void {
     if (!metadata) return;
 
-    const diffTools = ['FileWrite', 'FileEdit'];
-    if (!diffTools.includes(toolName)) return;
+    if (!DIFF_TOOLS_SET.has(toolName)) return;
 
     // FileWriteTool: metadata.oldContent / newContent
     // FileEditTool: metadata.oldContent / newContent
@@ -843,7 +847,7 @@ export class App {
 
       case '/sidebar': {
         const section = parts[1] as import('./Sidebar').SidebarSection | undefined;
-        if (section && ['tools', 'files', 'tasks', 'memory'].includes(section)) {
+        if (section && SIDEBAR_SECTIONS_SET.has(section)) {
           this.sidebarData.activeSection = section;
         } else {
           this.sidebarData.visible = !this.sidebarData.visible;
@@ -936,8 +940,7 @@ export class App {
 
       case '/permission': {
         const mode = parts[1];
-        const validModes = ['default', 'bypassPermissions', 'dontAsk', 'plan', 'acceptEdits'];
-        if (mode && validModes.includes(mode)) {
+        if (mode && VALID_PERMISSION_MODES_SET.has(mode)) {
           // Switch permission mode (runtime only, not persisted)
           this.addMessage({
             id: `sys-${Date.now()}`,

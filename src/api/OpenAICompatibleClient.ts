@@ -1,9 +1,12 @@
 // OpenAI Compatible API Client
 // Supports: OpenAI (GPT), Qwen (DashScope), GLM (Zhipu AI), and other OpenAI-compatible APIs
+// Cache optimization: byte-stable serialization for DeepSeek auto-prefix caching
 
 import { BaseApiClient, ApiError } from './BaseApiClient';
 import type { LLMStreamEvent, LLMRequestConfig, LLMResponse, TokenUsage } from './BaseApiClient';
-import type { ToolCall } from '../types/message';
+import type { ChatMessage, ToolCall } from '../types/message';
+import type { ToolDefinition } from '../types/tools';
+import { canonicalStringify } from '../services/cachePrefix';
 
 export interface OpenAICompatibleConfig {
   apiKey: string;
@@ -14,6 +17,7 @@ export interface OpenAICompatibleConfig {
 
 export class OpenAICompatibleClient extends BaseApiClient {
   private provider: 'openai' | 'qwen' | 'glm' | 'deepseek';
+  private frozenToolSpecs: Array<Record<string, unknown>> | null = null;
 
   constructor(config: OpenAICompatibleConfig) {
     super({
@@ -22,6 +26,85 @@ export class OpenAICompatibleClient extends BaseApiClient {
       model: config.model,
     });
     this.provider = config.provider || 'openai';
+  }
+
+  /**
+   * Build request body with cache-aware serialization.
+   * For DeepSeek: use canonical JSON (sorted keys) to ensure byte-stable prefixes.
+   * For OpenAI: add prompt_cache param on supported models.
+   * Ephemeral content is appended to the last user message to keep the prefix stable.
+   */
+  protected buildRequestBody(config: LLMRequestConfig): Record<string, unknown> {
+    const body: Record<string, unknown> = {
+      model: this.model,
+      messages: this.formatMessagesCacheAware(config.messages, config.ephemeralContent),
+      stream: config.stream ?? true,
+    };
+
+    // System prompt: use as-is (stable portion from CachePrefixService)
+    if (config.systemPrompt) {
+      body.system = config.systemPrompt;
+    }
+
+    if (config.maxTokens) {
+      body.max_tokens = config.maxTokens;
+    }
+
+    if (config.temperature !== undefined) {
+      body.temperature = config.temperature;
+    }
+
+    if (config.tools && config.tools.length > 0) {
+      body.tools = this.formatToolsCacheAware(config.tools);
+    }
+
+    // OpenAI: enable prompt caching for supported models
+    if (this.provider === 'openai') {
+      body.prompt_cache = true;
+    }
+
+    return body;
+  }
+
+  /**
+   * Format messages with byte-stable serialization.
+   * Appends ephemeral content to the last user message so it stays outside the cached prefix.
+   */
+  private formatMessagesCacheAware(messages: ChatMessage[], ephemeralContent?: string): Array<Record<string, unknown>> {
+    const formatted = this.formatMessages(messages);
+
+    // Append ephemeral content to the last user message
+    if (ephemeralContent && formatted.length > 0) {
+      for (let i = formatted.length - 1; i >= 0; i--) {
+        if (formatted[i].role === 'user') {
+          const existing = formatted[i].content;
+          formatted[i].content = typeof existing === 'string'
+            ? existing + '\n\n' + ephemeralContent
+            : ephemeralContent;
+          break;
+        }
+      }
+    }
+
+    return formatted;
+  }
+
+  /**
+   * Format tools with frozen canonical serialization.
+   * Tools are frozen after first serialization to guarantee byte-stable prefixes.
+   */
+  private formatToolsCacheAware(tools: ToolDefinition[]): Array<Record<string, unknown>> {
+    if (!this.frozenToolSpecs) {
+      this.frozenToolSpecs = tools.map(tool => ({
+        type: 'function',
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: this.extractSchemaParameters(tool.inputSchema),
+        },
+      }));
+    }
+    return this.frozenToolSpecs;
   }
 
   /**
@@ -47,7 +130,7 @@ export class OpenAICompatibleClient extends BaseApiClient {
         this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'OpenAI Compatible API error', response);
       }
 
-      const data = await response.json();
+      const data = await response.json() as Record<string, unknown>;
       return this.parseResponse(data);
     } catch (error) {
       this.handleApiError(error, 'Failed to call OpenAI Compatible API');
@@ -184,24 +267,27 @@ export class OpenAICompatibleClient extends BaseApiClient {
   /**
    * Parse non-streaming response
    */
-  private parseResponse(data: any): LLMResponse {
-    const choice = data.choices?.[0];
+  private parseResponse(data: Record<string, unknown>): LLMResponse {
+    const choices = data.choices as Array<Record<string, unknown>> | undefined;
+    const choice = choices?.[0];
     if (!choice) {
       throw new Error('No choices in response');
     }
 
-    const message = choice.message;
-    const content = message?.content || '';
+    const message = choice?.message as Record<string, unknown> | undefined;
+    const content = (message?.content as string) || '';
     const toolCalls: ToolCall[] = [];
 
     // Parse tool calls
-    if (message?.tool_calls && Array.isArray(message.tool_calls)) {
-      for (const tc of message.tool_calls) {
+    const rawToolCalls = message?.tool_calls as Array<Record<string, unknown>> | undefined;
+    if (rawToolCalls && Array.isArray(rawToolCalls)) {
+      for (const tc of rawToolCalls) {
         try {
+          const fn = tc.function as Record<string, unknown> | undefined;
           toolCalls.push({
-            id: tc.id,
-            toolName: tc.function?.name || '',
-            input: tc.function?.arguments ? JSON.parse(tc.function.arguments) : {},
+            id: tc.id as string,
+            toolName: (fn?.name as string) || '',
+            input: fn?.arguments ? JSON.parse(fn.arguments as string) : {},
             status: 'completed',
           });
         } catch (error) {
@@ -211,10 +297,11 @@ export class OpenAICompatibleClient extends BaseApiClient {
     }
 
     // Parse usage
+    const usageData = data.usage as Record<string, number> | undefined;
     const usage: TokenUsage = {
-      inputTokens: data.usage?.prompt_tokens || 0,
-      outputTokens: data.usage?.completion_tokens || 0,
-      totalTokens: data.usage?.total_tokens || 0,
+      inputTokens: usageData?.prompt_tokens || 0,
+      outputTokens: usageData?.completion_tokens || 0,
+      totalTokens: usageData?.total_tokens || 0,
     };
 
     return {
@@ -237,34 +324,31 @@ export class OpenAICompatibleClient extends BaseApiClient {
         const { done, value } = await reader.read();
 
         if (done) {
+          // Process any remaining buffer
+          if (buffer.length > 0) {
+            yield* this.processSSELine(buffer);
+          }
           break;
         }
 
         buffer += decoder.decode(value, { stream: true });
 
-        // Parse SSE messages
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+        // Process complete lines using indexOf to avoid array allocation
+        let lineStart = 0;
+        while (true) {
+          const newlineIdx = buffer.indexOf('\n', lineStart);
+          if (newlineIdx === -1) break;
 
-        for (const line of lines) {
-          const trimmed = line.trim();
+          const line = buffer.slice(lineStart, newlineIdx);
+          lineStart = newlineIdx + 1;
 
-          if (trimmed.startsWith('data: ')) {
-            const dataStr = trimmed.slice(6);
-
-            if (dataStr === '[DONE]') {
-              yield { type: 'stop' };
-              return;
-            }
-
-            try {
-              const data = JSON.parse(dataStr);
-              yield* this.parseStreamChunk(data);
-            } catch (error) {
-              console.warn('Failed to parse SSE chunk:', error);
-            }
+          if (line.length > 0) {
+            yield* this.processSSELine(line);
           }
         }
+
+        // Keep unprocessed remainder
+        buffer = lineStart > 0 ? buffer.slice(lineStart) : buffer;
       }
     } finally {
       reader.releaseLock();
@@ -272,30 +356,58 @@ export class OpenAICompatibleClient extends BaseApiClient {
   }
 
   /**
+   * Process a single SSE line - extracted for reuse from both normal and final buffer processing
+   */
+  private *processSSELine(line: string): Generator<LLMStreamEvent> {
+    // Fast path: check for 'data: ' prefix without trim
+    if (line.length < 6 || line.charCodeAt(0) !== 100) return; // 'd' = 100
+    if (line.startsWith('data: ')) {
+      const dataStr = line.slice(6);
+
+      if (dataStr === '[DONE]') {
+        yield { type: 'stop' };
+        return;
+      }
+
+      try {
+        const data = JSON.parse(dataStr);
+        yield* this.parseStreamChunk(data);
+      } catch (error) {
+        console.warn('Failed to parse SSE chunk:', error);
+      }
+    }
+  }
+
+  /**
    * Parse single stream chunk
    */
-  private *parseStreamChunk(data: any): Generator<LLMStreamEvent> {
-    const choice = data.choices?.[0];
+  private *parseStreamChunk(data: Record<string, unknown>): Generator<LLMStreamEvent> {
+    const choices = data.choices as Array<Record<string, unknown>> | undefined;
+    const choice = choices?.[0];
     if (!choice) {
       return;
     }
 
+    const delta = choice.delta as Record<string, unknown> | undefined;
+
     // Text delta
-    if (choice.delta?.content && choice.finish_reason !== 'tool_calls') {
+    if (delta?.content && choice.finish_reason !== 'tool_calls') {
       yield {
         type: 'text_delta',
-        text: choice.delta.content,
+        text: delta.content as string,
       };
     }
 
     // Tool calls
-    if (choice.delta?.tool_calls && Array.isArray(choice.delta.tool_calls)) {
-      for (const tc of choice.delta.tool_calls) {
+    const rawToolCalls = delta?.tool_calls as Array<Record<string, unknown>> | undefined;
+    if (rawToolCalls && Array.isArray(rawToolCalls)) {
+      for (const tc of rawToolCalls) {
         try {
+          const fn = tc.function as Record<string, unknown> | undefined;
           const toolCall: ToolCall = {
-            id: tc.id || `tool_call_${Date.now()}`,
-            toolName: tc.function?.name || '',
-            input: tc.function?.arguments ? JSON.parse(tc.function.arguments) : {},
+            id: (tc.id as string) || `tool_call_${Date.now()}`,
+            toolName: (fn?.name as string) || '',
+            input: fn?.arguments ? JSON.parse(fn.arguments as string) : {},
             status: 'completed',
           };
 
@@ -312,13 +424,14 @@ export class OpenAICompatibleClient extends BaseApiClient {
     // Finish reason
     if (choice.finish_reason === 'stop') {
       // Parse usage if available
-      if (data.usage) {
+      const usageData = data.usage as Record<string, number> | undefined;
+      if (usageData) {
         yield {
           type: 'stop',
           usage: {
-            inputTokens: data.usage.prompt_tokens || 0,
-            outputTokens: data.usage.completion_tokens || 0,
-            totalTokens: data.usage.total_tokens || 0,
+            inputTokens: usageData.prompt_tokens || 0,
+            outputTokens: usageData.completion_tokens || 0,
+            totalTokens: usageData.total_tokens || 0,
           },
         };
       }

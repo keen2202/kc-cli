@@ -47,9 +47,10 @@ export const tool = buildTool<DockerInput, string>({
       return toolResult((stdout || stderr).trim(), {
         metadata: { command: input.command },
       });
-    } catch (error: any) {
-      const output = error.stdout || error.stderr || error.message;
-      return toolError(`Docker failed: ${output.trim()}`);
+    } catch (error) {
+      const err = error as Record<string, unknown>;
+      const output = String(err.stdout || err.stderr || (error instanceof Error ? error.message : '') || '').trim();
+      return toolError(`Docker failed: ${output}`);
     }
   },
 
@@ -82,7 +83,10 @@ export const tool = buildTool<DockerInput, string>({
 
   isReadOnly: (input) => {
     const command = input.command.trim();
-    return READONLY_COMMANDS.has(command) || READONLY_COMMANDS.has(command.split(' ')[0]);
+    if (READONLY_COMMANDS.has(command)) return true;
+    // Use indexOf instead of split to avoid allocating array
+    const spaceIdx = command.indexOf(' ');
+    return spaceIdx > 0 && READONLY_COMMANDS.has(command.slice(0, spaceIdx));
   },
   isConcurrencySafe: () => false,
   isDestructive: (input) => DANGEROUS_COMMANDS.some(p => p.test(input.command)),

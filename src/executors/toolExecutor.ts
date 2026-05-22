@@ -29,6 +29,7 @@ const COMMAND_EXECUTING_TOOLS = new Set(['Bash', 'Run']);
  */
 export class ToolExecutor {
   private tools: Map<string, ToolDefinition>;
+  private cachedToolNames: string[]; // Cached since tools don't change after construction
   private cwd: string;
   private permissionConfig?: {
     alwaysDenyRules?: string[];
@@ -58,6 +59,7 @@ export class ToolExecutor {
     }
   ) {
     this.tools = new Map(tools.map(tool => [tool.name, tool]));
+    this.cachedToolNames = Array.from(this.tools.keys());
     this.cwd = cwd;
     this.permissionConfig = permissionConfig;
     this.pluginHooks = pluginHooks;
@@ -153,11 +155,7 @@ export class ToolExecutor {
 
       // 4. Execute tool with timeout (sandbox info passed via context)
       const timeoutMs = this.getToolTimeout(tool);
-      const enrichedContext: ToolUseContext = {
-        ...context,
-        sandbox: this.sandboxManager,
-      };
-      const result = await this.executeWithTimeout(tool, effectiveInputWithWrap, enrichedContext, timeoutMs, toolCall.toolName, toolCall.id);
+      const result = await this.executeWithTimeout(tool, effectiveInputWithWrap, context, timeoutMs, toolCall.toolName, toolCall.id);
 
       // 4b. Add sandbox metadata to result
       if (result.metadata) {
@@ -204,7 +202,14 @@ export class ToolExecutor {
     // Create abort controller for this tool execution
     const toolAbortController = new AbortController();
 
-    // Create timeout promise
+    // Merge with parent abort signal if available
+    if (context.abortController?.signal) {
+      context.abortController.signal.addEventListener('abort', () => {
+        toolAbortController.abort(context.abortController?.signal.reason);
+      }, { once: true });
+    }
+
+    // Timeout promise - rejects after timeoutMs
     const timeoutError = new Error(`Tool '${toolName}' timed out after ${timeoutMs / 1000}s`);
     let timedOut = false;
     const timeoutPromise = new Promise<never>((_, reject) => {
@@ -215,26 +220,16 @@ export class ToolExecutor {
       }, timeoutMs);
     });
 
-    // Merge with parent abort signal if available
-    if (context.abortController?.signal) {
-      context.abortController.signal.addEventListener('abort', () => {
-        toolAbortController.abort(context.abortController?.signal.reason);
-      }, { once: true });
-    }
-
-    // Create enriched context with abort signal
-    const enrichedContext: ToolUseContext = {
+    // Create tool execution promise with abort signal and sandbox
+    const execPromise = tool.call(input, {
       ...context,
       abortController: toolAbortController,
-    };
-
-    // Create tool execution promise
-    const execPromise = tool.call(input, enrichedContext);
+      sandbox: this.sandboxManager,
+    });
 
     // Race between timeout and execution
     try {
       const result = await Promise.race([execPromise, timeoutPromise]);
-      // After race resolves, check if abort happened (guards against stale results)
       if (toolAbortController.signal.aborted) {
         throw timeoutError;
       }
@@ -245,7 +240,6 @@ export class ToolExecutor {
         isError: toolResult.isError || false,
       };
     } catch (error) {
-      // If timed out, return a timeout result instead of throwing
       if (timedOut) {
         return {
           toolCallId: toolCallId || '',
@@ -384,8 +378,8 @@ export class ToolExecutor {
 
       const permission = await hasPermissionsToUseTool(toolCall.toolName, toolCall.input, {
         // ToolDefinition.checkPermissions takes ToolUseContext but hasPermissionsToUseTool
-      // expects PermissionContext; the fields are compatible at runtime.
-      toolCheckPermissions: tool.checkPermissions as any,
+        // expects PermissionContext; the fields are compatible at runtime.
+        toolCheckPermissions: tool.checkPermissions as unknown as (input: Record<string, unknown>, context: import('../types/permissions').PermissionContext) => import('../types/permissions').PermissionResult,
         content: this.extractContentForPermission(toolCall.toolName, toolCall.input),
         config: this.permissionConfig,
       });
@@ -407,7 +401,7 @@ export class ToolExecutor {
     return await hasPermissionsToUseTool(toolCall.toolName, toolCall.input, {
       // ToolDefinition.checkPermissions takes ToolUseContext but hasPermissionsToUseTool
       // expects PermissionContext; the fields are compatible at runtime.
-      toolCheckPermissions: tool.checkPermissions as any,
+      toolCheckPermissions: tool.checkPermissions as unknown as (input: Record<string, unknown>, context: import('../types/permissions').PermissionContext) => import('../types/permissions').PermissionResult,
       content: this.extractContentForPermission(toolCall.toolName, toolCall.input),
       config: this.permissionConfig,
     });
@@ -417,7 +411,7 @@ export class ToolExecutor {
    * Get registered tool names
    */
   getRegisteredTools(): string[] {
-    return Array.from(this.tools.keys());
+    return this.cachedToolNames;
   }
 
   /**

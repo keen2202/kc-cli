@@ -232,4 +232,79 @@ describe('CommandPalette — Rendering', () => {
     const output = renderCommandPalette(state, { maxWidth: 60 });
     expect(output).toContain('Change Model');
   });
+
+  it('renders search placeholder when no query', () => {
+    const state = createPaletteState();
+    state.open = true;
+    state.query = '';
+    const output = renderCommandPalette(state, { maxWidth: 60 });
+    expect(output).toContain('Type to search');
+  });
+
+  it('renders search cursor when open', () => {
+    const state = createPaletteState();
+    state.open = true;
+    state.query = 'test';
+    const output = renderCommandPalette(state, { maxWidth: 60 });
+    expect(output).toContain('test_');
+  });
+
+  it('renders commands with shortcuts', () => {
+    const state = createPaletteState();
+    state.open = true;
+    state.query = 'model';
+    const output = renderCommandPalette(state, { maxWidth: 80 });
+    // Model command has Alt+M shortcut
+    expect(output).toContain('Alt+M');
+  });
+
+  it('fills empty rows to maintain height', () => {
+    const state = createPaletteState();
+    state.open = true;
+    state.query = 'xyzzy_nonexistent';
+    const output = renderCommandPalette(state, { maxWidth: 60, maxHeight: 8 });
+    const lines = output.split('\n');
+    // Should have at least maxHeight + header/footer lines
+    expect(lines.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('renders with custom maxHeight', () => {
+    const state = createPaletteState();
+    state.open = true;
+    const output = renderCommandPalette(state, { maxWidth: 60, maxHeight: 5 });
+    expect(output).toContain('Command Palette');
+  });
+});
+
+describe('CommandPalette — Filter Edge Cases', () => {
+  it('filters by command id', () => {
+    const commands = createDefaultCommands();
+    const result = filterCommands(commands, 'clear');
+    expect(result.length).toBeGreaterThanOrEqual(1);
+    expect(result.some(c => c.id === 'clear')).toBe(true);
+  });
+
+  it('handles whitespace-only query', () => {
+    const commands = createDefaultCommands();
+    const result = filterCommands(commands, '   ');
+    expect(result).toHaveLength(commands.length);
+  });
+
+  it('handles query with extra spaces', () => {
+    const commands = createDefaultCommands();
+    const result = filterCommands(commands, '  model  ');
+    expect(result.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('filters with partial match on category', () => {
+    const commands = createDefaultCommands();
+    const result = filterCommands(commands, 'help');
+    expect(result.some(c => c.category === 'Help')).toBe(true);
+  });
+
+  it('returns empty for special characters in query', () => {
+    const commands = createDefaultCommands();
+    const result = filterCommands(commands, '@#$%');
+    expect(result).toHaveLength(0);
+  });
 });

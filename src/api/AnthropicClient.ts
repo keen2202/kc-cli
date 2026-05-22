@@ -2,7 +2,8 @@
 
 import { BaseApiClient, ApiError } from './BaseApiClient';
 import type { LLMStreamEvent, LLMRequestConfig, LLMResponse, TokenUsage } from './BaseApiClient';
-import type { ToolCall } from '../types/message';
+import type { ChatMessage, ToolCall, ToolResult } from '../types/message';
+import type { ToolDefinition } from '../types/tools';
 
 export interface AnthropicConfig {
   apiKey: string;
@@ -13,6 +14,7 @@ export interface AnthropicConfig {
 
 export class AnthropicClient extends BaseApiClient {
   private apiVersion: string;
+  private streamCacheUsage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheCreationTokens: number } | null = null;
 
   constructor(config: AnthropicConfig) {
     super({
@@ -20,7 +22,7 @@ export class AnthropicClient extends BaseApiClient {
       baseUrl: config.baseUrl || 'https://api.anthropic.com',
       model: config.model,
     });
-    this.apiVersion = config.apiVersion || '2023-06-01';
+    this.apiVersion = config.apiVersion || '2024-07-31';
   }
 
   /**
@@ -43,7 +45,7 @@ export class AnthropicClient extends BaseApiClient {
         this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'Anthropic API error', response);
       }
 
-      const data = await response.json();
+      const data = await response.json() as Record<string, unknown>;
       return this.parseResponse(data);
     } catch (error) {
       this.handleApiError(error, 'Failed to call Anthropic API');
@@ -119,7 +121,8 @@ export class AnthropicClient extends BaseApiClient {
   }
 
   /**
-   * Build request body for Anthropic API
+   * Build request body for Anthropic API.
+   * Ephemeral content is appended to the last user message to keep the cached prefix stable.
    */
   protected buildRequestBody(config: LLMRequestConfig): Record<string, unknown> {
     const body: Record<string, unknown> = {
@@ -137,9 +140,10 @@ export class AnthropicClient extends BaseApiClient {
     }
 
     // Format messages (filter out system messages)
+    // Pass ephemeral content to be appended to the last user message
     const messages = config.messages.filter(m => m.role !== 'system');
     if (messages.length > 0) {
-      body.messages = this.formatMessages(messages);
+      body.messages = this.formatMessages(messages, config.ephemeralContent);
     }
 
     // Tools
@@ -156,18 +160,36 @@ export class AnthropicClient extends BaseApiClient {
   }
 
   /**
-   * Format messages for Anthropic API
+   * Format messages for Anthropic API with cache optimization.
+   * Places cache_control on the second-to-last user message to maximize prefix cache reuse.
+   * Strategy: when messages.length >= MIN_MESSAGES_FOR_CACHE, mark the second-to-last user message
+   * so that (system + tools + stable conversation history) is cached as a prefix.
+   * The last user message (latest query) stays outside the cache boundary.
+   * Ephemeral content (memory, level adaptation) is appended to the last user message.
    */
-  protected formatMessages(messages: any[]): Array<Record<string, unknown>> {
-    return messages.map(msg => {
-      const formatted: Record<string, unknown> = {
+  protected formatMessages(messages: ChatMessage[], ephemeralContent?: string): Array<Record<string, unknown>> {
+    const MIN_MESSAGES_FOR_CACHE = 4; // Only add breakpoint when conversation has enough context
+
+    // Find the second-to-last user message index for cache breakpoint placement
+    let lastUserIdx = -1;
+    let secondToLastUserIdx = -1;
+    for (let i = 0; i < messages.length; i++) {
+      if (messages[i].role === 'user') {
+        secondToLastUserIdx = lastUserIdx;
+        lastUserIdx = i;
+      }
+    }
+
+    const formatted = messages.map((msg, index) => {
+      const contentArr: Array<Record<string, unknown>> = [];
+      const formattedMsg: Record<string, unknown> = {
         role: msg.role === 'assistant' ? 'assistant' : 'user',
-        content: [],
+        content: contentArr,
       };
 
       // Text content
       if (msg.content) {
-        (formatted.content as any[]).push({
+        contentArr.push({
           type: 'text',
           text: msg.content,
         });
@@ -175,7 +197,7 @@ export class AnthropicClient extends BaseApiClient {
 
       // Tool calls (assistant message)
       if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
-        (formatted.content as any[]).push(...msg.toolCalls.map((tc: ToolCall) => ({
+        contentArr.push(...msg.toolCalls.map((tc: ToolCall) => ({
           type: 'tool_use',
           id: tc.id,
           name: tc.toolName,
@@ -185,21 +207,57 @@ export class AnthropicClient extends BaseApiClient {
 
       // Tool results (user message)
       if (msg.role === 'tool' && msg.toolResults && msg.toolResults.length > 0) {
-        (formatted.content as any[]).push(...msg.toolResults.map((r: any) => ({
+        contentArr.push(...msg.toolResults.map((r: ToolResult) => ({
           type: 'tool_result',
           tool_use_id: r.toolCallId,
           content: r.output,
         })));
       }
 
-      return formatted;
+      // Add cache breakpoint on the second-to-last user message when conversation is long enough.
+      // This caches: system prompt + tools + conversation history (minus latest exchange).
+      // If not enough messages or only one user message, fall back to first user message.
+      const cacheTargetIdx = messages.length >= MIN_MESSAGES_FOR_CACHE && secondToLastUserIdx >= 0
+        ? secondToLastUserIdx
+        : (messages.length >= MIN_MESSAGES_FOR_CACHE ? 0 : -1);
+
+      if (
+        index === cacheTargetIdx &&
+        msg.role === 'user' &&
+        contentArr.length > 0
+      ) {
+        contentArr[contentArr.length - 1] = {
+          ...contentArr[contentArr.length - 1],
+          cache_control: { type: 'ephemeral' },
+        };
+      }
+
+      return formattedMsg;
     });
+
+    // Append ephemeral content to the last user message (outside cache boundary)
+    if (ephemeralContent) {
+      for (let i = formatted.length - 1; i >= 0; i--) {
+        if (formatted[i].role === 'user') {
+          const content = formatted[i].content as Array<Record<string, unknown>>;
+          content.push({
+            type: 'text',
+            text: ephemeralContent,
+          });
+          break;
+        }
+      }
+    }
+
+    return formatted;
   }
 
   /**
-   * Format tools for Anthropic API
+   * Format tools for Anthropic API with cache optimization.
+   * Places cache_control on the last tool to cache the entire tools array.
+   * Tools are static across turns → high cache reuse.
    */
-  protected formatTools(tools: any[]): Array<Record<string, unknown>> {
+  protected formatTools(tools: ToolDefinition[]): Array<Record<string, unknown>> {
     return tools.map((tool, index) => ({
       name: tool.name,
       description: tool.description,
@@ -216,37 +274,39 @@ export class AnthropicClient extends BaseApiClient {
       'Content-Type': 'application/json',
       'x-api-key': this.apiKey,
       'anthropic-version': this.apiVersion,
+      'anthropic-beta': 'prompt-caching-2024-07-31',
     };
   }
 
   /**
    * Parse non-streaming response
    */
-  private parseResponse(data: any): LLMResponse {
-    const content = data.content || [];
+  private parseResponse(data: Record<string, unknown>): LLMResponse {
+    const content = (data.content as Array<Record<string, unknown>>) || [];
     let textContent = '';
     const toolCalls: ToolCall[] = [];
 
     // Parse content blocks
     for (const block of content) {
       if (block.type === 'text') {
-        textContent += block.text;
+        textContent += block.text as string;
       } else if (block.type === 'tool_use') {
         toolCalls.push({
-          id: block.id,
-          toolName: block.name,
-          input: block.input || {},
+          id: block.id as string,
+          toolName: block.name as string,
+          input: (block.input as Record<string, unknown>) || {},
           status: 'completed',
         });
       }
     }
 
+    const usageData = data.usage as Record<string, number> | undefined;
     const usage: TokenUsage = {
-      inputTokens: data.usage?.input_tokens || 0,
-      outputTokens: data.usage?.output_tokens || 0,
-      totalTokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0),
-      cacheReadTokens: data.usage?.cache_read_input_tokens || 0,
-      cacheCreationTokens: data.usage?.cache_creation_input_tokens || 0,
+      inputTokens: usageData?.input_tokens || 0,
+      outputTokens: usageData?.output_tokens || 0,
+      totalTokens: (usageData?.input_tokens || 0) + (usageData?.output_tokens || 0),
+      cacheReadTokens: usageData?.cache_read_input_tokens || 0,
+      cacheCreationTokens: usageData?.cache_creation_input_tokens || 0,
     };
 
     return {
@@ -265,10 +325,12 @@ export class AnthropicClient extends BaseApiClient {
     const decoder = new TextDecoder();
     let buffer = '';
 
-    // SSE state machine
-    let currentEventType: string | null = null;
-    let currentToolCall: Partial<ToolCall> | null = null;
-    let toolInputBuffer = '';
+    // SSE state machine - context object created once, reused across all iterations
+    const ctx = {
+      currentEventType: null as string | null,
+      currentToolCall: null as Partial<ToolCall> | null,
+      toolInputBuffer: '',
+    };
 
     try {
       while (true) {
@@ -277,14 +339,7 @@ export class AnthropicClient extends BaseApiClient {
         if (done) {
           // Process remaining buffer
           if (buffer.trim()) {
-            yield* this.processBufferLine(buffer.trim(), {
-              currentEventType: currentEventType,
-              currentToolCall,
-              toolInputBuffer,
-              setEventType: (type) => { currentEventType = type; },
-              setToolCall: (tc) => { currentToolCall = tc; },
-              setToolInputBuffer: (buf) => { toolInputBuffer = buf; },
-            });
+            yield* this.processBufferLine(buffer.trim(), ctx);
           }
           break;
         }
@@ -300,15 +355,8 @@ export class AnthropicClient extends BaseApiClient {
         for (const part of parts) {
           const trimmed = part.trim();
           if (!trimmed) continue;
-          
-          yield* this.processBufferLine(trimmed, {
-            currentEventType: currentEventType,
-            currentToolCall,
-            toolInputBuffer,
-            setEventType: (type) => { currentEventType = type; },
-            setToolCall: (tc) => { currentToolCall = tc; },
-            setToolInputBuffer: (buf) => { toolInputBuffer = buf; },
-          });
+
+          yield* this.processBufferLine(trimmed, ctx);
         }
       }
     } finally {
@@ -321,96 +369,113 @@ export class AnthropicClient extends BaseApiClient {
    */
   private *processBufferLine(
     block: string,
-    context: {
+    ctx: {
       currentEventType: string | null;
       currentToolCall: Partial<ToolCall> | null;
       toolInputBuffer: string;
-      setEventType: (type: string) => void;
-      setToolCall: (tc: Partial<ToolCall> | null) => void;
-      setToolInputBuffer: (buf: string) => void;
     }
   ): Generator<LLMStreamEvent> {
-    const lines = block.split('\n');
     let eventType: string | null = null;
     let dataStr: string | null = null;
 
-    // Parse event type and data from the block
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith('event: ')) {
-        eventType = trimmed.slice(7);
-        context.setEventType(eventType);
-      } else if (trimmed.startsWith('data: ')) {
-        dataStr = trimmed.slice(6);
+    // Parse event and data lines using indexOf to avoid split+trim overhead
+    let pos = 0;
+    const len = block.length;
+    while (pos < len) {
+      const lineEnd = block.indexOf('\n', pos);
+      const actualEnd = lineEnd === -1 ? len : lineEnd;
+
+      // Skip leading whitespace
+      let lineStart = pos;
+      while (lineStart < actualEnd && (block.charCodeAt(lineStart) === 32 || block.charCodeAt(lineStart) === 9)) {
+        lineStart++;
       }
+
+      if (actualEnd - lineStart >= 7 && block.charCodeAt(lineStart) === 101 && block.slice(lineStart, lineStart + 7) === 'event: ') {
+        eventType = block.slice(lineStart + 7, actualEnd);
+        ctx.currentEventType = eventType;
+      } else if (actualEnd - lineStart >= 6 && block.charCodeAt(lineStart) === 100 && block.slice(lineStart, lineStart + 6) === 'data: ') {
+        dataStr = block.slice(lineStart + 6, actualEnd);
+      }
+
+      pos = lineEnd === -1 ? len : lineEnd + 1;
     }
 
     // Must have both event type and data
-    if (!eventType && !context.currentEventType) return;
+    if (!eventType && !ctx.currentEventType) return;
     if (!dataStr) return;
 
-    const resolvedEventType = eventType || context.currentEventType;
+    const resolvedEventType = eventType || ctx.currentEventType;
 
     try {
       const data = JSON.parse(dataStr);
-      yield* this.parseStreamEvent(resolvedEventType!, data, {
-        currentToolCall: context.currentToolCall,
-        toolInputBuffer: context.toolInputBuffer,
-        setToolCall: context.setToolCall,
-        setToolInputBuffer: context.setToolInputBuffer,
-      });
+      yield* this.parseStreamEvent(resolvedEventType!, data, ctx);
     } catch (error) {
       console.warn('Failed to parse SSE event data:', error);
     }
   }
 
   /**
-   * Parse single stream event
+   * Parse single stream event.
+   * Handles message_start (for cache metrics), content_block_start/delta/stop,
+   * message_delta, message_stop, and error events.
    */
   private *parseStreamEvent(
     eventType: string,
-    data: any,
-    context: {
+    data: Record<string, unknown>,
+    ctx: {
       currentToolCall: Partial<ToolCall> | null;
       toolInputBuffer: string;
-      setToolCall: (tc: Partial<ToolCall> | null) => void;
-      setToolInputBuffer: (buf: string) => void;
     }
   ): Generator<LLMStreamEvent> {
     switch (eventType) {
-      case 'content_block_start':
-        if (data.content_block?.type === 'text') {
-          // Text block starting
-        } else if (data.content_block?.type === 'tool_use') {
-          context.setToolCall({
-            id: data.content_block.id,
-            toolName: data.content_block.name,
-            input: {},
-          });
-          context.setToolInputBuffer('');
+      case 'message_start': {
+        const message = data.message as Record<string, unknown> | undefined;
+        const msgUsage = message?.usage as Record<string, number> | undefined;
+        if (msgUsage) {
+          this.streamCacheUsage = {
+            inputTokens: msgUsage.input_tokens || 0,
+            outputTokens: msgUsage.output_tokens || 0,
+            cacheReadTokens: msgUsage.cache_read_input_tokens || 0,
+            cacheCreationTokens: msgUsage.cache_creation_input_tokens || 0,
+          };
         }
         break;
+      }
 
-      case 'content_block_delta':
-        if (data.delta?.type === 'text_delta') {
+      case 'content_block_start': {
+        const contentBlock = data.content_block as Record<string, unknown> | undefined;
+        if (contentBlock?.type === 'tool_use') {
+          ctx.currentToolCall = {
+            id: contentBlock.id as string,
+            toolName: contentBlock.name as string,
+            input: {},
+          };
+          ctx.toolInputBuffer = '';
+        }
+        break;
+      }
+
+      case 'content_block_delta': {
+        const delta = data.delta as Record<string, unknown> | undefined;
+        if (delta?.type === 'text_delta') {
           yield {
             type: 'text_delta',
-            text: data.delta.text,
+            text: delta.text as string,
           };
-        } else if (data.delta?.type === 'input_json_delta') {
-          // Accumulate tool input
-          context.setToolInputBuffer(context.toolInputBuffer + (data.delta.partial_json || ''));
+        } else if (delta?.type === 'input_json_delta') {
+          ctx.toolInputBuffer += ((delta.partial_json as string) || '');
         }
         break;
+      }
 
       case 'content_block_stop':
-        // Tool call complete
-        if (context.currentToolCall) {
+        if (ctx.currentToolCall) {
           try {
             const toolCall: ToolCall = {
-              id: context.currentToolCall.id || '',
-              toolName: context.currentToolCall.toolName || '',
-              input: context.toolInputBuffer ? JSON.parse(context.toolInputBuffer) : {},
+              id: ctx.currentToolCall.id || '',
+              toolName: ctx.currentToolCall.toolName || '',
+              input: ctx.toolInputBuffer ? JSON.parse(ctx.toolInputBuffer) : {},
               status: 'completed',
             };
 
@@ -419,8 +484,8 @@ export class AnthropicClient extends BaseApiClient {
               toolCall,
             };
 
-            context.setToolCall(null);
-            context.setToolInputBuffer('');
+            ctx.currentToolCall = null;
+            ctx.toolInputBuffer = '';
           } catch (error) {
             console.warn('Failed to parse tool input:', error);
           }
@@ -428,28 +493,39 @@ export class AnthropicClient extends BaseApiClient {
         break;
 
       case 'message_stop':
-        yield { type: 'stop' };
-        break;
-
-      case 'message_delta':
-        if (data.usage) {
+        if (this.streamCacheUsage) {
           yield {
             type: 'stop',
             usage: {
-              inputTokens: data.usage?.input_tokens || 0,
-              outputTokens: data.usage?.output_tokens || 0,
-              totalTokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0),
+              inputTokens: this.streamCacheUsage.inputTokens,
+              outputTokens: this.streamCacheUsage.outputTokens,
+              totalTokens: this.streamCacheUsage.inputTokens + this.streamCacheUsage.outputTokens,
+              cacheReadTokens: this.streamCacheUsage.cacheReadTokens,
+              cacheCreationTokens: this.streamCacheUsage.cacheCreationTokens,
             },
           };
+          this.streamCacheUsage = null;
+        } else {
+          yield { type: 'stop' };
         }
         break;
 
-      case 'error':
+      case 'message_delta': {
+        const deltaUsage = data.usage as Record<string, number> | undefined;
+        if (deltaUsage?.output_tokens && this.streamCacheUsage) {
+          this.streamCacheUsage.outputTokens += deltaUsage.output_tokens;
+        }
+        break;
+      }
+
+      case 'error': {
+        const errorData = data.error as Record<string, unknown> | undefined;
         yield {
           type: 'error',
-          error: new Error(data.error?.message || 'Unknown Anthropic error'),
+          error: new Error((errorData?.message as string) || 'Unknown Anthropic error'),
         };
         break;
+      }
     }
   }
 

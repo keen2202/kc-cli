@@ -200,4 +200,87 @@ describe('ModelSelector — Rendering', () => {
     expect(providers.length).toBeGreaterThan(0);
     expect(output).toContain(getKnownProviders()[0]!.label);
   });
+
+  it('renders models for selected provider', () => {
+    const state = createModelSelectorState('anthropic', 'claude-sonnet-4-20250514');
+    const output = renderModelSelector(state, { maxWidth: 70 });
+    // Should show Anthropic models
+    expect(output).toContain('Claude Sonnet 4');
+  });
+
+  it('renders provider descriptions when selected', () => {
+    const state = createModelSelectorState('deepseek', 'deepseek-chat');
+    const output = renderModelSelector(state, { maxWidth: 80 });
+    expect(output).toContain('DeepSeek');
+    expect(output).toContain('code generation');
+  });
+
+  it('fills empty rows to maintain height', () => {
+    const state = createModelSelectorState();
+    const output = renderModelSelector(state, { maxWidth: 70, maxHeight: 5 });
+    expect(output).toContain('Select Model');
+  });
+});
+
+describe('ModelSelector — Provider Coverage', () => {
+  it('includes Qwen provider', () => {
+    const providers = getKnownProviders();
+    const qwen = providers.find(p => p.id === 'qwen');
+    expect(qwen).toBeDefined();
+    expect(qwen!.label).toBe('Qwen');
+    expect(qwen!.models.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('includes GLM provider', () => {
+    const providers = getKnownProviders();
+    const glm = providers.find(p => p.id === 'glm');
+    expect(glm).toBeDefined();
+    expect(glm!.models.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('includes OpenAI-compatible provider', () => {
+    const providers = getKnownProviders();
+    const compatible = providers.find(p => p.id === 'openai-compatible');
+    expect(compatible).toBeDefined();
+    expect(compatible!.models[0]!.id).toBe('custom');
+  });
+
+  it('includes Ollama provider', () => {
+    const providers = getKnownProviders();
+    const ollama = providers.find(p => p.id === 'ollama');
+    expect(ollama).toBeDefined();
+    expect(ollama!.models[0]!.id).toBe('auto');
+  });
+});
+
+describe('ModelSelector — Navigation Edge Cases', () => {
+  it('handles multiple moveDown calls across providers', () => {
+    const state = createModelSelectorState();
+    const totalModels = state.providers.reduce((sum, p) => sum + p.models.length, 0);
+    // Navigate through all models
+    for (let i = 0; i < totalModels; i++) {
+      modelSelectorMoveDown(state);
+    }
+    // Should wrap back to start
+    expect(state.providerIndex).toBe(0);
+    expect(state.modelIndex).toBe(0);
+  });
+
+  it('handles moveUp from first provider first model', () => {
+    const state = createModelSelectorState();
+    state.providerIndex = 0;
+    state.modelIndex = 0;
+    modelSelectorMoveUp(state);
+    // Should wrap to last provider
+    expect(state.providerIndex).toBe(state.providers.length - 1);
+  });
+
+  it('handles moveDown within multi-model provider', () => {
+    const state = createModelSelectorState('anthropic');
+    expect(state.modelIndex).toBe(0);
+    modelSelectorMoveDown(state);
+    expect(state.modelIndex).toBe(1);
+    modelSelectorMoveDown(state);
+    expect(state.modelIndex).toBe(2);
+  });
 });

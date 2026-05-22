@@ -15,7 +15,7 @@ export class HttpTransport {
   private messageId = 0;
   private notificationHandler: ((notification: JSONRPCNotification) => void) | null = null;
   private connected = false;
-  private sdkTransport: any | null = null;
+  private sdkTransport: { connect(): Promise<void>; sendRequest(method: string, params?: Record<string, unknown>): Promise<unknown>; close(): Promise<void> } | null = null;
   private useSdk = false;
 
   async connect(url: string, headers?: Record<string, string>): Promise<void> {
@@ -32,7 +32,7 @@ export class HttpTransport {
       this.sdkTransport = new StreamableHTTPClientTransport(new URL(url), {
         requestInit: { headers: this.headers },
       });
-      await this.sdkTransport.connect();
+      await this.sdkTransport!.connect();
       this.useSdk = true;
       this.connected = true;
       return;

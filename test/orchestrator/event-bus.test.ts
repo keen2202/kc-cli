@@ -169,8 +169,9 @@ describe('ScopedEventBus', () => {
     const handler = vi.fn();
     bus.on('agent1', handler);
     const scoped = new ScopedEventBus(bus, 'agent1');
-    scoped.emit(makeEvent('hello'));
-    expect(handler).toHaveBeenCalledWith(makeEvent('hello'));
+    const event = makeEvent('hello');
+    scoped.emit(event);
+    expect(handler).toHaveBeenCalledWith(event);
   });
 
   it('should subscribe via scoped bus', () => {

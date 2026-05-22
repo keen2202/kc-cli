@@ -71,24 +71,33 @@ export const LANGUAGE_REGISTRY: LanguageServerConfig[] = [
   },
 ];
 
-/**
- * Map file extension to language ID using the registry.
- */
-export function detectLanguageFromRegistry(filePath: string): string | null {
-  const ext = getExtension(filePath).toLowerCase();
-  for (const config of LANGUAGE_REGISTRY) {
-    if (config.extensions.includes(ext)) {
-      return config.languageId;
-    }
+// Pre-built extension → languageId map for O(1) lookups (avoids iterating registry per call)
+const extensionToLanguage = new Map<string, string>();
+for (const config of LANGUAGE_REGISTRY) {
+  for (const ext of config.extensions) {
+    extensionToLanguage.set(ext.toLowerCase(), config.languageId);
   }
-  return null;
 }
 
 /**
- * Get the language server config for a given language ID.
+ * Map file extension to language ID using the registry (O(1) Map lookup).
+ */
+export function detectLanguageFromRegistry(filePath: string): string | null {
+  const ext = getExtension(filePath).toLowerCase();
+  return extensionToLanguage.get(ext) ?? null;
+}
+
+// Pre-built languageId → config map for O(1) lookups
+const languageConfigMap = new Map<string, LanguageServerConfig>();
+for (const config of LANGUAGE_REGISTRY) {
+  languageConfigMap.set(config.languageId, config);
+}
+
+/**
+ * Get the language server config for a given language ID (O(1) Map lookup).
  */
 export function getLanguageConfig(languageId: string): LanguageServerConfig | null {
-  return LANGUAGE_REGISTRY.find(c => c.languageId === languageId) ?? null;
+  return languageConfigMap.get(languageId) ?? null;
 }
 
 /**
@@ -138,14 +147,26 @@ export function hasCapability(languageId: string, capability: LSPCapability): bo
 
 /**
  * Add a custom language server configuration at runtime.
+ * Keeps both LANGUAGE_REGISTRY array and lookup maps in sync.
  */
 export function registerLanguageServer(config: LanguageServerConfig): void {
   // Remove existing entry for the same languageId if present
   const idx = LANGUAGE_REGISTRY.findIndex(c => c.languageId === config.languageId);
   if (idx >= 0) {
+    // Remove old extensions from map
+    const oldConfig = LANGUAGE_REGISTRY[idx];
+    for (const ext of oldConfig.extensions) {
+      extensionToLanguage.delete(ext.toLowerCase());
+    }
     LANGUAGE_REGISTRY[idx] = config;
   } else {
     LANGUAGE_REGISTRY.push(config);
+  }
+
+  // Update maps
+  languageConfigMap.set(config.languageId, config);
+  for (const ext of config.extensions) {
+    extensionToLanguage.set(ext.toLowerCase(), config.languageId);
   }
 }
 

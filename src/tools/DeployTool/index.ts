@@ -63,8 +63,9 @@ export const tool = buildTool<DeployInput, string>({
           },
         }
       );
-    } catch (error: any) {
-      return toolError(`Deploy failed: ${error.stdout || error.stderr || error.message}`);
+    } catch (error) {
+      const err = error as Record<string, unknown>;
+      return toolError(`Deploy failed: ${String(err.stdout || err.stderr || (error instanceof Error ? error.message : String(error)))}`);
     }
   },
 

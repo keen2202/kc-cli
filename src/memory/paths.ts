@@ -90,6 +90,7 @@ export async function ensureMemoryDir(projectHash: string): Promise<void> {
  * Ensure the session directory structure exists
  */
 export async function ensureSessionDirs(): Promise<void> {
+  // Archive path is a child of session path, so mkdir session first, then archive
   await fs.mkdir(getSessionBasePath(), { recursive: true });
   await fs.mkdir(getArchivePath(), { recursive: true });
 }

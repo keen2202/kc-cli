@@ -3,6 +3,8 @@
 // Allows fine-grained control over which tools run in the sandbox,
 // with support for tool-level and pattern-based rules.
 
+import { getCacheManager } from './cache';
+
 /**
  * Sandbox enforcement level for a specific tool.
  *
@@ -118,19 +120,20 @@ export const DEFAULT_SANDBOX_POLICY: SandboxPolicy = {
  * Check if a tool name matches a glob pattern.
  * Supports '*' (any characters) and '?' (single character).
  */
-// Cache compiled regexes to avoid recompilation on every call
-const patternCache = new Map<string, RegExp>();
+// TieredCache for compiled regexes with hit rate tracking
+const patternCache = getCacheManager().getOrCreate<RegExp>(
+  'sandbox-patterns', 'permission', { maxSize: 200 }
+);
 
 function getCompiledPattern(pattern: string): RegExp {
-  let re = patternCache.get(pattern);
-  if (!re) {
-    const regexPattern = pattern
-      .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-      .replace(/\*/g, '.*')
-      .replace(/\?/g, '.');
-    re = new RegExp(`^${regexPattern}$`);
-    patternCache.set(pattern, re);
-  }
+  const cached = patternCache.get(pattern);
+  if (cached) return cached;
+  const regexPattern = pattern
+    .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.');
+  const re = new RegExp(`^${regexPattern}$`);
+  patternCache.set(pattern, re);
   return re;
 }
 

@@ -15,17 +15,19 @@ export async function loadMCPConfig(projectDir: string): Promise<LoadedMCPConfig
   const servers: Record<string, MCPServerConfig> = {};
   const sources: string[] = [];
 
-  // User global config: ~/.kc-cli/mcp.json
+  // Load both configs in parallel (independent reads)
   const userConfigPath = path.join(os.homedir(), '.kc-cli', 'mcp.json');
-  const userConfig = await loadConfigFile(userConfigPath);
+  const projectConfigPath = path.join(projectDir, '.mcp.json');
+  const [userConfig, projectConfig] = await Promise.all([
+    loadConfigFile(userConfigPath),
+    loadConfigFile(projectConfigPath),
+  ]);
+
   if (userConfig) {
     Object.assign(servers, userConfig.mcpServers);
     sources.push(userConfigPath);
   }
 
-  // Project config: .mcp.json in project root
-  const projectConfigPath = path.join(projectDir, '.mcp.json');
-  const projectConfig = await loadConfigFile(projectConfigPath);
   if (projectConfig) {
     // Project config overrides user config for same server names
     Object.assign(servers, projectConfig.mcpServers);

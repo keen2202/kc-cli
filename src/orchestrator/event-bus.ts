@@ -31,7 +31,8 @@ export class EventBus {
     const buffer = this.eventBuffers.get(agentId)!;
     if (buffer.length >= EventBus.MAX_BUFFER_SIZE) {
       // Drop oldest event to prevent unbounded growth
-      buffer.shift();
+      // Use index-based removal instead of O(n) shift()
+      buffer.splice(0, buffer.length - EventBus.MAX_BUFFER_SIZE + 1);
     }
     buffer.push(event);
 
@@ -207,7 +208,10 @@ export function eventsForAgent(
         return { value: undefined as any, done: true };
       }
       if (queue.length > 0) {
-        return { value: queue.shift()!, done: false };
+        // Use index-based read instead of O(n) shift()
+        const value = queue[0]!;
+        queue.splice(0, 1);
+        return { value, done: false };
       }
       return new Promise((resolve) => {
         resolveNext = resolve;

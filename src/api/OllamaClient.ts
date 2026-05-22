@@ -2,7 +2,8 @@
 
 import { BaseApiClient, ApiError } from './BaseApiClient';
 import type { LLMStreamEvent, LLMRequestConfig, LLMResponse, TokenUsage } from './BaseApiClient';
-import type { ToolCall } from '../types/message';
+import type { ChatMessage, ToolCall } from '../types/message';
+import type { ToolDefinition } from '../types/tools';
 
 export interface OllamaConfig {
   baseUrl?: string;
@@ -39,7 +40,7 @@ export class OllamaClient extends BaseApiClient {
         this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'Ollama API error', response);
       }
 
-      const data = await response.json();
+      const data = await response.json() as Record<string, unknown>;
       return this.parseResponse(data);
     } catch (error) {
       this.handleApiError(error, 'Failed to call Ollama API. Make sure Ollama is running');
@@ -128,7 +129,7 @@ export class OllamaClient extends BaseApiClient {
     };
 
     // Format messages
-    const messages: any[] = [];
+    const messages: Array<Record<string, unknown>> = [];
 
     if (config.systemPrompt) {
       messages.push({
@@ -157,22 +158,24 @@ export class OllamaClient extends BaseApiClient {
   /**
    * Parse non-streaming Response
    */
-  private parseResponse(data: any): LLMResponse {
-    const message = data.message;
+  private parseResponse(data: Record<string, unknown>): LLMResponse {
+    const message = data.message as Record<string, unknown> | undefined;
     if (!message) {
       throw new Error('No message in response');
     }
 
-    const content = message.content || '';
+    const content = (message.content as string) || '';
     const toolCalls: ToolCall[] = [];
 
     // Parse tool calls (Ollama format)
-    if (message.tool_calls && Array.isArray(message.tool_calls)) {
-      for (const tc of message.tool_calls) {
+    const rawToolCalls = message.tool_calls as Array<Record<string, unknown>> | undefined;
+    if (rawToolCalls && Array.isArray(rawToolCalls)) {
+      for (const tc of rawToolCalls) {
+        const fn = tc.function as Record<string, unknown> | undefined;
         toolCalls.push({
-          id: tc.id || `tool_call_${Date.now()}`,
-          toolName: tc.function?.name || '',
-          input: tc.function?.arguments || {},
+          id: (tc.id as string) || `tool_call_${Date.now()}`,
+          toolName: (fn?.name as string) || '',
+          input: (fn?.arguments as Record<string, unknown>) || {},
           status: 'completed',
         });
       }
@@ -180,9 +183,9 @@ export class OllamaClient extends BaseApiClient {
 
     // Parse usage
     const usage: TokenUsage = {
-      inputTokens: data.prompt_eval_count || 0,
-      outputTokens: data.eval_count || 0,
-      totalTokens: (data.prompt_eval_count || 0) + (data.eval_count || 0),
+      inputTokens: (data.prompt_eval_count as number) || 0,
+      outputTokens: (data.eval_count as number) || 0,
+      totalTokens: ((data.prompt_eval_count as number) || 0) + ((data.eval_count as number) || 0),
     };
 
     return {
@@ -193,7 +196,7 @@ export class OllamaClient extends BaseApiClient {
   }
 
   /**
-   * Parse streaming response
+   * Parse streaming response using indexOf-based line parsing (avoids array allocation per chunk)
    */
   private async *parseStreamResponse(body: ReadableStream): AsyncGenerator<LLMStreamEvent> {
     const reader = body.getReader();
@@ -210,26 +213,35 @@ export class OllamaClient extends BaseApiClient {
 
         buffer += decoder.decode(value, { stream: true });
 
-        // Ollama returns NDJSON (newline-delimited JSON)
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+        // Process complete lines using indexOf to avoid array allocation
+        let lineStart = 0;
+        let shouldStop = false;
 
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
+        while (!shouldStop) {
+          const newlineIdx = buffer.indexOf('\n', lineStart);
+          if (newlineIdx === -1) break;
 
-          try {
-            const data = JSON.parse(trimmed);
-            yield* this.parseStreamChunk(data);
+          const line = buffer.slice(lineStart, newlineIdx);
+          lineStart = newlineIdx + 1;
 
-            if (data.done) {
-              yield { type: 'stop' };
-              return;
+          if (line.length > 0) {
+            try {
+              const data = JSON.parse(line);
+              yield* this.parseStreamChunk(data);
+              if (data.done) {
+                yield { type: 'stop' };
+                shouldStop = true;
+              }
+            } catch (error) {
+              console.warn('Failed to parse Ollama chunk:', error);
             }
-          } catch (error) {
-            console.warn('Failed to parse Ollama chunk:', error);
           }
         }
+
+        if (shouldStop) return;
+
+        // Keep unprocessed remainder
+        buffer = lineStart > 0 ? buffer.slice(lineStart) : buffer;
       }
     } finally {
       reader.releaseLock();
@@ -239,23 +251,27 @@ export class OllamaClient extends BaseApiClient {
   /**
    * Parse single stream chunk
    */
-  private *parseStreamChunk(data: any): Generator<LLMStreamEvent> {
+  private *parseStreamChunk(data: Record<string, unknown>): Generator<LLMStreamEvent> {
+    const message = data.message as Record<string, unknown> | undefined;
+
     // Text delta
-    if (data.message?.content) {
+    if (message?.content) {
       yield {
         type: 'text_delta',
-        text: data.message.content,
+        text: message.content as string,
       };
     }
 
     // Tool calls
-    if (data.message?.tool_calls && Array.isArray(data.message.tool_calls)) {
-      for (const tc of data.message.tool_calls) {
+    const rawToolCalls = message?.tool_calls as Array<Record<string, unknown>> | undefined;
+    if (rawToolCalls && Array.isArray(rawToolCalls)) {
+      for (const tc of rawToolCalls) {
         try {
+          const fn = tc.function as Record<string, unknown> | undefined;
           const toolCall: ToolCall = {
-            id: tc.id || `tool_call_${Date.now()}`,
-            toolName: tc.function?.name || '',
-            input: tc.function?.arguments || {},
+            id: (tc.id as string) || `tool_call_${Date.now()}`,
+            toolName: (fn?.name as string) || '',
+            input: (fn?.arguments as Record<string, unknown>) || {},
             status: 'completed',
           };
 
@@ -274,9 +290,9 @@ export class OllamaClient extends BaseApiClient {
       yield {
         type: 'stop',
         usage: {
-          inputTokens: data.prompt_eval_count || 0,
-          outputTokens: data.eval_count || 0,
-          totalTokens: (data.prompt_eval_count || 0) + (data.eval_count || 0),
+          inputTokens: (data.prompt_eval_count as number) || 0,
+          outputTokens: (data.eval_count as number) || 0,
+          totalTokens: ((data.prompt_eval_count as number) || 0) + ((data.eval_count as number) || 0),
         },
       };
     }

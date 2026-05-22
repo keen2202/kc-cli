@@ -87,8 +87,9 @@ export const tool = buildTool<TaskCreateInput, string>({
           }
         );
       }
-    } catch (error: any) {
-      return toolError(`TaskCreate failed: ${error.stdout || error.stderr || error.message}`);
+    } catch (error) {
+      const err = error as Record<string, unknown>;
+      return toolError(`TaskCreate failed: ${err.stdout || err.stderr || (error instanceof Error ? error.message : String(error))}`);
     }
   },
 

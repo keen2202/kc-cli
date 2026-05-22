@@ -11,6 +11,8 @@ interface LoadedPlugin {
 
 export class PluginManager {
   private plugins = new Map<string, LoadedPlugin>();
+  private cachedHooks: PluginHooks | null = null;
+  private hooksDirty = true;
 
   async loadAll(projectDir: string): Promise<void> {
     const pluginDirs = await discoverPlugins(projectDir);
@@ -33,6 +35,7 @@ export class PluginManager {
       try {
         await loaded.plugin.onInit?.();
         loaded.status = 'initialized';
+        this.hooksDirty = true;
 
         // Register plugin postTurn hooks into the global hook registry
         if (loaded.plugin.hooks?.postTurn) {
@@ -47,11 +50,13 @@ export class PluginManager {
       } catch (error) {
         loaded.status = 'error';
         loaded.error = error instanceof Error ? error.message : String(error);
+        this.hooksDirty = true;
       }
     }
   }
 
   async shutdownAll(): Promise<void> {
+    this.hooksDirty = true;
     const shutdowns = Array.from(this.plugins.entries()).map(async ([, loaded]) => {
       if (loaded.status !== 'initialized') return;
       try {
@@ -81,6 +86,11 @@ export class PluginManager {
   }
 
   getPluginHooks(): PluginHooks {
+    // Return cached hooks if plugin set hasn't changed
+    if (!this.hooksDirty && this.cachedHooks) {
+      return this.cachedHooks;
+    }
+
     const merged: PluginHooks = {};
     for (const [, loaded] of this.plugins) {
       if (loaded.status !== 'initialized' || !loaded.plugin.hooks) continue;
@@ -117,6 +127,9 @@ export class PluginManager {
           : pluginHook;
       }
     }
+
+    this.cachedHooks = merged;
+    this.hooksDirty = false;
     return merged;
   }
 

@@ -25,6 +25,7 @@ export class SandboxMonitor {
   private containerId: string | null = null;
   private pid: number | null = null;
   private backend: 'docker' | 'proc' = 'proc';
+  private static readonly MAX_METRICS = 300; // Cap at 5 minutes of 1s intervals
 
   /**
    * Start monitoring a sandboxed process/container.
@@ -121,6 +122,10 @@ export class SandboxMonitor {
 
       if (metrics) {
         metrics.wallTimeMs = Date.now() - this.startTime;
+        // Cap metrics array to prevent unbounded growth in long-running sandboxes
+        if (this.metrics.length >= SandboxMonitor.MAX_METRICS) {
+          this.metrics.splice(0, this.metrics.length - SandboxMonitor.MAX_METRICS + 1);
+        }
         this.metrics.push(metrics);
       }
     } catch {

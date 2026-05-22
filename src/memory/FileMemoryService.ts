@@ -35,12 +35,12 @@ export class FileMemoryService implements MemoryService {
   async initialize(): Promise<void> {
     await ensureSessionDirs();
 
-    // Create base memory directory
+    // Create base memory directory and ensure .gitignore in parallel (independent operations)
     const memoryBasePath = path.join(getKcCliBasePath(), 'memory');
-    await fs.mkdir(memoryBasePath, { recursive: true });
-
-    // Ensure .gitignore exists
-    await ensureGitignore(getKcCliBasePath());
+    await Promise.all([
+      fs.mkdir(memoryBasePath, { recursive: true }),
+      ensureGitignore(getKcCliBasePath()),
+    ]);
   }
 
   // ==================== Memory Operations ====================
@@ -117,8 +117,10 @@ export class FileMemoryService implements MemoryService {
     }
 
     try {
-      const content = await fs.readFile(filePath, 'utf-8');
-      const stat = await fs.stat(filePath);
+      const [content, stat] = await Promise.all([
+        fs.readFile(filePath, 'utf-8'),
+        fs.stat(filePath),
+      ]);
       const { header, body } = parseFrontmatter(content);
 
       if (!header.name || !header.type) {
@@ -253,19 +255,17 @@ export class FileMemoryService implements MemoryService {
     }
 
     const files = await fs.readdir(sessionDir);
-    const jsonFiles = files.filter(
-      (f) =>
-        f.endsWith('.json') &&
-        ALLOWED_SESSION_EXTENSIONS.includes(path.extname(f).toLowerCase())
-    );
+    const jsonFiles = files.filter((f) => f.endsWith('.json'));
 
     const sessions: SessionSnapshot[] = [];
 
     for (const file of jsonFiles) {
       try {
         const filePath = path.join(sessionDir, file);
-        const stat = await fs.stat(filePath);
-        const content = await fs.readFile(filePath, 'utf-8');
+        const [stat, content] = await Promise.all([
+          fs.stat(filePath),
+          fs.readFile(filePath, 'utf-8'),
+        ]);
         const session = JSON.parse(content) as SessionSnapshot;
 
         // Apply filters
@@ -386,8 +386,10 @@ export class FileMemoryService implements MemoryService {
     for (const file of mdFiles) {
       try {
         const filePath = path.join(dirPath, file);
-        const stat = await fs.stat(filePath);
-        const content = await fs.readFile(filePath, 'utf-8');
+        const [stat, content] = await Promise.all([
+          fs.stat(filePath),
+          fs.readFile(filePath, 'utf-8'),
+        ]);
         const { header, body } = parseFrontmatter(content);
 
         if (!header.name || !header.type) continue;

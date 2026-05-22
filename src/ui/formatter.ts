@@ -159,20 +159,28 @@ function formatDuration(ms: number): string {
   return `${minutes}m${secs}s`;
 }
 
+// Cached highlight.js module reference (lazy-loaded once)
+let _hljs: any = null;
+let _hljsLoadFailed = false;
+
 export function formatCodeBlock(code: string, language?: string): string {
   if (_bareMode) return code;
 
   try {
-    const hljs = require('highlight.js');
-    if (language && hljs.getLanguage(language)) {
-      const highlighted = hljs.highlight(code, { language }).value;
+    if (!_hljs && !_hljsLoadFailed) {
+      _hljs = require('highlight.js');
+    }
+    if (!_hljs) return chalk.gray(code);
+
+    if (language && _hljs.getLanguage(language)) {
+      const highlighted = _hljs.highlight(code, { language }).value;
       return highlighted;
     }
     // Auto-detect language
-    const highlighted = hljs.highlightAuto(code).value;
+    const highlighted = _hljs.highlightAuto(code).value;
     return highlighted;
   } catch {
-    // Fallback: return code with basic formatting
+    _hljsLoadFailed = true;
     return chalk.gray(code);
   }
 }

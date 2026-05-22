@@ -9,11 +9,25 @@ import type {
 import { getState } from '../bootstrap/state';
 import { containsProtectedPath } from './protectedPaths';
 import { parseRuleString } from './rules';
+import { getCacheManager } from '../services/cache';
 
 export interface PermissionEngineConfig {
   alwaysDenyRules?: string[];
   alwaysAskRules?: string[];
   alwaysAllowRules?: string[];
+}
+
+// TieredCache for parsed permission rules with hit rate tracking
+const parsedRuleCache = getCacheManager().getOrCreate<{ toolName: string; ruleContent?: string }>(
+  'permission-rules', 'permission', { maxSize: 500 }
+);
+
+function getCachedRule(ruleString: string): { toolName: string; ruleContent?: string } {
+  const cached = parsedRuleCache.get(ruleString);
+  if (cached) return cached;
+  const parsed = parseRuleString(ruleString);
+  parsedRuleCache.set(ruleString, parsed);
+  return parsed;
 }
 
 /**
@@ -41,22 +55,22 @@ export async function hasPermissionsToUseTool(
 ): Promise<PermissionResult> {
   const state = getState();
 
-  // Parse rules from config or use empty arrays
+  // Parse rules from config or use empty arrays (cached for static rules)
   const config = options.config || {};
   const alwaysDenyRules: PermissionRule[] = (config.alwaysDenyRules || []).map(ruleString => ({
     source: 'cliArg' as const,
     ruleBehavior: 'deny' as const,
-    ruleValue: parseRuleString(ruleString),
+    ruleValue: getCachedRule(ruleString),
   }));
   const alwaysAllowRules: PermissionRule[] = (config.alwaysAllowRules || []).map(ruleString => ({
     source: 'cliArg' as const,
     ruleBehavior: 'allow' as const,
-    ruleValue: parseRuleString(ruleString),
+    ruleValue: getCachedRule(ruleString),
   }));
   const alwaysAskRules: PermissionRule[] = (config.alwaysAskRules || []).map(ruleString => ({
     source: 'cliArg' as const,
     ruleBehavior: 'ask' as const,
-    ruleValue: parseRuleString(ruleString),
+    ruleValue: getCachedRule(ruleString),
   }));
   
   const context: PermissionContext = {
@@ -243,15 +257,21 @@ function matchRules(
 /**
  * Match pattern with wildcard support
  * Supports: "*", "?", "prefix:*"
+ * Caches compiled regex patterns for repeated use.
  */
-function matchPattern(pattern: string, content: string): boolean {
-  // Convert wildcard pattern to regex
-  const regexPattern = pattern
-    .replace(/[.+?^${}()|[\]\\]/g, '\\$&') // Escape special chars
-    .replace(/\*/g, '.*') // * matches anything
-    .replace(/\?/g, '.'); // ? matches single char
+const patternCache = getCacheManager().getOrCreate<RegExp>(
+  'permission-patterns', 'permission', { maxSize: 500 }
+);
 
+function matchPattern(pattern: string, content: string): boolean {
+  const cached = patternCache.get(pattern);
+  if (cached) return cached.test(content);
+  const regexPattern = pattern
+    .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.');
   const regex = new RegExp(`^${regexPattern}$`, 'i');
+  patternCache.set(pattern, regex);
   return regex.test(content);
 }
 

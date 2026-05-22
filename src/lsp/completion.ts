@@ -138,31 +138,31 @@ export class CompletionProvider {
   /**
    * Sort by sortText and filter out snippets (agents don't need them).
    */
-  private sortAndFilter(items: any[]): LSPCompletionItem[] {
+  private sortAndFilter(items: Array<Record<string, unknown>>): LSPCompletionItem[] {
     return items
-      .filter((item: any) => {
+      .filter((item) => {
         // Filter out snippet type (agent doesn't need them)
         if (item.kind === CompletionItemKind.Snippet) return false;
         // Filter out items without a label
         if (!item.label) return false;
         return true;
       })
-      .sort((a: any, b: any) => {
-        const sortA = a.sortText ?? a.label;
-        const sortB = b.sortText ?? b.label;
+      .sort((a, b) => {
+        const sortA = (a.sortText ?? a.label) as string;
+        const sortB = (b.sortText ?? b.label) as string;
         return sortA.localeCompare(sortB);
       })
       .slice(0, this.maxItems)
-      .map((item: any) => ({
-        label: item.label,
-        kind: item.kind ?? CompletionItemKind.Text,
-        detail: item.detail,
+      .map((item) => ({
+        label: item.label as string,
+        kind: (item.kind as CompletionItemKind) ?? CompletionItemKind.Text,
+        detail: item.detail as string | undefined,
         documentation: typeof item.documentation === 'object'
-          ? item.documentation.value
-          : item.documentation,
-        insertText: item.insertText ?? item.label,
-        sortText: item.sortText,
-        filterText: item.filterText,
+          ? (item.documentation as Record<string, string>).value
+          : item.documentation as string | undefined,
+        insertText: (item.insertText as string) ?? (item.label as string),
+        sortText: item.sortText as string | undefined,
+        filterText: item.filterText as string | undefined,
       }));
   }
 }

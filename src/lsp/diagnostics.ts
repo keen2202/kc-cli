@@ -2,12 +2,13 @@
 
 import type { LSPDiagnostic } from './types';
 import { LSPClientManager, detectLanguage } from './client';
+import { TieredCache } from '../services/cache';
 
 type SeverityFilter = 'all' | 'errors' | 'warnings';
 
 export class DiagnosticCollector {
   private clientManager: LSPClientManager;
-  private cache = new Map<string, LSPDiagnostic[]>();
+  private cache = new TieredCache<LSPDiagnostic[]>({ maxSize: 500, defaultTtlMs: 2 * 60 * 1000 });
   private fileVersions = new Map<string, number>();
 
   constructor(clientManager?: LSPClientManager) {

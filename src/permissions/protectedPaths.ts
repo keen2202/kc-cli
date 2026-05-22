@@ -38,6 +38,12 @@ export const PROTECTED_PATH_PATTERNS: RegExp[] = [
 /**
  * Simple protected path substrings for quick checks
  * Used for string-based matching (e.g., in command args)
+ * Pre-compiled regex for single-pass matching instead of 10 sequential includes()
+ */
+export const PROTECTED_PATH_SUBSTRINGS_REGEX = /\/etc\/passwd|\/etc\/shadow|\.ssh|\.gnupg|\/sys\/|\/proc\/|\.aws\/credentials|\.kube\/config|\.docker\/config\.json|\.config\/gcloud/;
+
+/**
+ * @deprecated Use PROTECTED_PATH_SUBSTRINGS_REGEX for better performance
  */
 export const PROTECTED_PATH_SUBSTRINGS: string[] = [
   '/etc/passwd',
@@ -71,7 +77,8 @@ export function isProtectedPath(filePath: string): boolean {
 
 /**
  * Quick check if a path or command string contains a protected substring
+ * Uses single regex test instead of 10 sequential includes() calls
  */
 export function containsProtectedPath(text: string): boolean {
-  return PROTECTED_PATH_SUBSTRINGS.some(p => text.includes(p));
+  return PROTECTED_PATH_SUBSTRINGS_REGEX.test(text);
 }

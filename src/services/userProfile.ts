@@ -46,10 +46,12 @@ const DEFAULT_PROFILE: UserProfile = {
 export class UserProfileService {
   private profile: UserProfile;
   private settingsPath: string;
+  private preferredToolsSet: Set<string>;
 
   constructor(settingsPath?: string) {
     this.settingsPath = settingsPath || path.join(os.homedir(), SETTINGS_FILE);
     this.profile = { ...DEFAULT_PROFILE };
+    this.preferredToolsSet = new Set(this.profile.preferredTools);
   }
 
   /**
@@ -69,16 +71,21 @@ export class UserProfileService {
 
   /**
    * Record tool preference (called after tool usage)
+   * Uses Set for O(1) deduplication instead of O(n) Array.includes
    */
   recordToolPreference(toolName: string): void {
-    // Add to preferred tools if not already there
-    if (!this.profile.preferredTools.includes(toolName)) {
+    // Add to preferred tools if not already there (O(1) Set lookup)
+    if (!this.preferredToolsSet.has(toolName)) {
+      this.preferredToolsSet.add(toolName);
       this.profile.preferredTools.push(toolName);
     }
 
     // Keep top 10 most recent tools
     if (this.profile.preferredTools.length > 10) {
-      this.profile.preferredTools = this.profile.preferredTools.slice(-10);
+      const removed = this.profile.preferredTools.splice(0, this.profile.preferredTools.length - 10);
+      for (const tool of removed) {
+        this.preferredToolsSet.delete(tool);
+      }
     }
 
     this.profile.totalToolCalls++;
@@ -175,6 +182,8 @@ export class UserProfileService {
             ...settings.userProfile.codingStyle,
           },
         };
+        // Rebuild Set from loaded preferredTools
+        this.preferredToolsSet = new Set(this.profile.preferredTools);
       }
     } catch {
       // File doesn't exist or is invalid, use defaults
@@ -192,6 +201,7 @@ export class UserProfileService {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
+    this.preferredToolsSet.clear();
   }
 }
 

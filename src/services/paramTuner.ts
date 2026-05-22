@@ -184,11 +184,18 @@ export class ParameterTuningService {
    * Tune compaction threshold based on conversation patterns
    */
   private tuneCompactionThreshold(): void {
-    const compactionObservations = this.observations.filter(o => o.parameter === 'compactionThreshold');
-    if (compactionObservations.length < 3) return;
+    // Single-pass: count and sum in one reduce instead of filter + reduce
+    let count = 0;
+    let sum = 0;
+    for (const o of this.observations) {
+      if (o.parameter === 'compactionThreshold') {
+        count++;
+        sum += o.value;
+      }
+    }
+    if (count < 3) return;
 
-    // Calculate average compaction effectiveness
-    const avgEffectiveness = compactionObservations.reduce((sum, o) => sum + o.value, 0) / compactionObservations.length;
+    const avgEffectiveness = sum / count;
 
     // If compaction is very effective (saving lots of tokens), lower threshold to compact earlier
     // If compaction is not very effective, raise threshold to compact less often
@@ -204,11 +211,18 @@ export class ParameterTuningService {
    * Tune extraction throttle based on extraction yield
    */
   private tuneExtractionThrottle(): void {
-    const extractionObservations = this.observations.filter(o => o.parameter === 'extractionThrottle');
-    if (extractionObservations.length < 3) return;
+    // Single-pass: count and sum in one reduce instead of filter + reduce
+    let count = 0;
+    let sum = 0;
+    for (const o of this.observations) {
+      if (o.parameter === 'extractionThrottle') {
+        count++;
+        sum += o.value;
+      }
+    }
+    if (count < 3) return;
 
-    // Calculate average extraction yield (memories per extraction)
-    const avgYield = extractionObservations.reduce((sum, o) => sum + o.value, 0) / extractionObservations.length;
+    const avgYield = sum / count;
 
     // If yield is high (>2 memories per extraction), can increase throttle
     // If yield is low (<0.5 memories per extraction), decrease throttle

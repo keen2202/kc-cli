@@ -124,12 +124,11 @@ export function getMemoriesToPrune(
   feedbackMap: Map<string, { loaded: number; referenced: number }>,
   config: PruneConfig = DEFAULT_PRUNE_CONFIG
 ): string[] {
-  return memories
-    .filter(memory => {
-      const feedback = feedbackMap.get(memory.fileName) || null;
-      return shouldPruneMemory(memory, feedback, config);
-    })
-    .map(memory => memory.fileName);
+  // Single-pass: filter + map combined into flatMap
+  return memories.flatMap(memory => {
+    const feedback = feedbackMap.get(memory.fileName) || null;
+    return shouldPruneMemory(memory, feedback, config) ? [memory.fileName] : [];
+  });
 }
 
 /**

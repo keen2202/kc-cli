@@ -1,6 +1,9 @@
 // Sandbox backend implementations
 
 import type { SandboxBackend, SandboxOptions } from './sandbox';
+import { createLogger } from './logger';
+
+const logger = createLogger('sandbox:profiles');
 
 /**
  * BubblewrapSandbox — uses `bwrap` for namespace isolation on Linux.
@@ -37,16 +40,19 @@ export class BubblewrapSandbox implements SandboxBackend {
       this._supportsRlimit = true;
     } catch {
       this._supportsRlimit = false;
+      logger.debug('bwrap does not support rlimit options');
     }
     return this._supportsRlimit;
   }
 
   isAvailable(): boolean {
     try {
-      const { execSync } = require('child_process');
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { execSync } = require('child_process') as typeof import('child_process');
       execSync('which bwrap', { stdio: 'ignore' });
       return true;
     } catch {
+      logger.debug('bwrap not available');
       return false;
     }
   }
@@ -67,16 +73,10 @@ export class BubblewrapSandbox implements SandboxBackend {
     args.push('--die-with-parent');
 
     // Bind-mount workspace as read-write.
-    // For workDirs under /tmp/, we bind AFTER --tmpfs /tmp
+    // For non-/tmp/ workDirs, bind now. For /tmp/ subdirs, bind AFTER --tmpfs /tmp
     // (see below) to prevent the tmpfs from shadowing it.
-    if (!options.workDir.startsWith('/tmp/')) {
-      args.push('--bind', options.workDir, options.workDir);
-    }
-
-    // Bind workDir AFTER --tmpfs /tmp for /tmp/ subdirectories.
-    // The tmpfs creates an empty /tmp that shadows host /tmp subdirs;
-    // a later bind mount overlays the specific workDir on top.
-    if (options.workDir.startsWith('/tmp/')) {
+    const isTmpWorkDir = options.workDir.startsWith('/tmp/');
+    if (!isTmpWorkDir) {
       args.push('--bind', options.workDir, options.workDir);
     }
 
@@ -100,7 +100,7 @@ export class BubblewrapSandbox implements SandboxBackend {
     // Re-bind workDir AFTER --tmpfs /tmp when workDir is under /tmp.
     // The tmpfs creates an empty /tmp that shadows host /tmp subdirs;
     // a later bind mount overlays the specific workDir on top.
-    if (options.workDir.startsWith('/tmp/')) {
+    if (isTmpWorkDir) {
       args.push('--bind', options.workDir, options.workDir);
     }
 

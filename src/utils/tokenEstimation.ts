@@ -2,23 +2,32 @@
 // Provides precise token counting using js-tiktoken with LRU caching.
 
 import type { ChatMessage } from '../types/message';
+import { getCacheManager } from '../services/cache';
+
+/**
+ * Interface for tiktoken encoder
+ */
+interface TiktokenEncoder {
+  encode(text: string): number[];
+  free?(): void;
+}
 
 // Lazy-loaded tiktoken encoder
-let encoder: any = null;
+let encoder: TiktokenEncoder | null = null;
 let encoderLoadFailed = false;
 
-function getEncoder(): any {
+function getEncoder(): TiktokenEncoder | null {
   if (encoderLoadFailed) return null;
   if (encoder) return encoder;
 
   try {
     const tiktoken = require('js-tiktoken');
-    encoder = tiktoken.encoding_for_model('gpt-4o');
+    encoder = tiktoken.encoding_for_model('gpt-4o') as TiktokenEncoder;
     return encoder;
   } catch {
     try {
       const tiktoken = require('js-tiktoken');
-      encoder = tiktoken.get_encoding('cl100k_base');
+      encoder = tiktoken.get_encoding('cl100k_base') as TiktokenEncoder;
       return encoder;
     } catch {
       encoderLoadFailed = true;
@@ -29,21 +38,21 @@ function getEncoder(): any {
 
 export type TokenEncoding = 'cl100k_base' | 'o200k_base' | 'tiktoken' | 'custom';
 
+// Global token cache managed by CacheManager for unified hit rate tracking
+const tokenCache = getCacheManager().getOrCreate<number>('token-estimation', 'token', { maxSize: 2000 });
+
 /**
- * Token counter with FIFO cache for avoiding redundant encoding.
+ * Token counter with TieredCache for LRU eviction and hit rate tracking.
  */
 export class TokenCounter {
-  private encoder: any = null;
-  private cache = new Map<string, number>();
-  private maxCacheSize: number;
+  private encoder: TiktokenEncoder | null = null;
   private provider: string;
   private model: string;
   private encoding: TokenEncoding;
 
-  constructor(provider: string, model: string, maxCacheSize = 1000, encoding?: TokenEncoding) {
+  constructor(provider: string, model: string, _maxCacheSize?: number, encoding?: TokenEncoding) {
     this.provider = provider;
     this.model = model;
-    this.maxCacheSize = maxCacheSize;
     this.encoding = encoding ?? this.inferEncoding(provider, model);
   }
 
@@ -53,8 +62,8 @@ export class TokenCounter {
   count(text: string): number {
     if (!text || text.length === 0) return 0;
 
-    // Check cache first
-    const cached = this.cache.get(text);
+    // Check managed TieredCache (with automatic LRU eviction and hit tracking)
+    const cached = tokenCache.get(text);
     if (cached !== undefined) return cached;
 
     // Get encoder
@@ -73,15 +82,7 @@ export class TokenCounter {
       result = this.heuristicCount(text);
     }
 
-    // Cache the result (with eviction)
-    if (this.cache.size >= this.maxCacheSize) {
-      const firstKey = this.cache.keys().next().value;
-      if (firstKey !== undefined) {
-        this.cache.delete(firstKey);
-      }
-    }
-    this.cache.set(text, result);
-
+    tokenCache.set(text, result);
     return result;
   }
 
@@ -123,24 +124,24 @@ export class TokenCounter {
    * Clear the cache.
    */
   clearCache(): void {
-    this.cache.clear();
+    tokenCache.clear();
   }
 
-  private getEncoder(): any {
+  private getEncoder(): TiktokenEncoder | null {
     try {
       const tiktoken = require('js-tiktoken');
       // Use encoding from capabilities if available
       if (this.encoding === 'o200k_base') {
-        return tiktoken.get_encoding('o200k_base');
+        return tiktoken.get_encoding('o200k_base') as TiktokenEncoder;
       }
       if (this.encoding === 'cl100k_base') {
-        return tiktoken.get_encoding('cl100k_base');
+        return tiktoken.get_encoding('cl100k_base') as TiktokenEncoder;
       }
       // For 'custom' or 'tiktoken', try model-specific first
       try {
-        return tiktoken.encoding_for_model(this.model as any);
+        return tiktoken.encoding_for_model(this.model) as TiktokenEncoder;
       } catch {
-        return tiktoken.get_encoding('cl100k_base');
+        return tiktoken.get_encoding('cl100k_base') as TiktokenEncoder;
       }
     } catch {
       return null;

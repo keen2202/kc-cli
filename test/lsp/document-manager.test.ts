@@ -152,5 +152,72 @@ describe('DocumentManager', () => {
 
       expect(doc.content).toBe('line1\nline3');
     });
+
+    it('should handle identical content (no changes)', async () => {
+      await manager.open('/test/file.ts', 'same content');
+      const doc = await manager.update('/test/file.ts', 'same content');
+
+      expect(doc.content).toBe('same content');
+      expect(doc.version).toBe(2);
+    });
+
+    it('should handle completely different content', async () => {
+      await manager.open('/test/file.ts', 'old');
+      const doc = await manager.update('/test/file.ts', 'new');
+
+      expect(doc.content).toBe('new');
+    });
+
+    it('should handle adding lines to empty content', async () => {
+      await manager.open('/test/file.ts', '');
+      const doc = await manager.update('/test/file.ts', 'line1\nline2');
+
+      expect(doc.content).toBe('line1\nline2');
+    });
+  });
+
+  describe('isOpen', () => {
+    it('should return true for open document', async () => {
+      await manager.open('/test/file.ts', 'content');
+      expect(manager.isOpen('/test/file.ts')).toBe(true);
+    });
+
+    it('should return false for non-existent document', () => {
+      expect(manager.isOpen('/nonexistent.ts')).toBe(false);
+    });
+
+    it('should return false after closing', async () => {
+      await manager.open('/test/file.ts', 'content');
+      manager.close('/test/file.ts');
+      expect(manager.isOpen('/test/file.ts')).toBe(false);
+    });
+  });
+
+  describe('version tracking', () => {
+    it('should start at version 1 on open', async () => {
+      const doc = await manager.open('/test/file.ts', 'content');
+      expect(doc.version).toBe(1);
+    });
+
+    it('should increment version on each update', async () => {
+      await manager.open('/test/file.ts', 'v1');
+      const doc2 = await manager.update('/test/file.ts', 'v2');
+      expect(doc2.version).toBe(2);
+      const doc3 = await manager.update('/test/file.ts', 'v3');
+      expect(doc3.version).toBe(3);
+    });
+  });
+
+  describe('constructor', () => {
+    it('should accept a custom client manager', () => {
+      const customManager = new DocumentManager(mockClientInstance as any);
+      expect(customManager).toBeDefined();
+    });
+
+    it('should create default client manager if none provided', () => {
+      // The mock replaces LSPClientManager, so this is fine
+      const defaultManager = new DocumentManager();
+      expect(defaultManager).toBeDefined();
+    });
   });
 });

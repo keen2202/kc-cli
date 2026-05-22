@@ -21,7 +21,7 @@ export class StdioTransport {
     reject: (error: Error) => void;
   }>();
   private notificationHandler: ((notification: JSONRPCNotification) => void) | null = null;
-  private sdkTransport: any | null = null;
+  private sdkTransport: { connect(): Promise<void>; sendRequest(method: string, params?: Record<string, unknown>): Promise<unknown>; close(): Promise<void> } | null = null;
   private useSdk = false;
 
   async connect(command: string, args: string[], env?: Record<string, string>): Promise<void> {
@@ -33,7 +33,7 @@ export class StdioTransport {
         args,
         env: { ...process.env, ...env },
       });
-      await this.sdkTransport.connect();
+      await this.sdkTransport!.connect();
       this.useSdk = true;
       return;
     } catch {
@@ -144,10 +144,12 @@ export class StdioTransport {
   }
 
   private processBuffer(): void {
-    const lines = this.buffer.split('\n');
-    this.buffer = lines.pop() || '';
+    // indexOf-based incremental parsing instead of split('\n') to avoid allocating array for entire buffer
+    let newlineIdx: number;
+    while ((newlineIdx = this.buffer.indexOf('\n')) !== -1) {
+      const line = this.buffer.slice(0, newlineIdx);
+      this.buffer = this.buffer.slice(newlineIdx + 1);
 
-    for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
 

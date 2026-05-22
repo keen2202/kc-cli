@@ -5,8 +5,15 @@ import {
   listRegisteredLanguages,
   hasCapability,
   registerLanguageServer,
+  isLanguageServerAvailable,
+  discoverAvailableServers,
   LANGUAGE_REGISTRY,
 } from '../../src/lsp/language-registry';
+
+// Mock child_process for execSync
+vi.mock('child_process', () => ({
+  execSync: vi.fn(),
+}));
 
 describe('Language Registry', () => {
   describe('detectLanguageFromRegistry', () => {
@@ -138,6 +145,75 @@ describe('Language Registry', () => {
 
       // Restore original
       if (original) registerLanguageServer(original);
+    });
+  });
+
+  describe('isLanguageServerAvailable', () => {
+    it('should return false for unknown language', () => {
+      expect(isLanguageServerAvailable('unknown-lang')).toBe(false);
+    });
+
+    it('should return true when binary is found', async () => {
+      const { execSync } = await import('child_process');
+      vi.mocked(execSync).mockReturnValue(Buffer.from('/usr/bin/gopls'));
+
+      expect(isLanguageServerAvailable('go')).toBe(true);
+      expect(execSync).toHaveBeenCalledWith('which gopls', { stdio: 'ignore', timeout: 3000 });
+    });
+
+    it('should return false when binary is not found', async () => {
+      const { execSync } = await import('child_process');
+      vi.mocked(execSync).mockImplementation(() => { throw new Error('not found'); });
+
+      expect(isLanguageServerAvailable('rust')).toBe(false);
+    });
+  });
+
+  describe('discoverAvailableServers', () => {
+    it('should return only servers whose binaries are found', async () => {
+      const { execSync } = await import('child_process');
+      vi.mocked(execSync).mockImplementation((cmd: string) => {
+        if (typeof cmd === 'string' && cmd.includes('typescript-language-server')) {
+          return Buffer.from('/usr/bin/typescript-language-server');
+        }
+        if (typeof cmd === 'string' && cmd.includes('gopls')) {
+          return Buffer.from('/usr/bin/gopls');
+        }
+        throw new Error('not found');
+      });
+
+      const available = discoverAvailableServers();
+      expect(available.length).toBeGreaterThanOrEqual(2);
+      const ids = available.map(c => c.languageId);
+      expect(ids).toContain('typescript');
+      expect(ids).toContain('go');
+    });
+
+    it('should return empty array when no servers available', async () => {
+      const { execSync } = await import('child_process');
+      vi.mocked(execSync).mockImplementation(() => { throw new Error('not found'); });
+
+      const available = discoverAvailableServers();
+      expect(available).toEqual([]);
+    });
+  });
+
+  describe('detectLanguageFromRegistry edge cases', () => {
+    it('should handle case-insensitive extensions', () => {
+      expect(detectLanguageFromRegistry('file.TS')).toBe('typescript');
+      expect(detectLanguageFromRegistry('file.PY')).toBe('python');
+    });
+
+    it('should handle files with no extension', () => {
+      expect(detectLanguageFromRegistry('Makefile')).toBeNull();
+    });
+
+    it('should handle deeply nested paths', () => {
+      expect(detectLanguageFromRegistry('/very/deep/nested/path/file.go')).toBe('go');
+    });
+
+    it('should handle .cc extension for cpp', () => {
+      expect(detectLanguageFromRegistry('file.cc')).toBe('cpp');
     });
   });
 });

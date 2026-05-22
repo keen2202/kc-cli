@@ -79,12 +79,27 @@ class ToolRegistryImpl implements ToolRegistry {
 
   /**
    * Filter tools by deny rules
+   * Pre-processes patterns into a Set for O(1) exact match lookups
    */
   filterByDenyRules(denyPatterns: string[]): ToolDefinition[] {
+    // Separate exact matches from pattern matches for faster lookup
+    const exactDenySet = new Set<string>();
+    const prefixPatterns: string[] = [];
+
+    for (const pattern of denyPatterns) {
+      const parenIdx = pattern.indexOf('(');
+      if (parenIdx === -1) {
+        exactDenySet.add(pattern);
+      } else {
+        prefixPatterns.push(pattern);
+      }
+    }
+
     return this.getAllTools().filter(tool => {
-      return !denyPatterns.some(pattern => {
-        return pattern === tool.name || pattern.startsWith(`${tool.name}(`);
-      });
+      // O(1) Set lookup for exact matches
+      if (exactDenySet.has(tool.name)) return false;
+      // Check prefix patterns only if no exact match
+      return !prefixPatterns.some(pattern => pattern.startsWith(`${tool.name}(`));
     });
   }
 

@@ -42,13 +42,12 @@ export class ObservableStateStore {
       lastActivityAt: Date.now(),
     };
 
-    // Notify all listeners (copy array to prevent mutation during iteration)
+    // Snapshot listeners to prevent notifying subscribers added during this cycle
     const listenersArray = Array.from(this.listeners);
-    for (const listener of listenersArray) {
+    for (let i = 0; i < listenersArray.length; i++) {
       try {
-        listener(this.state);
+        listenersArray[i](this.state);
       } catch (error) {
-        // Don't let listener errors break state updates
         console.error('State listener error:', error);
       }
     }

@@ -47,8 +47,9 @@ export const tool = buildTool<GitInput, string>({
       return toolResult(output, {
         metadata: { command: input.command, cwd: workingDir },
       });
-    } catch (error: any) {
-      const output = (error.stdout || error.stderr || error.message || '').trim();
+    } catch (error) {
+      const err = error as Record<string, unknown>;
+      const output = String(err.stdout || err.stderr || (error instanceof Error ? error.message : '') || '').trim();
       return toolError(`Git command failed: ${output.slice(0, 2000)}`, {
         command: input.command,
       });

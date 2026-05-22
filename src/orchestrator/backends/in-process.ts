@@ -26,6 +26,16 @@ import { ResultAggregator } from '../result-aggregator.js';
 // Async context store for sub-agent isolation
 const agentContextStore = new AsyncLocalStorage<SubAgentRuntime>();
 
+// Cached QueryEngine class to avoid repeated dynamic import on every spawn
+let CachedQueryEngine: (new (config: Record<string, unknown>, tools: unknown[]) => QueryEngineLike) | null = null;
+
+/**
+ * Reset the cached QueryEngine (for testing)
+ */
+export function resetCachedQueryEngine(): void {
+  CachedQueryEngine = null;
+}
+
 /**
  * Get current sub-agent context from AsyncLocalStorage
  */
@@ -82,9 +92,10 @@ export class InProcessBackend implements SubAgentBackend {
         deniedTools: config.deniedTools,
       });
 
-      // Filter tools
+      // Filter tools - use Set for O(1) lookup instead of O(n) Array.includes
+      const allowedToolNamesSet = new Set(allowedToolNames);
       const childTools = Array.from(this.allTools.values()).filter((tool) =>
-        allowedToolNames.includes(tool.name as ToolName)
+        allowedToolNamesSet.has(tool.name as ToolName)
       );
 
       // Create abort controller
@@ -129,10 +140,14 @@ export class InProcessBackend implements SubAgentBackend {
       );
 
       // Create QueryEngine for sub-agent
-      // Note: We need to dynamically import to avoid circular dependency
-      const { QueryEngine } = await import('../../query/QueryEngine');
+      // Cache the import to avoid repeated module resolution on every spawn
+      if (!CachedQueryEngine) {
+        const mod = await import('../../query/QueryEngine');
+        CachedQueryEngine = mod.QueryEngine as unknown as typeof CachedQueryEngine;
+      }
+      const QueryEngineClass = CachedQueryEngine!;
 
-      const queryEngine = new QueryEngine(
+      const queryEngine = new QueryEngineClass(
         {
           model: config.model || 'claude-sonnet-4-20250514',
           provider: 'anthropic',
@@ -279,6 +294,12 @@ export class InProcessBackend implements SubAgentBackend {
           error: runtime.error.message,
           timestamp: Date.now(),
         });
+      } finally {
+        // Clean up completed/failed agents from active map to prevent memory leak
+        // Keep in map briefly for any pending queries, then remove
+        setTimeout(() => {
+          this.activeAgents.delete(agentId);
+        }, 5000);
       }
     });
   }

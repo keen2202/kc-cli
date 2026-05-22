@@ -112,9 +112,14 @@ export const VALID_TRANSITIONS: Record<AgentStateName, AgentStateName[]> = {
   error: ['idle', 'error'],
 };
 
+// Pre-built Set-based transitions for O(1) lookup (replaces Array.includes per validation)
+const VALID_TRANSITION_SETS: Record<AgentStateName, Set<AgentStateName>> = Object.fromEntries(
+  Object.entries(VALID_TRANSITIONS).map(([key, values]) => [key, new Set(values)])
+) as Record<AgentStateName, Set<AgentStateName>>;
+
 /**
  * Check if a state transition is valid
  */
 export function isValidTransition(from: AgentStateName, to: AgentStateName): boolean {
-  return VALID_TRANSITIONS[from]?.includes(to) ?? false;
+  return VALID_TRANSITION_SETS[from]?.has(to) ?? false;
 }

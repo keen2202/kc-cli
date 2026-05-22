@@ -35,6 +35,7 @@ export class StateValidator {
    */
   validate(messages: ChatMessage[]): ValidationResult {
     const issues: ValidationIssue[] = [];
+    let hasErrors = false;
 
     // Collect all tool call IDs from assistant messages
     const toolCallIds = new Set<string>();
@@ -43,6 +44,18 @@ export class StateValidator {
         for (const tc of msg.toolCalls) {
           if (tc.id) {
             toolCallIds.add(tc.id);
+          }
+        }
+      }
+    }
+
+    // Pre-build set of tool call IDs that have results (O(n) instead of O(n*m))
+    const toolCallsWithResults = new Set<string>();
+    for (const msg of messages) {
+      if (msg.role === 'tool' && msg.toolResults) {
+        for (const result of msg.toolResults) {
+          if (result.toolCallId) {
+            toolCallsWithResults.add(result.toolCallId);
           }
         }
       }
@@ -64,8 +77,8 @@ export class StateValidator {
             });
           }
 
-          // Validate tool result structure
           if (!result.toolCallId || result.toolCallId === '') {
+            hasErrors = true;
             issues.push({
               type: 'invalid_tool_result',
               messageIndex: i,
@@ -80,6 +93,7 @@ export class StateValidator {
       if (msg.role === 'assistant' && msg.toolCalls) {
         for (const tc of msg.toolCalls) {
           if (!tc.id || tc.id === '') {
+            hasErrors = true;
             issues.push({
               type: 'invalid_tool_result',
               messageIndex: i,
@@ -88,26 +102,21 @@ export class StateValidator {
             });
           }
 
-          // Check if there's a corresponding tool result (except for the last assistant message)
-          if (tc.id && i < messages.length - 1) {
-            const hasResult = messages.some(
-              (m, idx) => idx > i && m.role === 'tool' && m.toolResults?.some(r => r.toolCallId === tc.id)
-            );
-            if (!hasResult) {
-              issues.push({
-                type: 'missing_tool_call',
-                messageIndex: i,
-                severity: 'warning',
-                detail: `Tool call ${tc.id} (${tc.toolName}) has no corresponding result`,
-              });
-            }
+          // O(1) lookup instead of O(n*m) scan
+          if (tc.id && i < messages.length - 1 && !toolCallsWithResults.has(tc.id)) {
+            issues.push({
+              type: 'missing_tool_call',
+              messageIndex: i,
+              severity: 'warning',
+              detail: `Tool call ${tc.id} (${tc.toolName}) has no corresponding result`,
+            });
           }
         }
       }
     }
 
     return {
-      valid: issues.filter(i => i.severity === 'error').length === 0,
+      valid: !hasErrors,
       issues,
       repaired: false,
     };

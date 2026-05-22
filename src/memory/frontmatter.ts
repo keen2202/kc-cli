@@ -97,15 +97,17 @@ function parseYamlValue(raw: string): string | number {
   return value;
 }
 
+// Module-level Set for O(1) type validation (avoids array allocation per call)
+const VALID_MEMORY_TYPES = new Set<MemoryType>(['user', 'feedback', 'project', 'reference']);
+
 /**
  * Validate and coerce a string to MemoryType
  * Returns undefined for unrecognized types
  */
 export function validateMemoryType(type: string): MemoryType | undefined {
-  const validTypes: MemoryType[] = ['user', 'feedback', 'project', 'reference'];
   const normalized = type.toLowerCase().trim();
 
-  if (validTypes.includes(normalized as MemoryType)) {
+  if (VALID_MEMORY_TYPES.has(normalized as MemoryType)) {
     return normalized as MemoryType;
   }
 
@@ -138,37 +140,16 @@ export function generateFrontmatter(header: MemoryHeader): string {
   return lines.join('\n');
 }
 
+// Single regex to detect YAML special characters (replaces 16 sequential includes() calls)
+// Matches: special chars anywhere, or leading/trailing spaces/quotes
+const YAML_SPECIAL_CHARS = /[:#,\[\]{}&*?|<>=!%@\\\-]|^ | $|^["']/;
+
 /**
  * Escape a value for YAML if needed
  */
 function escapeYamlValue(value: string): string {
-  // Quote if value contains special characters
-  if (
-    value.includes(':') ||
-    value.includes('#') ||
-    value.includes(',') ||
-    value.includes('{') ||
-    value.includes('}') ||
-    value.includes('[') ||
-    value.includes(']') ||
-    value.includes('&') ||
-    value.includes('*') ||
-    value.includes('?') ||
-    value.includes('|') ||
-    value.includes('-') ||
-    value.includes('<') ||
-    value.includes('>') ||
-    value.includes('=') ||
-    value.includes('!') ||
-    value.includes('%') ||
-    value.includes('@') ||
-    value.includes('\\') ||
-    value.startsWith(' ') ||
-    value.endsWith(' ') ||
-    value.startsWith('"') ||
-    value.startsWith("'")
-  ) {
-    // Use double quotes, escaping internal quotes and backslashes
+  // Single regex test instead of 16 sequential includes() calls
+  if (YAML_SPECIAL_CHARS.test(value)) {
     return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
   }
 

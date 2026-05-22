@@ -1,6 +1,17 @@
 // Provider capability detection system
 // Defines and queries the capabilities of each LLM provider and model.
 
+import { getCacheManager } from '../services/cache';
+
+/**
+ * Provider-specific prompt caching strategy.
+ * - 'explicit-breakpoints': Uses cache_control markers (Anthropic)
+ * - 'auto-prefix': Relies on byte-stable prefix for automatic caching (DeepSeek)
+ * - 'prompt-cache': Uses provider-specific opt-in param (OpenAI prompt_cache)
+ * - 'none': No caching optimization
+ */
+export type CacheStrategy = 'explicit-breakpoints' | 'auto-prefix' | 'prompt-cache' | 'none';
+
 export interface ProviderCapabilities {
   // Context limits
   maxContextWindow: number;
@@ -31,6 +42,9 @@ export interface ProviderCapabilities {
   // Recommended defaults
   recommendedTemperature: number;
   recommendedMaxTools: number; // Max tools per request
+
+  // Prompt caching strategy
+  prefixCachingStrategy: CacheStrategy;
 }
 
 /**
@@ -53,6 +67,7 @@ const DEFAULT_CAPABILITIES: ProviderCapabilities = {
   tokenEncoding: 'cl100k_base',
   recommendedTemperature: 0.7,
   recommendedMaxTools: 10,
+  prefixCachingStrategy: 'none',
 };
 
 /**
@@ -76,6 +91,7 @@ export const PROVIDER_CAPABILITIES: Record<string, ProviderCapabilities> = {
     tokenEncoding: 'custom',
     recommendedTemperature: 0,
     recommendedMaxTools: 20,
+    prefixCachingStrategy: 'explicit-breakpoints',
   },
 
   openai: {
@@ -95,6 +111,7 @@ export const PROVIDER_CAPABILITIES: Record<string, ProviderCapabilities> = {
     tokenEncoding: 'o200k_base',
     recommendedTemperature: 0.7,
     recommendedMaxTools: 20,
+    prefixCachingStrategy: 'prompt-cache',
   },
 
   deepseek: {
@@ -114,6 +131,7 @@ export const PROVIDER_CAPABILITIES: Record<string, ProviderCapabilities> = {
     tokenEncoding: 'cl100k_base',
     recommendedTemperature: 0.3,
     recommendedMaxTools: 15,
+    prefixCachingStrategy: 'auto-prefix',
   },
 
   qwen: {
@@ -133,6 +151,7 @@ export const PROVIDER_CAPABILITIES: Record<string, ProviderCapabilities> = {
     tokenEncoding: 'cl100k_base',
     recommendedTemperature: 0.7,
     recommendedMaxTools: 15,
+    prefixCachingStrategy: 'none',
   },
 
   glm: {
@@ -152,6 +171,7 @@ export const PROVIDER_CAPABILITIES: Record<string, ProviderCapabilities> = {
     tokenEncoding: 'cl100k_base',
     recommendedTemperature: 0.7,
     recommendedMaxTools: 10,
+    prefixCachingStrategy: 'none',
   },
 
   ollama: {
@@ -171,6 +191,7 @@ export const PROVIDER_CAPABILITIES: Record<string, ProviderCapabilities> = {
     tokenEncoding: 'cl100k_base',
     recommendedTemperature: 0.8,
     recommendedMaxTools: 5,
+    prefixCachingStrategy: 'none',
   },
 };
 
@@ -270,20 +291,30 @@ const MODEL_OVERRIDES: Record<string, Partial<ProviderCapabilities>> = {
   },
 };
 
+// TieredCache for merged capabilities with hit rate tracking
+const capabilitiesCache = getCacheManager().getOrCreate<ProviderCapabilities>(
+  'provider-capabilities', 'capability', { maxSize: 100 }
+);
+
 /**
  * Get capabilities for a provider, with optional model-specific overrides.
+ * Caches merged results for repeated lookups.
  */
 export function getCapabilities(provider: string, model?: string): ProviderCapabilities {
   const base = PROVIDER_CAPABILITIES[provider] ?? DEFAULT_CAPABILITIES;
 
   if (!model) return base;
 
-  const overrideKey = `${provider}/${model}`;
-  const override = MODEL_OVERRIDES[overrideKey];
+  const cacheKey = `${provider}/${model}`;
+  const cached = capabilitiesCache.get(cacheKey);
+  if (cached) return cached;
 
+  const override = MODEL_OVERRIDES[cacheKey];
   if (!override) return base;
 
-  return { ...base, ...override };
+  const merged = { ...base, ...override };
+  capabilitiesCache.set(cacheKey, merged);
+  return merged;
 }
 
 /**
@@ -307,4 +338,11 @@ export function getRecommendedTemperature(provider: string, model?: number): num
  */
 export function getMaxContextWindow(provider: string, model?: string): number {
   return getCapabilities(provider, model).maxContextWindow;
+}
+
+/**
+ * Get the prompt caching strategy for a provider/model.
+ */
+export function getCachingStrategy(provider: string, model?: string): CacheStrategy {
+  return getCapabilities(provider, model).prefixCachingStrategy;
 }

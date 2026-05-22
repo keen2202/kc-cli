@@ -6,6 +6,8 @@ import type {
   AggregatedResult,
   SubAgentStatus,
 } from './types.js';
+import type { AgentEvent } from '../state/types.js';
+import type { MultiAgentEvent } from '../types/orchestrator.js';
 import type { ToolUseContext, ToolDefinition, ToolName } from '../types/tools.js';
 import type { PermissionMode } from '../types/permissions.js';
 import { EventBus } from './event-bus.js';
@@ -115,7 +117,7 @@ export class AgentOrchestrator {
       }, timeoutMs);
 
       // Listen for completion
-      const unsubscribe = this.eventBus.on(agentId, (event: any) => {
+      const unsubscribe = this.eventBus.on(agentId, (event: AgentEvent | MultiAgentEvent) => {
         if (event.type === 'agent:subagent_completed') {
           clearTimeout(timeoutId);
           unsubscribe();
@@ -151,26 +153,40 @@ export class AgentOrchestrator {
    * @returns Aggregated result from all agents
    */
   async waitForAll(timeoutMs: number = 600000): Promise<AggregatedResult> {
-    const startTime = Date.now();
+    // If already done, return immediately
+    if (this.aggregator.isAllDone()) {
+      return this.aggregator.generateSummary();
+    }
 
-    // Poll until all agents are done or timeout
-    while (!this.aggregator.isAllDone()) {
-      if (Date.now() - startTime > timeoutMs) {
+    // Event-based wait instead of polling: resolve when all agents complete
+    await new Promise<void>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        unsubscribe();
         // Cancel any remaining agents
         const activeAgents = this.backend.listActive();
+        const elapsed = timeoutMs / 1000;
         for (const agentId of activeAgents) {
-          this.aggregator.recordTimeout(
-            agentId,
-            (Date.now() - startTime) / 1000
-          );
-          await this.backend.shutdown(agentId, true);
+          this.aggregator.recordTimeout(agentId, elapsed);
+          this.backend.shutdown(agentId, true).catch(() => {});
         }
-        break;
-      }
+        resolve(); // Continue to get results (with timeouts recorded)
+      }, timeoutMs);
 
-      // Wait a bit before polling again
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
+      const unsubscribe = this.eventBus.onAny(() => {
+        if (this.aggregator.isAllDone()) {
+          clearTimeout(timeoutId);
+          unsubscribe();
+          resolve();
+        }
+      });
+
+      // Double-check in case agents completed between our initial check and subscription
+      if (this.aggregator.isAllDone()) {
+        clearTimeout(timeoutId);
+        unsubscribe();
+        resolve();
+      }
+    });
 
     return this.aggregator.generateSummary();
   }

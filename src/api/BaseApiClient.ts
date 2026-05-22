@@ -2,6 +2,7 @@
 
 import type { ChatMessage, ToolCall } from '../types/message';
 import type { ToolDefinition } from '../types/tools';
+import { zodToJsonSchema } from '../utils/zodToJsonSchema';
 
 export interface LLMStreamEvent {
   type: 'text_delta' | 'tool_use' | 'tool_result' | 'stop' | 'error';
@@ -28,6 +29,8 @@ export interface LLMRequestConfig {
   temperature?: number;
   stream?: boolean;
   abortSignal?: AbortSignal;
+  /** Ephemeral per-turn content (memory context, level adaptation) that should NOT break cache prefix */
+  ephemeralContent?: string;
 }
 
 export interface LLMResponse {
@@ -172,15 +175,29 @@ export abstract class BaseApiClient {
 
   /**
    * Extract parameters from Zod schema for tool definition
-   * Simplified implementation - would need full schema serialization in production
+   * Converts Zod schema to JSON Schema format for LLM tool definitions
    */
-  protected extractSchemaParameters(_schema: any): Record<string, unknown> {
-    // Placeholder: In production, serialize Zod schema to JSON Schema
-    return {
-      type: 'object',
-      properties: {},
-      required: [],
-    };
+  protected extractSchemaParameters(schema: unknown): Record<string, unknown> {
+    if (!schema) {
+      return { type: 'object', properties: {} };
+    }
+
+    // If it's already a plain object (JSON Schema), return as-is
+    if (typeof schema === 'object' && schema !== null && !('_def' in schema)) {
+      const obj = schema as Record<string, unknown>;
+      // If it has a type field, assume it's valid JSON Schema
+      if ('type' in obj) return obj;
+      // Otherwise wrap as object schema
+      return { type: 'object', properties: obj, required: [] };
+    }
+
+    // Convert Zod schema to JSON Schema
+    try {
+      return zodToJsonSchema(schema as any);
+    } catch {
+      // Fallback for unsupported schema types
+      return { type: 'object', properties: {} };
+    }
   }
 
   /**

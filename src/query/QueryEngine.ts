@@ -20,6 +20,8 @@ import { CircuitBreakerRegistry } from '../services/circuitBreaker';
 import { StateValidator } from '../services/stateValidator';
 import { UserProfileService } from '../services/userProfile';
 import { getSystemPromptAdaptation, getToolHints } from '../services/behavioralAdapter';
+import { CacheMetrics } from '../services/cacheMetrics';
+import { CachePrefixService, buildCacheStrategy } from '../services/cachePrefix';
 
 import { v4 as uuidv4 } from 'uuid';
 
@@ -73,6 +75,12 @@ export class QueryEngine {
   // Performance: cached token estimate
   private cachedTokenEstimate: number | null = null;
 
+  // Cache metrics tracking
+  private cacheMetrics = new CacheMetrics();
+
+  // Cache prefix service for byte-stable prompt prefixes
+  private cachePrefix: CachePrefixService;
+
   // Constants
   private static readonly DEFAULT_MAX_MESSAGES = 1000; // Hard limit to prevent memory exhaustion
   private static readonly MESSAGE_TRIM_COUNT = 100; // Messages to remove when limit hit
@@ -115,6 +123,12 @@ export class QueryEngine {
 
     // Initialize user profile (level-based adaptation)
     this.userProfile = new UserProfileService();
+
+    // Initialize cache prefix service
+    this.cachePrefix = new CachePrefixService(
+      config.provider,
+      buildCacheStrategy(config.provider),
+    );
   }
 
   /**
@@ -241,7 +255,6 @@ export class QueryEngine {
 
       for (let retryAttempt = 0; retryAttempt <= maxCompactionRetries; retryAttempt++) {
         try {
-          const { fullCompact } = await import('../services/compaction');
           fullResult = await fullCompact(
             this.messages,
             this.apiClient,
@@ -289,44 +302,51 @@ export class QueryEngine {
   private async *streamingPhase(): AsyncGenerator<StreamEvent | AgentEvent> {
     const maxRetries = 3;
 
+    // Cache tool definitions outside retry loop - they don't change between retries
+    const toolsDef = this.toolExecutor.getRegisteredTools().map(toolName => {
+      const tool = this.toolExecutor.getTool(toolName);
+      return tool;
+    }).filter((t): t is ToolDefinition => t !== undefined);
+
+    // Get last user message for memory lookup
+    const lastUserMessage = [...this.messages].reverse().find(m => m.role === 'user');
+
+    // Load relevant memories (pre-query) - cached outside retry loop
+    let memoryContext = '';
+    if (lastUserMessage && this.memoryIntegration.isEnabled()) {
+      const recentTools = toolsDef.slice(0, 5).map(t => t.name);
+      memoryContext = await this.memoryIntegration.loadRelevantMemories(
+        lastUserMessage.content || '',
+        recentTools
+      );
+    }
+
+    // Build system prompt with stable/ephemeral separation for cache optimization
+    const level = this.userProfile.getLevel();
+    const levelAdaptation = getSystemPromptAdaptation(level, toolsDef);
+
+    // Freeze prefix on first call
+    if (!this.cachePrefix.isFrozen()) {
+      this.cachePrefix.freezePrefix(this.config.systemPrompt || '', toolsDef);
+    }
+
+    const stableSystemPrompt = this.cachePrefix.getStableSystemPrompt();
+    const ephemeral = this.cachePrefix.getEphemeralAugmentations(memoryContext, levelAdaptation);
+    const ephemeralContent = ephemeral
+      ? [ephemeral.levelAdaptation, ephemeral.memoryContext].filter(Boolean).join('\n\n')
+      : undefined;
+
     for (let retryAttempt = 0; retryAttempt <= maxRetries; retryAttempt++) {
-      // Build API request
+      // Build API request - only messages change between retries
       const apiMessages = this.buildApiMessages();
-      const toolsDef = this.toolExecutor.getRegisteredTools().map(toolName => {
-        const tool = this.toolExecutor.getTool(toolName);
-        return tool;
-      }).filter((t): t is ToolDefinition => t !== undefined);
-
-      // Get last user message for memory lookup
-      const lastUserMessage = [...this.messages].reverse().find(m => m.role === 'user');
-
-      // Load relevant memories (pre-query)
-      let memoryContext = '';
-      if (lastUserMessage && this.memoryIntegration.isEnabled()) {
-        const recentTools = toolsDef.slice(0, 5).map(t => t.name);
-        memoryContext = await this.memoryIntegration.loadRelevantMemories(
-          lastUserMessage.content || '',
-          recentTools
-        );
-      }
-
-      // Build system prompt with memory context and level adaptation
-      const level = this.userProfile.getLevel();
-      const levelAdaptation = getSystemPromptAdaptation(level, toolsDef);
-      let systemPrompt = this.config.systemPrompt || '';
-      if (levelAdaptation) {
-        systemPrompt += levelAdaptation;
-      }
-      if (memoryContext) {
-        systemPrompt += `\n\n${memoryContext}`;
-      }
 
       // Call LLM with streaming
       const requestConfig: LLMRequestConfig = {
         model: this.config.model,
-        messages: apiMessages,
+        messages: apiMessages as unknown as ChatMessage[],
         tools: toolsDef,
-        systemPrompt,
+        systemPrompt: stableSystemPrompt,
+        ephemeralContent,
         stream: true,
         abortSignal: this.abortController.signal,
       };
@@ -357,6 +377,17 @@ export class QueryEngine {
             yield this.createErrorEvent(event.error || new Error('Unknown error'));
             return;
           } else if (event.type === 'stop') {
+            // Capture cache metrics from stream usage data
+            if (event.usage) {
+              const cacheUsage = event.usage as { cacheReadTokens?: number; cacheCreationTokens?: number };
+              this.cacheMetrics.record(
+                this.config.model,
+                event.usage.inputTokens || 0,
+                cacheUsage.cacheReadTokens || 0,
+                cacheUsage.cacheCreationTokens || 0,
+                this.config.provider,
+              );
+            }
             // Stream complete
             break;
           }
@@ -642,8 +673,9 @@ export class QueryEngine {
   /**
    * Build messages for API call
    */
-  private buildApiMessages(): any[] {
-    const messages: any[] = [];
+  private buildApiMessages(): Array<{ role: string; content: string | null; tool_calls?: unknown[]; tool_call_id?: string }> {
+    // Pre-allocate: system prompt + messages + potential tool result expansion
+    const messages: Array<{ role: string; content: string | null; tool_calls?: unknown[]; tool_call_id?: string }> = [];
 
     if (this.config.systemPrompt) {
       messages.push({
@@ -652,7 +684,9 @@ export class QueryEngine {
       });
     }
 
-    for (const msg of this.messages) {
+    const len = this.messages.length;
+    for (let i = 0; i < len; i++) {
+      const msg = this.messages[i];
       if (msg.role === 'user') {
         messages.push({
           role: 'user',
@@ -672,12 +706,15 @@ export class QueryEngine {
           })),
         });
       } else if (msg.role === 'tool') {
-        for (const result of msg.toolResults || []) {
-          messages.push({
-            role: 'tool',
-            tool_call_id: result.toolCallId,
-            content: result.output,
-          });
+        const results = msg.toolResults;
+        if (results) {
+          for (let j = 0; j < results.length; j++) {
+            messages.push({
+              role: 'tool',
+              tool_call_id: results[j].toolCallId,
+              content: results[j].output,
+            });
+          }
         }
       }
     }
@@ -736,6 +773,21 @@ export class QueryEngine {
   }
 
   /**
+   * Get cache metrics for this query engine session.
+   * Tracks prompt cache hit rates across all API calls.
+   */
+  getCacheMetrics() {
+    return this.cacheMetrics;
+  }
+
+  /**
+   * Get the cache prefix service for this session.
+   */
+  getCachePrefix() {
+    return this.cachePrefix;
+  }
+
+  /**
    * Enforce message history limit to prevent unbounded memory growth.
    * Removes oldest messages when limit is exceeded.
    */
@@ -750,44 +802,45 @@ export class QueryEngine {
       return;
     }
 
-    // Find anchor indices: system prompt and first user message
-    const anchorIndices = new Set<number>();
+    // Single pass: find anchor indices (first system + first user message)
+    let firstSystemIdx = -1;
+    let firstUserIdx = -1;
     for (let i = 0; i < this.messages.length; i++) {
-      if (this.messages[i].role === 'system') {
-        anchorIndices.add(i);
-        break; // Only the first system message is an anchor
+      if (firstSystemIdx === -1 && this.messages[i].role === 'system') {
+        firstSystemIdx = i;
       }
-    }
-    for (let i = 0; i < this.messages.length; i++) {
-      if (this.messages[i].role === 'user') {
-        anchorIndices.add(i);
-        break; // Only the first user message is an anchor
+      if (firstUserIdx === -1 && this.messages[i].role === 'user') {
+        firstUserIdx = i;
       }
+      if (firstSystemIdx !== -1 && firstUserIdx !== -1) break;
     }
 
     const excess = this.messages.length - maxMessages;
 
-    if (anchorIndices.size === 0) {
-      // No anchors, trim from the front
+    // If no anchors or anchors are beyond the trim window, just slice
+    if (firstSystemIdx === -1 && firstUserIdx === -1) {
       this.messages = this.messages.slice(excess);
     } else {
-      // Trim non-anchor messages from oldest first, skipping anchors
-      const toRemove = new Set<number>();
-      let removed = 0;
+      // Build set of protected indices
+      const protectedIndices = new Set<number>();
+      if (firstSystemIdx !== -1) protectedIndices.add(firstSystemIdx);
+      if (firstUserIdx !== -1) protectedIndices.add(firstUserIdx);
 
-      for (let i = 0; i < this.messages.length && removed < excess; i++) {
-        if (!anchorIndices.has(i)) {
-          toRemove.add(i);
-          removed++;
+      // Collect removable indices (oldest first)
+      const removable: number[] = [];
+      for (let i = 0; i < this.messages.length; i++) {
+        if (!protectedIndices.has(i)) {
+          removable.push(i);
         }
       }
 
-      // If we couldn't remove enough non-anchor messages, we have to trim anyway
-      // (this shouldn't happen in practice as anchors are at the start)
-      if (removed < excess) {
-        this.messages = this.messages.slice(excess);
-      } else {
+      if (removable.length >= excess) {
+        // Remove the oldest `excess` non-anchor messages
+        const toRemove = new Set(removable.slice(0, excess));
         this.messages = this.messages.filter((_, idx) => !toRemove.has(idx));
+      } else {
+        // Not enough non-anchor messages, trim from front
+        this.messages = this.messages.slice(excess);
       }
     }
 

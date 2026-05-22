@@ -57,19 +57,21 @@ async function loadRelevantMemories(
   const relevantFileNames = findRelevantMemories(query, manifest, recentTools, maxRelevant);
   if (relevantFileNames.length === 0) return [];
 
-  // Load full content for relevant files
+  // Load full content for relevant files in parallel
   const projectPath = getProjectMemoryPath(projectHash);
   const entries: MemoryEntry[] = [];
 
-  for (const fileName of relevantFileNames) {
-    try {
+  const loadResults = await Promise.allSettled(
+    relevantFileNames.map(async (fileName) => {
       const filePath = path.join(projectPath, fileName);
-      const content = await fs.readFile(filePath, 'utf-8');
-      const stat = await fs.stat(filePath);
+      const [content, stat] = await Promise.all([
+        fs.readFile(filePath, 'utf-8'),
+        fs.stat(filePath),
+      ]);
 
       // Parse frontmatter
       const frontmatterMatch = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
-      if (!frontmatterMatch) continue;
+      if (!frontmatterMatch) return null;
 
       const [, yamlBlock, body] = frontmatterMatch;
 
@@ -82,25 +84,28 @@ async function loadRelevantMemories(
       const name = nameMatch ? nameMatch[1].trim() : fileName.replace('.md', '');
       const description = descMatch ? descMatch[1].trim() : '';
 
-      entries.push({
-        header: {
-          name,
-          description,
-          type,
-        },
+      return {
+        header: { name, description, type },
         content: body.trim(),
         filePath,
         fileName,
         mtime: stat.mtimeMs,
-      });
-    } catch {
-      // Skip unreadable files
-      continue;
+      };
+    })
+  );
+
+  for (const result of loadResults) {
+    if (result.status === 'fulfilled' && result.value) {
+      entries.push(result.value);
     }
   }
 
   return entries;
 }
+
+// Reusable encoder/decoder instances (avoid allocation per call)
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
 
 /**
  * Build the entrypoint section from MEMORY.md
@@ -110,11 +115,9 @@ function buildEntrypointSection(entrypoint: string): string {
   const lines = entrypoint.split('\n');
   let truncated = lines.slice(0, 200).join('\n');
 
-  const encoder = new TextEncoder();
-  if (encoder.encode(truncated).length > 25 * 1024) {
-    const bytes = encoder.encode(truncated).slice(0, 25 * 1024);
-    const decoder = new TextDecoder();
-    truncated = decoder.decode(bytes);
+  if (textEncoder.encode(truncated).length > 25 * 1024) {
+    const bytes = textEncoder.encode(truncated).slice(0, 25 * 1024);
+    truncated = textDecoder.decode(bytes);
     truncated += '\n\n*(Index truncated - some memories not shown)*';
   }
 

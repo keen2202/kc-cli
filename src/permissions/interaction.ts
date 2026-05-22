@@ -23,6 +23,7 @@ export class PermissionHandler {
   private rl: readline.Interface;
   private options: Required<PermissionHandlerOptions>;
   private decisionLog: Array<{ tool: string; decision: string; timestamp: number }> = [];
+  private static readonly MAX_LOG_SIZE = 1000;
 
   constructor(options: PermissionHandlerOptions = {}) {
     this.options = {
@@ -225,6 +226,10 @@ export class PermissionHandler {
    * Log permission decision
    */
   private logDecision(tool: string, decision: string): void {
+    // Cap log size to prevent unbounded memory growth in long sessions
+    if (this.decisionLog.length >= PermissionHandler.MAX_LOG_SIZE) {
+      this.decisionLog.splice(0, this.decisionLog.length - PermissionHandler.MAX_LOG_SIZE + 1);
+    }
     this.decisionLog.push({
       tool,
       decision,

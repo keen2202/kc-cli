@@ -7,6 +7,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
+// Pre-built XML escape lookup map for single-pass escaping
+const XML_ESCAPE_MAP: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&apos;',
+};
+
 /**
  * WindowsSandbox — uses Windows Sandbox (WSB) for isolation on Windows.
  *
@@ -101,11 +110,7 @@ export class WindowsSandbox implements SandboxBackend {
    * Escape special XML characters.
    */
   private escapeXML(str: string): string {
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&apos;');
+    // Single-pass XML escaping with lookup map instead of 5 chained replaces
+    return str.replace(/[&<>"']/g, ch => XML_ESCAPE_MAP[ch]!);
   }
 }

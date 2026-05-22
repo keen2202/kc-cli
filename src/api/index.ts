@@ -9,6 +9,9 @@ export type {
   LLMResponse,
 } from './BaseApiClient';
 
+export { CachePrefixService, buildCacheStrategy, canonicalStringify } from '../services/cachePrefix';
+export type { FrozenPrefix, EphemeralContent, CacheStrategy as CacheStrategyType } from '../services/cachePrefix';
+
 export { OpenAICompatibleClient } from './OpenAICompatibleClient';
 export type { OpenAICompatibleConfig } from './OpenAICompatibleClient';
 

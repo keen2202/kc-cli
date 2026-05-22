@@ -22,20 +22,17 @@ const PERMISSION_HIERARCHY: Record<PermissionMode, PermissionMode[]> = {
   acceptEdits: ['acceptEdits', 'default', 'plan'],
 };
 
+// Pre-built Sets for O(1) permission lookups (avoids Array.includes per call)
+const PERMISSION_HIERARCHY_SETS: Record<PermissionMode, Set<PermissionMode>> = Object.fromEntries(
+  Object.entries(PERMISSION_HIERARCHY).map(([key, values]) => [key, new Set(values)])
+) as Record<PermissionMode, Set<PermissionMode>>;
+
 /**
  * Security critical paths that always require permission check
  * Even with bypassPermissions, sub-agents must be checked for these
+ * Pre-compiled regex for single-pass matching instead of 8 sequential includes()
  */
-const SECURITY_CRITICAL_PATHS = [
-  '/etc/passwd',
-  '/etc/shadow',
-  '.ssh',
-  '.gnupg',
-  '/sys/',
-  '/proc/',
-  '~/.ssh',
-  '~/.gnupg',
-];
+const SECURITY_CRITICAL_PATHS_REGEX = /\/etc\/passwd|\/etc\/shadow|\.ssh|\.gnupg|\/sys\/|\/proc\/|~\/\.ssh|~\/\.gnupg/;
 
 /**
  * Derive child agent's permission mode from parent's mode
@@ -54,10 +51,11 @@ export function deriveChildPermissions(
   }
 
   const allowedChildModes = PERMISSION_HIERARCHY[parentMode] || ['default'];
+  const allowedSet = PERMISSION_HIERARCHY_SETS[parentMode] || new Set(['default']);
 
-  // If child requests a specific mode, validate it
+  // If child requests a specific mode, validate it (O(1) Set lookup)
   if (requestedMode) {
-    if (allowedChildModes.includes(requestedMode)) {
+    if (allowedSet.has(requestedMode)) {
       return requestedMode;
     }
     // Requested mode exceeds parent's capability, use the most permissive allowed
@@ -65,7 +63,7 @@ export function deriveChildPermissions(
   }
 
   // No request: inherit parent's mode (if allowed) or use most permissive
-  if (allowedChildModes.includes(parentMode)) {
+  if (allowedSet.has(parentMode)) {
     return parentMode;
   }
   return allowedChildModes[0];
@@ -87,14 +85,16 @@ export function buildChildToolAllowList(
 ): ToolName[] {
   let allowedTools = [...parentTools];
 
-  // If specific tools are allowed (whitelist)
+  // If specific tools are allowed (whitelist) - use Set for O(1) lookup
   if (config?.tools && config.tools.length > 0) {
-    allowedTools = parentTools.filter((tool) => config.tools!.includes(tool));
+    const allowSet = new Set(config.tools);
+    allowedTools = parentTools.filter((tool) => allowSet.has(tool));
   }
 
-  // If specific tools are denied (blacklist)
+  // If specific tools are denied (blacklist) - use Set for O(1) lookup
   if (config?.deniedTools && config.deniedTools.length > 0) {
-    allowedTools = allowedTools.filter((tool) => !config.deniedTools!.includes(tool));
+    const denySet = new Set(config.deniedTools);
+    allowedTools = allowedTools.filter((tool) => !denySet.has(tool));
   }
 
   // Sub-agents cannot spawn other sub-agents (prevent infinite recursion)
@@ -144,13 +144,8 @@ export function isSecurityCritical(
     (input.file_path as string) ||
     '';
 
-  for (const protectedPath of SECURITY_CRITICAL_PATHS) {
-    if (pathToCheck.includes(protectedPath)) {
-      return true;
-    }
-  }
-
-  return false;
+  // Single regex test instead of 8 sequential includes() calls
+  return SECURITY_CRITICAL_PATHS_REGEX.test(pathToCheck);
 }
 
 /**
@@ -164,6 +159,6 @@ export function isValidChildPermission(
   parentMode: PermissionMode,
   childMode: PermissionMode
 ): boolean {
-  const allowedChildModes = PERMISSION_HIERARCHY[parentMode] || ['default'];
-  return allowedChildModes.includes(childMode);
+  const allowedSet = PERMISSION_HIERARCHY_SETS[parentMode] || new Set(['default']);
+  return allowedSet.has(childMode);
 }

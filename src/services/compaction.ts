@@ -95,17 +95,11 @@ export function microcompact(
     const msg = messages[i];
 
     if (msg.role === 'tool' && msg.toolResults) {
-      // Check if this is a compactable tool
-      // Try to infer tool name from the associated assistant message's toolCalls
-      // Since we can't reliably determine the tool from the result alone,
-      // we consider all tool results with output as compactable candidates
       const hasCompactableTool = msg.toolResults.some(result => {
-        // Results with substantial output are good compaction candidates
         return result.output && String(result.output).length > 50;
       });
 
       if (hasCompactableTool) {
-        // Replace tool result content with placeholder
         compacted.push({
           ...msg,
           toolResults: msg.toolResults.map(result => ({
@@ -117,10 +111,8 @@ export function microcompact(
         compacted.push(msg);
       }
     } else if (msg.role === 'assistant' && msg.toolCalls) {
-      // Keep assistant messages with tool calls (they're small)
       compacted.push(msg);
     } else {
-      // Keep user messages and system messages
       compacted.push(msg);
     }
   }
@@ -128,7 +120,9 @@ export function microcompact(
   // Add recent messages unchanged
   compacted.push(...messagesToKeep);
 
-  const tokensSaved = calculateTokensSaved(messages, compacted);
+  // Calculate tokens saved without re-estimating original messages
+  const compactedTokens = estimateMessageTokensArray(compacted);
+  const tokensSaved = originalTokens - compactedTokens;
 
   return {
     messages: compacted,
@@ -144,7 +138,7 @@ export function microcompact(
  */
 export async function fullCompact(
   messages: ChatMessage[],
-  apiClient: any, // LLM API client (placeholder type)
+  apiClient: import('../api/BaseApiClient').BaseApiClient,
   config: CompactConfig,
   systemPrompt: string = ''
 ): Promise<CompactionResult> {
@@ -165,7 +159,6 @@ export async function fullCompact(
       const remainingTokens = estimateMessageTokensArray(microResult.messages);
 
       if (remainingTokens < threshold) {
-        // Microcompact was sufficient
         return microResult;
       }
     }
