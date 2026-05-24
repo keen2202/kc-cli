@@ -12,9 +12,13 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { execSync, spawn } from 'child_process';
 import type { SWEBenchInstance, Prediction, RunResult, RunConfig } from './types';
 import { buildSystemPrompt, buildUserPrompt } from './prompt';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Import KC-CLI core modules
 // These are imported dynamically to avoid build issues

@@ -131,13 +131,41 @@ export abstract class BaseApiClient {
    * Subclasses can override for provider-specific formatting
    */
   protected formatMessages(messages: ChatMessage[]): Array<Record<string, unknown>> {
-    return messages.map(msg => {
+    const result: Array<Record<string, unknown>> = [];
+
+    for (const msg of messages) {
+      if (msg.role === 'tool') {
+        // Pre-formatted tool message (from buildApiMessages) - pass through
+        if ((msg as any).tool_call_id) {
+          result.push({
+            role: 'tool',
+            tool_call_id: (msg as any).tool_call_id,
+            content: msg.content ?? '',
+          });
+          continue;
+        }
+        // ChatMessage with toolResults - expand each result
+        if (msg.toolResults && msg.toolResults.length > 0) {
+          for (const tr of msg.toolResults) {
+            result.push({
+              role: 'tool',
+              tool_call_id: tr.toolCallId,
+              content: tr.output ?? '',
+            });
+          }
+          continue;
+        }
+      }
+
       const formatted: Record<string, unknown> = {
         role: msg.role,
-        content: msg.content,
+        content: msg.content ?? '',
       };
 
-      if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+      // Pre-formatted assistant message (from buildApiMessages) - preserve tool_calls
+      if (msg.role === 'assistant' && (msg as any).tool_calls) {
+        formatted.tool_calls = (msg as any).tool_calls;
+      } else if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
         formatted.tool_calls = msg.toolCalls.map(tc => ({
           id: tc.id,
           type: 'function',
@@ -148,14 +176,15 @@ export abstract class BaseApiClient {
         }));
       }
 
-      if (msg.role === 'tool' && msg.toolResults && msg.toolResults.length > 0) {
-        // Tool results are handled separately in most APIs
-        // This is a simplified version
-        formatted.content = msg.toolResults.map(r => r.output).join('\n');
+      // Ensure assistant messages always have content (some APIs require it)
+      if (msg.role === 'assistant' && !formatted.content && !formatted.tool_calls) {
+        formatted.content = '(no response)';
       }
 
-      return formatted;
-    });
+      result.push(formatted);
+    }
+
+    return result;
   }
 
   /**

@@ -205,6 +205,14 @@ export class AnthropicClient extends BaseApiClient {
         })));
       }
 
+      // Ensure assistant messages always have content (some APIs require it)
+      if (msg.role === 'assistant' && contentArr.length === 0) {
+        contentArr.push({
+          type: 'text',
+          text: '(no response)',
+        });
+      }
+
       // Tool results (user message)
       if (msg.role === 'tool' && msg.toolResults && msg.toolResults.length > 0) {
         contentArr.push(...msg.toolResults.map((r: ToolResult) => ({

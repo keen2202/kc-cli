@@ -7,7 +7,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import type { SWEBenchInstance, RunConfig } from './types';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const DATASET_MAP: Record<string, string> = {
   verified: 'princeton-nlp/SWE-bench_Verified',

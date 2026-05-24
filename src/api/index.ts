@@ -43,7 +43,7 @@ export interface ProviderModelInfo {
 export const PROVIDER_MODELS: Record<LLMProvider, ProviderModelInfo> = {
   'anthropic': {
     default: 'claude-sonnet-4-20250514',
-    supported: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-opus-20240229'],
+    supported: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-opus-20240229', 'mimo-v2.5-pro'],
   },
   'openai': {
     default: 'gpt-4o',

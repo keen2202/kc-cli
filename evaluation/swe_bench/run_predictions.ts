@@ -11,9 +11,13 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { solveInstance } from './adapter';
 import { loadDataset } from './dataset';
 import type { RunConfig, RunResult, Prediction, PredictionsFile, RunSummary } from './types';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Parse CLI arguments
 function parseArgs(): RunConfig {
