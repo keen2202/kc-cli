@@ -5,6 +5,8 @@ import { resetCachedQueryEngine } from '../../src/orchestrator/backends/in-proce
 
 // Track submitMessage calls for each test
 let submitMessageImpl: () => AsyncGenerator<any> = async function* () {};
+// Optional error to throw from QueryEngine constructor
+let constructorError: Error | null = null;
 
 // Export for test access
 export function setSubmitMessageImpl(fn: () => AsyncGenerator<any>) {
@@ -45,9 +47,13 @@ beforeEach(async () => {
   state.initializeState({ cwd: '/test', permissionMode: 'default' });
   // Reset to default no-op generator
   submitMessageImpl = async function* () {};
+  constructorError = null;
   // Re-register the mock for each test
   vi.doMock('../../src/query/QueryEngine', () => ({
     QueryEngine: class MockQueryEngine {
+      constructor() {
+        if (constructorError) throw constructorError;
+      }
       submitMessage(_msg: string) {
         return submitMessageImpl();
       }
@@ -163,17 +169,7 @@ describe('InProcessBackend - spawn', () => {
   });
 
   it('should handle spawn error and return failure', async () => {
-    // Override the QueryEngine mock to throw
-    vi.doMock('../../src/query/QueryEngine', () => ({
-      QueryEngine: class {
-        constructor() { throw new Error('No API key'); }
-        submitMessage() {}
-        abort() {}
-        isAborted() { return false; }
-      },
-    }));
-
-    // Reset cache AFTER setting up the mock
+    constructorError = new Error('No API key');
     resetCachedQueryEngine();
 
     const { InProcessBackend } = await import('../../src/orchestrator/backends/in-process');
