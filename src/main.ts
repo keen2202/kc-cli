@@ -6,6 +6,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import * as path from 'path';
+import { getErrorMessage } from './types/errors';
 
 import { profileCheckpoint, getProfileReport } from './bootstrap/profiler';
 import { initializeState, getState, updateState } from './bootstrap/state';
@@ -124,30 +125,55 @@ async function runAgent(prompt: string | undefined, opts: any) {
   }
   profileCheckpoint('tools_registered');
 
-  // Phase 3b: Initialize MCP servers
+  // Phase 3b: Initialize MCP servers (parallel connection)
   let mcpManager: MCPClientManager | null = null;
   if (!opts.bare) {
     try {
       const mcpConfig = await loadMCPConfig(cwd);
       if (Object.keys(mcpConfig.servers).length > 0) {
         mcpManager = new MCPClientManager();
-        for (const [serverId, serverConfig] of Object.entries(mcpConfig.servers)) {
-          try {
-            await mcpManager.connect(serverId, serverConfig);
-            const mcpTools = mcpManager.getServerTools(serverId);
-            for (const mcpTool of mcpTools) {
-              const toolDef = convertMCPTool(mcpTool, serverId, mcpManager);
-              toolRegistry.registerMCPTool(toolDef);
+
+        // Connect to all MCP servers in parallel
+        const connectionTimeout = 30000; // 30 seconds per server
+        const connectionPromises = Object.entries(mcpConfig.servers).map(
+          async ([serverId, serverConfig]) => {
+            const timeoutPromise = new Promise<never>((_, reject) => {
+              setTimeout(() => reject(new Error(`Connection timeout after ${connectionTimeout / 1000}s`)), connectionTimeout);
+            });
+
+            try {
+              await Promise.race([
+                mcpManager!.connect(serverId, serverConfig),
+                timeoutPromise,
+              ]);
+              const mcpTools = mcpManager!.getServerTools(serverId);
+              for (const mcpTool of mcpTools) {
+                const toolDef = convertMCPTool(mcpTool, serverId, mcpManager!);
+                toolRegistry.registerMCPTool(toolDef);
+              }
+              if (opts.verbose) {
+                console.log(chalk.gray(`  MCP: ${serverId} (${mcpTools.length} tools)`));
+              }
+              return { serverId, success: true, toolCount: mcpTools.length };
+            } catch (error) {
+              console.warn(chalk.yellow(`Warning: MCP server "${serverId}" failed to connect: ${error instanceof Error ? error.message : error}`));
+              return { serverId, success: false, error };
             }
-            if (opts.verbose) {
-              console.log(chalk.gray(`  MCP: ${serverId} (${mcpTools.length} tools)`));
-            }
-          } catch (error) {
-            console.warn(chalk.yellow(`Warning: MCP server "${serverId}" failed to connect: ${error instanceof Error ? error.message : error}`));
           }
+        );
+
+        // Wait for all connections to complete (success or failure)
+        const results = await Promise.allSettled(connectionPromises);
+
+        // Log summary
+        const succeeded = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
+        const failed = results.length - succeeded;
+        if (failed > 0) {
+          console.log(chalk.yellow(`MCP: ${succeeded} connected, ${failed} failed`));
         }
       }
-    } catch {
+    } catch (_err) {
+      console.error("Suppressed error:", _err);
       // MCP config loading is optional, ignore errors
     }
   }
@@ -168,7 +194,8 @@ async function runAgent(prompt: string | undefined, opts: any) {
       if (opts.verbose && pluginTools.length > 0) {
         console.log(chalk.gray(`  Plugins: ${pluginTools.length} tool(s) loaded`));
       }
-    } catch {
+    } catch (_err) {
+      console.error("Suppressed error:", _err);
       // Plugin loading is optional
     }
   }
@@ -249,7 +276,7 @@ async function executePrompt(queryEngine: QueryEngine, prompt: string) {
     }
   } catch (error) {
     console.error(
-      chalk.red(`\n❌ Fatal error: ${error instanceof Error ? error.message : String(error)}`)
+      chalk.red(`\n❌ Fatal error: ${getErrorMessage(error)}`)
     );
     process.exit(1);
   }
@@ -400,7 +427,7 @@ async function runREPL(queryEngine: QueryEngine) {
         }
       } catch (error) {
         console.error(
-          chalk.red(`\n❌ Error: ${error instanceof Error ? error.message : String(error)}`)
+          chalk.red(`\n❌ Error: ${getErrorMessage(error)}`)
         );
       }
 

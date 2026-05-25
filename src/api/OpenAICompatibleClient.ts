@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 // OpenAI Compatible API Client
 // Supports: OpenAI (GPT), Qwen (DashScope), GLM (Zhipu AI), and other OpenAI-compatible APIs
 // Cache optimization: byte-stable serialization for DeepSeek auto-prefix caching
@@ -291,7 +292,7 @@ export class OpenAICompatibleClient extends BaseApiClient {
             status: 'completed',
           });
         } catch (error) {
-          console.warn('Failed to parse tool call arguments:', error);
+          logger.api.warn('Failed to parse tool call arguments: ' + String(error));
         }
       }
     }
@@ -373,7 +374,7 @@ export class OpenAICompatibleClient extends BaseApiClient {
         const data = JSON.parse(dataStr);
         yield* this.parseStreamChunk(data);
       } catch (error) {
-        console.warn('Failed to parse SSE chunk:', error);
+        logger.api.warn('Failed to parse SSE chunk: ' + String(error));
       }
     }
   }
@@ -416,7 +417,7 @@ export class OpenAICompatibleClient extends BaseApiClient {
             toolCall,
           };
         } catch (error) {
-          console.warn('Failed to parse tool call chunk:', error);
+          logger.api.warn('Failed to parse tool call chunk: ' + String(error));
         }
       }
     }

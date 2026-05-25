@@ -62,6 +62,61 @@ export function assertPathWithinWorkspace(filePath: string, cwd: string): void {
       `Path traversal denied: "${filePath}" resolves to "${resolved}" which is outside workspace "${cwd}"`
     );
   }
+
+  // Resolve symlinks to prevent TOCTOU attacks where a symlink is
+  // substituted between the path check and the file operation
+  let realPath: string;
+  try {
+    realPath = fs.realpathSync.native(resolved);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      // File doesn't exist yet — resolve parent directory and verify
+      realPath = resolveParentForNewFile(resolved, normalizedCwd);
+    } else if ((err as NodeJS.ErrnoException).code === 'ELOOP') {
+      throw new Error(
+        `Symlink loop detected: "${filePath}" contains a circular symlink reference`
+      );
+    } else {
+      throw err;
+    }
+  }
+
+  // Check that the real (symlink-resolved) path is still within workspace
+  if (realPath !== cwd && !realPath.startsWith(normalizedCwd)) {
+    throw new Error(
+      `Symlink escape denied: "${filePath}" resolves to "${realPath}" which is outside workspace "${cwd}"`
+    );
+  }
+}
+
+function resolveParentForNewFile(filePath: string, normalizedCwd: string): string {
+  let dir = path.dirname(filePath);
+
+  while (dir !== filePath) {
+    try {
+      const realDir = fs.realpathSync.native(dir);
+      if (realDir !== normalizedCwd.slice(0, -1) && !realDir.startsWith(normalizedCwd)) {
+        throw new Error(
+          `Symlink escape denied: parent directory "${dir}" resolves to "${realDir}" outside workspace`
+        );
+      }
+      const relative = path.relative(dir, filePath);
+      return relative ? path.join(realDir, relative) : realDir;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        dir = path.dirname(dir);
+        continue;
+      }
+      if ((err as NodeJS.ErrnoException).code === 'ELOOP') {
+        throw new Error('Symlink loop detected in parent directory path');
+      }
+      throw err;
+    }
+  }
+
+  throw new Error(
+    `Cannot resolve path for new file: "${filePath}" — no existing parent found`
+  );
 }
 
 /**

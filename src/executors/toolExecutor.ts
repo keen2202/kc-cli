@@ -1,5 +1,6 @@
 // Tool executor - handles single and parallel tool execution with permission checks
 
+import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import type { ToolCall, ToolResult } from '../types/message';
 import type { ToolDefinition, ToolUseContext } from '../types/tools';
 import type { PermissionResult } from '../types/permissions';
@@ -8,13 +9,52 @@ import type { PluginHooks } from '../plugins/types';
 import { hasPermissionsToUseTool } from '../permissions/engine';
 import { SandboxManager } from '../services/sandbox';
 import { mergeSandboxPolicy } from '../services/sandbox-policy';
+import { Semaphore } from '../utils/semaphore';
+import { DEFAULT_TOOL_TIMEOUT_MS } from '../constants';
+import { getErrorMessage } from '../types/errors';
+import { logger } from '../services/logger';
 
 /**
- * Symbol used to mark tool input that has already had its command
+ * Key used to mark tool input that has already had its command
  * wrapped by the executor's sandbox. Tools check for this marker
  * to avoid double-wrapping.
  */
-export const SANDBOX_WRAPPED_MARKER = Symbol.for('kc-cli.sandbox-wrapped');
+export const SANDBOX_WRAPPED_MARKER = '__sandboxWrapped' as const;
+
+/**
+ * Key used to store the HMAC signature on wrapped tool input.
+ */
+export const SANDBOX_SIGNATURE_KEY = '__sandboxSignature' as const;
+
+/**
+ * Session secret for HMAC signing. Generated once per process start.
+ * Not persisted — each process gets a fresh secret.
+ */
+const SESSION_SECRET = randomBytes(32);
+
+/**
+ * Create an HMAC signature for a sandbox-wrapped tool ID.
+ * Used to prevent external code from forging the sandbox marker.
+ */
+export function createSandboxSignature(toolId: string): string {
+  return createHmac('sha256', SESSION_SECRET).update(toolId).digest('hex');
+}
+
+/**
+ * Verify an HMAC signature for a sandbox-wrapped tool ID.
+ * Uses timingSafeEqual to prevent timing attacks.
+ */
+export function verifySandboxSignature(toolId: string, signature: string): boolean {
+  try {
+    const expected = createHmac('sha256', SESSION_SECRET).update(toolId).digest('hex');
+    const expectedBuf = Buffer.from(expected, 'hex');
+    const signatureBuf = Buffer.from(signature, 'hex');
+    if (expectedBuf.length !== signatureBuf.length) return false;
+    return timingSafeEqual(expectedBuf, signatureBuf);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Tool names whose input contains a `command` field that must be
@@ -22,6 +62,12 @@ export const SANDBOX_WRAPPED_MARKER = Symbol.for('kc-cli.sandbox-wrapped');
  * accidentally or intentionally bypassing sandbox policy.
  */
 const COMMAND_EXECUTING_TOOLS = new Set(['Bash', 'Run']);
+
+/**
+ * Maximum number of tools that can execute concurrently.
+ * Can be overridden via config.
+ */
+const DEFAULT_MAX_CONCURRENT_TOOLS = 5;
 
 /**
  * Tool executor that supports both sequential and parallel tool execution
@@ -38,7 +84,8 @@ export class ToolExecutor {
   };
   private pluginHooks?: PluginHooks;
   private sandboxManager: SandboxManager;
-  private readonly DEFAULT_TIMEOUT_MS = 30_000; // 30 seconds
+  private concurrencySemaphore: Semaphore;
+  private readonly defaultTimeoutMs = DEFAULT_TOOL_TIMEOUT_MS;
 
   constructor(
     tools: ToolDefinition[],
@@ -56,6 +103,9 @@ export class ToolExecutor {
       maxMemoryMb?: number;
       cpuTimeLimitSec?: number;
       policy?: Parameters<typeof mergeSandboxPolicy>[0];
+    },
+    concurrencyOptions?: {
+      maxConcurrentTools?: number;
     }
   ) {
     this.tools = new Map(tools.map(tool => [tool.name, tool]));
@@ -63,6 +113,10 @@ export class ToolExecutor {
     this.cwd = cwd;
     this.permissionConfig = permissionConfig;
     this.pluginHooks = pluginHooks;
+
+    // Initialize concurrency semaphore
+    const maxConcurrent = concurrencyOptions?.maxConcurrentTools ?? DEFAULT_MAX_CONCURRENT_TOOLS;
+    this.concurrencySemaphore = new Semaphore(maxConcurrent);
 
     // Initialize sandbox manager with config
     const policy = sandboxOptions?.policy ? mergeSandboxPolicy(sandboxOptions.policy) : undefined;
@@ -111,7 +165,7 @@ export class ToolExecutor {
           }
           effectiveInput = modifiedInput;
         } catch (err) {
-          console.warn(`[Plugin] preToolUse hook error:`, err);
+          logger.tools.error('[Plugin] preToolUse hook error: ' + String(err));
         }
       }
 
@@ -140,22 +194,27 @@ export class ToolExecutor {
       // This is the authoritative sandbox enforcement point — tools MUST NOT
       // bypass this by creating their own SandboxManager. The wrapped command
       // is injected into input and marked to prevent double-wrapping.
+      // An HMAC signature is attached to prevent external code from forging the marker.
       let effectiveInputWithWrap = effectiveInput;
       if (COMMAND_EXECUTING_TOOLS.has(toolCall.toolName) && sandboxDecision === 'run-sandboxed') {
         const wrappedCommand = this.sandboxManager.wrapCommand(
           (effectiveInput as Record<string, unknown>).command as string,
           toolCall.toolName
         );
+        const signature = createSandboxSignature(toolCall.toolName);
         effectiveInputWithWrap = {
           ...effectiveInput,
           command: wrappedCommand,
           [SANDBOX_WRAPPED_MARKER]: true,
-        } as typeof effectiveInput;
+          [SANDBOX_SIGNATURE_KEY]: signature,
+        } as Record<string, unknown> as typeof effectiveInput;
       }
 
-      // 4. Execute tool with timeout (sandbox info passed via context)
+      // 4. Execute tool with concurrency limit and timeout
       const timeoutMs = this.getToolTimeout(tool);
-      const result = await this.executeWithTimeout(tool, effectiveInputWithWrap, context, timeoutMs, toolCall.toolName, toolCall.id);
+      const result = await this.concurrencySemaphore.withPermit(async () => {
+        return this.executeWithTimeout(tool, effectiveInputWithWrap, context, timeoutMs, toolCall.toolName, toolCall.id);
+      });
 
       // 4b. Add sandbox metadata to result
       if (result.metadata) {
@@ -173,7 +232,7 @@ export class ToolExecutor {
         try {
           await this.pluginHooks.postToolUse(toolCall.toolName, effectiveInput, result, context);
         } catch (err) {
-          console.warn(`[Plugin] postToolUse hook error:`, err);
+          logger.tools.error('[Plugin] postToolUse hook error: ' + String(err));
         }
       }
 
@@ -181,7 +240,7 @@ export class ToolExecutor {
     } catch (error) {
       return {
         toolCallId: toolCall.id,
-        output: `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`,
+        output: `Tool execution failed: ${getErrorMessage(error)}`,
         isError: true,
       };
     }
@@ -261,7 +320,7 @@ export class ToolExecutor {
     if (typeof timeout === 'number' && timeout > 0) {
       return timeout * 1000; // Convert seconds to ms
     }
-    return this.DEFAULT_TIMEOUT_MS;
+    return this.defaultTimeoutMs;
   }
 
   /**
@@ -377,8 +436,6 @@ export class ToolExecutor {
       }
 
       const permission = await hasPermissionsToUseTool(toolCall.toolName, toolCall.input, {
-        // ToolDefinition.checkPermissions takes ToolUseContext but hasPermissionsToUseTool
-        // expects PermissionContext; the fields are compatible at runtime.
         toolCheckPermissions: tool.checkPermissions as unknown as (input: Record<string, unknown>, context: import('../types/permissions').PermissionContext) => import('../types/permissions').PermissionResult,
         content: this.extractContentForPermission(toolCall.toolName, toolCall.input),
         config: this.permissionConfig,
@@ -399,8 +456,6 @@ export class ToolExecutor {
     context: ToolUseContext
   ): Promise<PermissionResult> {
     return await hasPermissionsToUseTool(toolCall.toolName, toolCall.input, {
-      // ToolDefinition.checkPermissions takes ToolUseContext but hasPermissionsToUseTool
-      // expects PermissionContext; the fields are compatible at runtime.
       toolCheckPermissions: tool.checkPermissions as unknown as (input: Record<string, unknown>, context: import('../types/permissions').PermissionContext) => import('../types/permissions').PermissionResult,
       content: this.extractContentForPermission(toolCall.toolName, toolCall.input),
       config: this.permissionConfig,
@@ -434,4 +489,30 @@ export class ToolExecutor {
   getSandboxManager(): SandboxManager {
     return this.sandboxManager;
   }
+
+  /**
+   * Verify that tool input has a valid sandbox signature.
+   * Returns true if the input was properly sandbox-wrapped by this executor.
+   */
+  static verifySandboxInput(input: Record<string, unknown>, toolName: string): boolean {
+    return isAlreadySandboxWrapped(input, toolName);
+  }
+}
+
+/**
+ * Check if tool input was already sandbox-wrapped by the executor.
+ * Shared utility for tools to avoid double-wrapping commands.
+ */
+export function isAlreadySandboxWrapped(
+  input: Record<string, unknown>,
+  toolName: string
+): boolean {
+  const marker = input[SANDBOX_WRAPPED_MARKER];
+  const signature = input[SANDBOX_SIGNATURE_KEY];
+
+  if (marker !== true || typeof signature !== 'string') {
+    return false;
+  }
+
+  return verifySandboxSignature(toolName, signature);
 }

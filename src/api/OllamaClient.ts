@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 // Ollama API Client (Local LLM Server)
 
 import { BaseApiClient, ApiError } from './BaseApiClient';
@@ -233,7 +234,7 @@ export class OllamaClient extends BaseApiClient {
                 shouldStop = true;
               }
             } catch (error) {
-              console.warn('Failed to parse Ollama chunk:', error);
+              logger.api.warn('Failed to parse Ollama chunk: ' + String(error));
             }
           }
         }
@@ -280,7 +281,7 @@ export class OllamaClient extends BaseApiClient {
             toolCall,
           };
         } catch (error) {
-          console.warn('Failed to parse Ollama tool call:', error);
+          logger.api.warn('Failed to parse Ollama tool call: ' + String(error));
         }
       }
     }

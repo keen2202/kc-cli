@@ -5,6 +5,8 @@ import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
 import { exec } from 'child_process';
+import { isExecError, getErrorMessage } from '../../types/errors';
+import { LARGE_MAX_BUFFER } from '../../constants';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
@@ -49,7 +51,7 @@ export const tool = buildTool<DeployInput, string>({
       const { stdout, stderr } = await execAsync(command, {
         cwd: context.cwd,
         timeout: 600000, // 10 minute timeout
-        maxBuffer: 50 * 1024 * 1024,
+        maxBuffer: LARGE_MAX_BUFFER,
       });
 
       return toolResult(

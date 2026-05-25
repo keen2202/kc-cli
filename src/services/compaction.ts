@@ -256,6 +256,26 @@ Keep the summary under 500 words.`;
  * Format compact summary from LLM response
  * Extracts content from <summary> tags if present
  */
+export function needsForceTruncation(messages: any[]): boolean {
+  return messages.length > 500;
+}
+
+export function forceTruncate(messages: any[]): { messages: any[]; tokensSaved: number; wasCompacted: boolean } {
+  const half = Math.floor(messages.length / 2);
+  return {
+    messages: messages.slice(half),
+    tokensSaved: half * 100,
+    wasCompacted: true,
+  };
+}
+
+export function getCompactionStrategy(
+  _messageCount: number,
+  _contextWindow: number
+): 'none' | 'micro' | 'full' {
+  return _messageCount > 100 ? 'full' : _messageCount > 50 ? 'micro' : 'none';
+}
+
 export function formatCompactSummary(rawSummary: string): string {
   // Extract content from <summary> tags if present
   const summaryMatch = rawSummary.match(/<summary>([\s\S]*?)<\/summary>/);

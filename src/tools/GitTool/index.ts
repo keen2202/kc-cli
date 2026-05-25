@@ -5,10 +5,123 @@ import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
 import { DANGEROUS_GIT_PATTERNS, isReadOnlyGitCommand } from '../../permissions/readonlyCommands';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
+import { isExecError, getErrorMessage } from '../../types/errors';
+import { DEFAULT_MAX_BUFFER } from '../../constants';
 
-const execAsync = promisify(exec);
+// Shell metacharacters and control chars that could enable command injection
+const SHELL_METACHAR_REGEX = /[;&|`$(){}!#~<>\n\r]/;
+
+function parseGitArgs(command: string): string[] {
+  const trimmed = command.trim();
+  if (!trimmed) throw new Error('Empty git command');
+
+  if (SHELL_METACHAR_REGEX.test(trimmed)) {
+    throw new Error(
+      `Git command contains forbidden shell metacharacters: ${trimmed.slice(0, 100)}`
+    );
+  }
+
+  const args: string[] = [];
+  let current = '';
+  let inSingle = false;
+  let inDouble = false;
+
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+
+    if (inSingle) {
+      if (ch === "'") {
+        inSingle = false;
+      } else {
+        current += ch;
+      }
+    } else if (inDouble) {
+      if (ch === '"') {
+        inDouble = false;
+      } else if (ch === '\\' && i + 1 < trimmed.length) {
+        const next = trimmed[i + 1];
+        if (next === '"' || next === '\\') {
+          current += next;
+          i++;
+        } else {
+          current += ch;
+        }
+      } else {
+        current += ch;
+      }
+    } else if (ch === "'") {
+      inSingle = true;
+    } else if (ch === '"') {
+      inDouble = true;
+    } else if (ch === ' ' || ch === '\t') {
+      if (current.length > 0) {
+        args.push(current);
+        current = '';
+      }
+    } else {
+      current += ch;
+    }
+  }
+
+  if (current.length > 0) args.push(current);
+  return args;
+}
+
+function spawnGit(
+  command: string,
+  cwd: string,
+  timeout: number
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const args = parseGitArgs(command);
+    const child = spawn('git', ['-c', 'color.ui=never', ...args], {
+      cwd,
+      timeout,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+      if (stdout.length > DEFAULT_MAX_BUFFER) {
+        child.kill();
+        reject(new Error('Git output exceeded max buffer size'));
+      }
+    });
+
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+      if (stderr.length > DEFAULT_MAX_BUFFER) {
+        child.kill();
+        reject(new Error('Git stderr output exceeded max buffer size'));
+      }
+    });
+
+    child.on('error', (err) => {
+      reject(err);
+    });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        const err = new Error(`git exited with code ${code}`) as Error & {
+          code: number | null;
+          stdout: string;
+          stderr: string;
+        };
+        err.code = code;
+        err.stdout = stdout;
+        err.stderr = stderr;
+        reject(err);
+      }
+    });
+  });
+}
 
 const GitInputSchema = z.object({
   command: z.string().describe('Git command to execute (without "git" prefix)'),
@@ -29,16 +142,8 @@ export const tool = buildTool<GitInput, string>({
       const workingDir = input.cwd || context.cwd;
       const timeout = (input.timeout || 60) * 1000;
 
-      // Use -c color.ui=never for clean, parseable output
-      const gitCmd = `git -c color.ui=never ${input.command}`;
+      const { stdout, stderr } = await spawnGit(input.command, workingDir, timeout);
 
-      const { stdout, stderr } = await execAsync(gitCmd, {
-        cwd: workingDir,
-        timeout,
-        maxBuffer: 10 * 1024 * 1024, // 10MB
-      });
-
-      // Sanitize output: truncate if extremely large
       let output = (stdout || stderr || '').trim();
       if (output.length > 100_000) {
         output = output.slice(0, 100_000) + '\n\n[Output truncated — too large]';
@@ -48,9 +153,13 @@ export const tool = buildTool<GitInput, string>({
         metadata: { command: input.command, cwd: workingDir },
       });
     } catch (error) {
-      const err = error as Record<string, unknown>;
-      const output = String(err.stdout || err.stderr || (error instanceof Error ? error.message : '') || '').trim();
-      return toolError(`Git command failed: ${output.slice(0, 2000)}`, {
+      if (isExecError(error)) {
+        const output = String(error.stdout || error.stderr || error.message || '').trim();
+        return toolError(`Git command failed: ${output.slice(0, 2000)}`, {
+          command: input.command,
+        });
+      }
+      return toolError(`Git command failed: ${getErrorMessage(error).slice(0, 2000)}`, {
         command: input.command,
       });
     }
@@ -59,7 +168,6 @@ export const tool = buildTool<GitInput, string>({
   checkPermissions: (input, context): PermissionResult => {
     const command = input.command.trim();
 
-    // Check for dangerous commands
     for (const pattern of DANGEROUS_GIT_PATTERNS) {
       if (pattern.test(command)) {
         return {
@@ -69,7 +177,6 @@ export const tool = buildTool<GitInput, string>({
       }
     }
 
-    // Check if read-only
     if (isReadOnlyGitCommand(command)) {
       return {
         behavior: 'allow',

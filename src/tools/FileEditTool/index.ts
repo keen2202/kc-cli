@@ -61,7 +61,7 @@ export const tool = buildTool<FileEditInput, string>({
       if (input.dry_run) {
         const diff = changes.join('\n');
         return toolResult(`Dry run - changes:\n${diff}`, {
-          metadata: { file_path: filePath, changes: changes.length },
+          metadata: { filePath, changes: changes.length },
         });
       }
 

@@ -56,7 +56,8 @@ export class ACPServer {
       try {
         const request = JSON.parse(trimmed) as ACPRequest;
         this.handleRequest(request);
-      } catch {
+      } catch (_err) {
+      console.error("Suppressed error:", _err);
         this.sendError(null, -32700, 'Parse error');
       }
     }

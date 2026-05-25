@@ -1,5 +1,6 @@
 import readline from 'readline';
 import chalk from 'chalk';
+import { getErrorMessage } from '../../types/errors';
 import { renderStatusBar } from './StatusBar';
 import { renderToolCallCard, type ToolCallData } from './ToolCallCard';
 import { renderChatView, type ChatMessage } from './ChatView';
@@ -198,7 +199,8 @@ export class App {
         this.diffWorker = null;
       });
       this.diffWorkerReady = true;
-    } catch {
+    } catch (_err) {
+      console.error("Suppressed error:", _err);
       // worker_threads not available - will use synchronous fallback
       this.diffWorkerReady = false;
     }
@@ -433,7 +435,7 @@ export class App {
         this.handleEvent(event, assistantMsg);
       }
     } catch (error) {
-      assistantMsg.content = chalk.red(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      assistantMsg.content = chalk.red(`Error: ${getErrorMessage(error)}`);
     }
 
     this.turnCount++;

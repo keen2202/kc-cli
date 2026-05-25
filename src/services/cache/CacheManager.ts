@@ -57,7 +57,6 @@ const BASE_MAX_SIZE: Record<CacheCategory, number> = {
 export class CacheManager {
   private static instance: CacheManager | null = null;
   private caches = new Map<string, CacheRegistration>();
-  private adaptiveTtls = new Map<string, number>();
   private pruneInterval: NodeJS.Timeout | null = null;
 
   private constructor() {
@@ -99,7 +98,6 @@ export class CacheManager {
     });
 
     this.caches.set(name, { name, category, cache });
-    this.adaptiveTtls.set(name, baseTtl);
 
     return cache;
   }
@@ -119,28 +117,6 @@ export class CacheManager {
     category: CacheCategory = 'general'
   ): TieredCache<V> {
     return this.getOrCreate<V>(`prefixed:${prefix}`, category);
-  }
-
-  /**
-   * Record a cache access for adaptive TTL tuning
-   */
-  recordAccess(name: string, hit: boolean): void {
-    const reg = this.caches.get(name);
-    if (!reg) return;
-
-    const currentTtl = this.adaptiveTtls.get(name) ?? BASE_TTL[reg.category];
-    const stats = reg.cache.getStats();
-
-    // Adaptive TTL: increase on high hit rate, decrease on low
-    if (stats.hits + stats.misses > 50) {
-      if (stats.hitRate > 0.9 && currentTtl < BASE_TTL[reg.category] * 3) {
-        // High hit rate - can afford longer TTL
-        this.adaptiveTtls.set(name, currentTtl * 1.2);
-      } else if (stats.hitRate < 0.5 && currentTtl > BASE_TTL[reg.category] * 0.3) {
-        // Low hit rate - shorten TTL to evict stale data faster
-        this.adaptiveTtls.set(name, currentTtl * 0.8);
-      }
-    }
   }
 
   /**

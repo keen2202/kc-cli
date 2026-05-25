@@ -1,5 +1,6 @@
 import type { Plugin, PluginHooks, PluginStatus } from './types';
 import type { ToolDefinition } from '../types/tools';
+import { logger } from '../services/logger';
 import { discoverPlugins, loadPlugin } from './plugin-loader';
 import { registerPostTurnHook } from '../hooks/postTurnHooks';
 

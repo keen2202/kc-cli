@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 // Observable state store - immutable state updates with listener notifications
 
 import type { AgentState, AgentStateName, ToolExecutionState } from './types';

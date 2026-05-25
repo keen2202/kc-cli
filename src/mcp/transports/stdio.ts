@@ -23,8 +23,17 @@ export class StdioTransport {
   private notificationHandler: ((notification: JSONRPCNotification) => void) | null = null;
   private sdkTransport: { connect(): Promise<void>; sendRequest(method: string, params?: Record<string, unknown>): Promise<unknown>; close(): Promise<void> } | null = null;
   private useSdk = false;
+  private isDisconnecting = false;
+
+  // Store event handler references for cleanup
+  private _onProcessError: ((err: Error) => void) | null = null;
+  private _onStdoutData: ((data: Buffer) => void) | null = null;
+  private _onStderrData: ((data: Buffer) => void) | null = null;
+  private _onProcessExit: ((code: number | null) => void) | null = null;
 
   async connect(command: string, args: string[], env?: Record<string, string>): Promise<void> {
+    this.isDisconnecting = false;
+
     // Try to use SDK transport if available
     try {
       const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
@@ -48,27 +57,32 @@ export class StdioTransport {
         env: mergedEnv,
       });
 
-      this.process.on('error', (err) => {
+      this._onProcessError = (err: Error) => {
         reject(new Error(`Failed to spawn MCP server: ${err.message}`));
-      });
+      };
+      this.process.on('error', this._onProcessError);
 
-      this.process.stdout?.on('data', (data: Buffer) => {
+      this._onStdoutData = (data: Buffer) => {
         this.buffer += data.toString();
         this.processBuffer();
-      });
+      };
+      this.process.stdout?.on('data', this._onStdoutData);
 
-      this.process.stderr?.on('data', (data: Buffer) => {
+      this._onStderrData = (_data: Buffer) => {
         // stderr is used for logging in MCP servers, ignore silently
-      });
+      };
+      this.process.stderr?.on('data', this._onStderrData);
 
-      this.process.on('exit', (code) => {
+      this._onProcessExit = (code: number | null) => {
+        if (this.isDisconnecting) return;
         this.process = null;
         // Reject all pending requests
         for (const [, pending] of this.pendingRequests) {
           pending.reject(new Error(`MCP server exited with code ${code}`));
         }
         this.pendingRequests.clear();
-      });
+      };
+      this.process.on('exit', this._onProcessExit);
 
       // Give the process a moment to start
       setTimeout(() => {
@@ -116,24 +130,47 @@ export class StdioTransport {
   }
 
   async disconnect(): Promise<void> {
+    this.isDisconnecting = true;
+
     if (this.useSdk && this.sdkTransport) {
       await this.sdkTransport.close();
       this.sdkTransport = null;
       this.useSdk = false;
+      this.isDisconnecting = false;
       return;
     }
 
     if (this.process) {
+      // Remove event listeners to prevent leaks on reconnect
+      if (this._onProcessError) {
+        this.process.removeListener('error', this._onProcessError);
+        this._onProcessError = null;
+      }
+      if (this._onStdoutData && this.process.stdout) {
+        this.process.stdout.removeListener('data', this._onStdoutData);
+        this._onStdoutData = null;
+      }
+      if (this._onStderrData && this.process.stderr) {
+        this.process.stderr.removeListener('data', this._onStderrData);
+        this._onStderrData = null;
+      }
+      if (this._onProcessExit) {
+        this.process.removeListener('exit', this._onProcessExit);
+        this._onProcessExit = null;
+      }
+
       this.process.kill('SIGTERM');
       // Give it a moment, then force kill
+      const currentProcess = this.process;
       setTimeout(() => {
-        if (this.process) {
-          this.process.kill('SIGKILL');
+        if (currentProcess && !currentProcess.killed) {
+          currentProcess.kill('SIGKILL');
         }
       }, 2000);
       this.process = null;
     }
     this.pendingRequests.clear();
+    this.isDisconnecting = false;
   }
 
   isConnected(): boolean {

@@ -49,7 +49,8 @@ export function computeDiff(oldText: string, newText: string): DiffLine[] {
     }
 
     return result;
-  } catch {
+  } catch (_err) {
+      console.error("Suppressed error:", _err);
     // Fallback to manual line-by-line comparison if diff library not available
     return computeDiffManual(oldText, newText);
   }

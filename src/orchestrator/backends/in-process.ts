@@ -1,3 +1,4 @@
+import { logger } from '../../services/logger';
 // In-process backend for sub-agent execution
 // Uses AsyncLocalStorage for async context isolation
 
@@ -162,7 +163,7 @@ export class InProcessBackend implements SubAgentBackend {
 
       // Start agent loop asynchronously
       this.runAgentLoop(runtime, parentContext, queryEngine).catch((error) => {
-        console.error(`Agent ${agentId} loop error:`, error);
+        logger.orchestrator.error(`Agent ${agentId} loop error:`, error);
         runtime.status = 'failed';
         runtime.error = error;
         runtime.completedAt = Date.now();
@@ -315,7 +316,7 @@ export class InProcessBackend implements SubAgentBackend {
 
     // For now, just log the message
     // In full implementation, this would add to agent's message queue
-    console.log(`Message to ${agentId}:`, message);
+    logger.orchestrator.info(`Message to ${agentId}: ` + String(message));
   }
 
   /**

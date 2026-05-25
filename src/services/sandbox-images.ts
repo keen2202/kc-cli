@@ -4,6 +4,7 @@
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getErrorMessage } from '../types/errors';
 
 export interface ImageInfo {
   repository: string;
@@ -47,7 +48,7 @@ export class ImageManager {
       this.checkedImages.add(image);
       onProgress?.({ status: 'pulling', message: `Successfully pulled ${image}` });
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = getErrorMessage(error);
       onProgress?.({ status: 'error', message: `Failed to pull ${image}: ${msg}` });
       throw new Error(`Failed to pull Docker image ${image}: ${msg}`);
     }

@@ -8,6 +8,7 @@ import { loadConfig } from '../bootstrap/config';
 import type { AgentEvent } from '../state/types';
 import type { StreamEvent } from '../types/message';
 import type { LLMProvider } from '../api';
+import { getErrorMessage } from '../types/errors';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface ACPHandlerState {
@@ -93,7 +94,7 @@ async function runAgent(
     session.info.status = 'error';
     state.sendNotification('agent/error', {
       sessionId,
-      error: error instanceof Error ? error.message : String(error),
+      error: getErrorMessage(error),
     });
   }
 }

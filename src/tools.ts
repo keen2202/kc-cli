@@ -1,6 +1,7 @@
 // Tool registry and assembly
 
 import type { ToolDefinition, ToolName, ToolRegistry } from './types/tools';
+import { logger } from './services/logger';
 
 // Import implemented tools statically to avoid Windows path issues with dynamic imports
 // Note: Using .js extension for ESM compatibility with tsx
@@ -44,13 +45,14 @@ import { tool as LSPTool } from './lsp/tool.js';
 class ToolRegistryImpl implements ToolRegistry {
   tools: Map<ToolName, ToolDefinition> = new Map();
   mcpTools: Map<string, ToolDefinition> = new Map();
+  pluginTools: Map<string, ToolDefinition> = new Map();
 
   getTool(name: ToolName): ToolDefinition | undefined {
-    return this.tools.get(name) || this.mcpTools.get(name);
+    return this.tools.get(name) || this.mcpTools.get(name) || this.pluginTools.get(name);
   }
 
   getAllTools(): ToolDefinition[] {
-    const allTools = [...this.tools.values(), ...this.mcpTools.values()];
+    const allTools = [...this.tools.values(), ...this.mcpTools.values(), ...this.pluginTools.values()];
     return allTools
       .filter(tool => tool.isEnabled?.() !== false)
       .sort((a, b) => a.name.localeCompare(b.name)); // Stable sort for prompt cache
@@ -65,16 +67,21 @@ class ToolRegistryImpl implements ToolRegistry {
   }
 
   registerPluginTool(tool: ToolDefinition): void {
-    this.mcpTools.set(tool.name, tool);
+    this.pluginTools.set(tool.name, tool);
   }
 
   unregisterMCPTools(): void {
     this.mcpTools.clear();
   }
 
+  unregisterPluginTools(): void {
+    this.pluginTools.clear();
+  }
+
   unregisterTool(name: ToolName): void {
     this.tools.delete(name);
     this.mcpTools.delete(name);
+    this.pluginTools.delete(name);
   }
 
   /**
@@ -133,6 +140,10 @@ class ToolRegistryImpl implements ToolRegistry {
 // Singleton registry
 export const toolRegistry = new ToolRegistryImpl();
 
+// Register with DI container for consumers
+import { getServiceContainer } from './services/ServiceContainer';
+getServiceContainer().register('toolRegistry', () => toolRegistry, 'singleton');
+
 /**
  * Register all built-in tools
  */
@@ -159,7 +170,7 @@ export async function registerBuiltInTools(): Promise<void> {
     try {
       toolRegistry.registerTool(tool);
     } catch (error) {
-      console.warn(`Warning: Failed to register tool ${tool.name}:`, error);
+      logger.tools.warn(`Warning: Failed to register tool ${tool.name}: ` + String(error));
     }
   }
 }

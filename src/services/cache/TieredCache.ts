@@ -1,8 +1,10 @@
 // TieredCache - Unified LRU cache with TTL, compression, and hit rate tracking
 // L1: In-memory LRU with configurable size and TTL
 // L2: Optional disk persistence for large or cold entries
+// LRU uses Map insertion order for O(1) get/set/evict
 
 import { createHash } from 'crypto';
+import { DEFAULT_MAX_BUFFER } from '../../constants';
 
 export interface CacheEntry<V> {
   value: V;
@@ -36,14 +38,15 @@ export interface TieredCacheOptions {
 
 const DEFAULT_OPTIONS: TieredCacheOptions = {
   maxSize: 500,
-  maxBytes: 10 * 1024 * 1024, // 10MB
+  maxBytes: DEFAULT_MAX_BUFFER,
   defaultTtlMs: 5 * 60 * 1000, // 5 minutes
   evictionBatchRatio: 0.25,
 };
 
 export class TieredCache<V = any> {
+  // Map insertion order serves as LRU order: oldest first, newest last.
+  // On get(), we delete+re-set to move accessed entries to the end.
   private store = new Map<string, CacheEntry<V>>();
-  private accessOrder: string[] = []; // LRU tracking (most recent at end)
   private options: TieredCacheOptions;
   private stats = { hits: 0, misses: 0, evictions: 0 };
   private version = 0;
@@ -66,10 +69,11 @@ export class TieredCache<V = any> {
       return undefined;
     }
 
-    // Update access metadata
+    // Move to end (most recent) by deleting and re-inserting — O(1)
+    this.store.delete(key);
     entry.lastAccessed = Date.now();
     entry.accessCount++;
-    this.touchLRU(key);
+    this.store.set(key, entry);
     this.stats.hits++;
 
     return entry.value;
@@ -80,10 +84,7 @@ export class TieredCache<V = any> {
     const sizeBytes = this.estimateSize(value);
 
     // Remove existing entry if present (for update)
-    if (this.store.has(key)) {
-      this.store.delete(key);
-      this.removeFromLRU(key);
-    }
+    this.store.delete(key);
 
     // Evict if necessary to make room
     this.evictIfNeeded(sizeBytes);
@@ -99,8 +100,8 @@ export class TieredCache<V = any> {
       ttlMs: ttlMs ?? this.options.defaultTtlMs,
     };
 
+    // Map.set puts the entry at the end (most recently used)
     this.store.set(key, entry);
-    this.accessOrder.push(key);
   }
 
   has(key: string): boolean {
@@ -114,16 +115,11 @@ export class TieredCache<V = any> {
   }
 
   delete(key: string): boolean {
-    const existed = this.store.delete(key);
-    if (existed) {
-      this.removeFromLRU(key);
-    }
-    return existed;
+    return this.store.delete(key);
   }
 
   clear(): void {
     this.store.clear();
-    this.accessOrder = [];
   }
 
   get size(): number {
@@ -170,7 +166,7 @@ export class TieredCache<V = any> {
     let count = 0;
     for (const [key, entry] of this.store) {
       if (predicate(key, entry)) {
-        this.delete(key);
+        this.store.delete(key);
         count++;
       }
     }
@@ -232,7 +228,7 @@ export class TieredCache<V = any> {
     let pruned = 0;
     for (const [key, entry] of this.store) {
       if (now - entry.createdAt > entry.ttlMs) {
-        this.delete(key);
+        this.store.delete(key);
         pruned++;
       }
     }
@@ -243,18 +239,6 @@ export class TieredCache<V = any> {
 
   private isExpired(entry: CacheEntry<V>): boolean {
     return Date.now() - entry.createdAt > entry.ttlMs;
-  }
-
-  private touchLRU(key: string): void {
-    this.removeFromLRU(key);
-    this.accessOrder.push(key);
-  }
-
-  private removeFromLRU(key: string): void {
-    const idx = this.accessOrder.indexOf(key);
-    if (idx >= 0) {
-      this.accessOrder.splice(idx, 1);
-    }
   }
 
   private evictIfNeeded(incomingSize: number): void {
@@ -272,24 +256,32 @@ export class TieredCache<V = any> {
     }
   }
 
+  /**
+   * Evict the least-recently-used entry.
+   * Uses Map.prototype.keys().next().value for O(1) access to the oldest entry,
+   * since Map preserves insertion order and we re-insert entries on access.
+   */
   private evictLRU(): CacheEntry<V> | null {
     // Evict oldest entries in batch for efficiency
     const batchSize = Math.max(1, Math.floor(this.store.size * this.options.evictionBatchRatio));
-    let evicted: CacheEntry<V> | null = null;
+    let firstEvicted: CacheEntry<V> | null = null;
 
-    for (let i = 0; i < batchSize && this.accessOrder.length > 0; i++) {
-      const oldestKey = this.accessOrder[0]!;
+    for (let i = 0; i < batchSize && this.store.size > 0; i++) {
+      const oldestKey = this.store.keys().next().value as string;
+      if (!oldestKey) break;
+
       const entry = this.store.get(oldestKey);
       if (entry) {
         this.store.delete(oldestKey);
         this.stats.evictions++;
         this.options.onEvict?.(oldestKey, entry);
-        if (!evicted) evicted = entry;
+        if (!firstEvicted) {
+          firstEvicted = entry;
+        }
       }
-      this.accessOrder.shift();
     }
 
-    return evicted;
+    return firstEvicted;
   }
 
   private getTotalSizeBytes(): number {
@@ -309,7 +301,7 @@ export class TieredCache<V = any> {
     if (value === null || value === undefined) return 0;
     try {
       return JSON.stringify(value).length * 2;
-    } catch {
+    } catch (_err) {
       return 64; // fallback estimate
     }
   }

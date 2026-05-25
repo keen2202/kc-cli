@@ -4,11 +4,76 @@ import { z } from 'zod';
 import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
+import { isAlreadySandboxWrapped } from '../../executors/toolExecutor';
+import { isExecError, getErrorMessage } from '../../types/errors';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { DANGEROUS_BASH_PATTERNS } from '../../permissions/readonlyCommands';
+import { logger } from '../../services/logger';
+import { LARGE_MAX_BUFFER } from '../../constants';
 
 const execAsync = promisify(exec);
+
+/**
+ * Environment variables that can lead to code injection or privilege escalation
+ * when set by untrusted input. These are filtered before merging into process env.
+ */
+const DANGEROUS_ENV_VARS = new Set([
+  'LD_PRELOAD',
+  'LD_LIBRARY_PATH',
+  'DYLD_INSERT_LIBRARIES',
+  'DYLD_LIBRARY_PATH',
+  'NODE_OPTIONS',
+  'NODE_PATH',
+  'PYTHONSTARTUP',
+  'PYTHONPATH',
+  'PERL5LIB',
+  'PERLLIB',
+  'RUBYOPT',
+  'RUBYLIB',
+  'PATH',
+  'HOME',
+  'SHELL',
+  'BASH_ENV',
+  'PROMPT_COMMAND',
+  'IFS',
+  'CDPATH',
+  'GIT_EXEC_PATH',
+  'GIT_TEMPLATE_DIR',
+  'ANSIBLE_CONFIG',
+  'DOCKER_HOST',
+  'KUBECONFIG',
+]);
+
+// Allowlist override via KC_ALLOW_ENV_VARS env var (comma-separated)
+const ALLOWLISTED_ENV_VARS = new Set(
+  (process.env.KC_ALLOW_ENV_VARS || '')
+    .split(',')
+    .map(v => v.trim().toUpperCase())
+    .filter(Boolean)
+);
+
+function filterEnvVars(env: Record<string, string>): Record<string, string> {
+  const filtered: Record<string, string> = {};
+  const blockedVars: string[] = [];
+
+  for (const [key, value] of Object.entries(env)) {
+    const upperKey = key.toUpperCase();
+    if (DANGEROUS_ENV_VARS.has(upperKey) && !ALLOWLISTED_ENV_VARS.has(upperKey)) {
+      blockedVars.push(key);
+      continue;
+    }
+    filtered[key] = value;
+  }
+
+  if (blockedVars.length > 0) {
+    logger.tools.warn('Blocked dangerous environment variables', {
+      blockedVars,
+    });
+  }
+
+  return filtered;
+}
 
 const RunInputSchema = z.object({
   command: z.string().describe('Command to execute'),
@@ -33,14 +98,14 @@ export const tool = buildTool<RunInput, string>({
 
       const env = {
         ...process.env,
-        ...(input.env || {}),
+        ...filterEnvVars(input.env || {}),
       };
 
       // The ToolExecutor pre-wraps commands for 'Run' tool at the executor level
       // (the authoritative sandbox enforcement point). Check for the executor's
-      // wrapping marker to avoid double-wrapping.
-      const SANDBOX_WRAPPED_MARKER = Symbol.for('kc-cli.sandbox-wrapped');
-      const alreadyWrapped = (input as any)[SANDBOX_WRAPPED_MARKER] === true;
+      // wrapping marker and HMAC signature to avoid double-wrapping.
+      const inputRecord = input as Record<string, unknown>;
+      const alreadyWrapped = isAlreadySandboxWrapped(inputRecord, 'Run');
 
       let wrappedCmd = input.command;
       let sandboxed = false;
@@ -56,7 +121,8 @@ export const tool = buildTool<RunInput, string>({
           wrappedCmd = context.sandbox.wrapCommand(input.command, 'Run');
           sandboxed = context.sandbox.isAvailable();
           sandboxBackend = context.sandbox.getBackendName();
-        } catch {
+        } catch (_err) {
+          logger.tools.error('Suppressed error: ' + String(_err));
           // Sandbox denied — should have been caught by ToolExecutor
           throw new Error('Run tool requires sandbox but sandbox is not available');
         }
@@ -67,7 +133,7 @@ export const tool = buildTool<RunInput, string>({
         timeout,
         env,
         shell: input.shell,
-        maxBuffer: 50 * 1024 * 1024, // 50MB
+        maxBuffer: LARGE_MAX_BUFFER,
       });
 
       const output = stdout || stderr;
@@ -75,17 +141,21 @@ export const tool = buildTool<RunInput, string>({
         metadata: {
           command: input.command,
           cwd: workingDir,
-          exit_code: 0,
+          exitCode: 0,
           sandboxed,
           sandboxBackend,
         },
       });
     } catch (error) {
-      const err = error as Record<string, unknown>;
-      const output = String(err.stdout || err.stderr || (error instanceof Error ? error.message : '') || '').trim();
-      return toolError(`Command failed: ${output}`, {
+      if (isExecError(error)) {
+        const output = String(error.stdout || error.stderr || error.message || '').trim();
+        return toolError(`Command failed: ${output}`, {
+          command: input.command,
+          exitCode: error.code,
+        });
+      }
+      return toolError(`Command failed: ${getErrorMessage(error)}`, {
         command: input.command,
-        exit_code: err.code,
       });
     }
   },

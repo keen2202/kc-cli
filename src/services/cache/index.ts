@@ -2,7 +2,7 @@
 
 export { TieredCache, cacheKey, contentKey, type CacheEntry, type CacheStats, type TieredCacheOptions } from './TieredCache';
 export { CacheManager, getCacheManager, type CacheCategory, type GlobalCacheStats } from './CacheManager';
-export { compressForCache, decompressFromCache, stableHash, type CompressionResult } from './compression';
+export { stableHash } from './compression';
 export { CacheConsistencyManager, getConsistencyManager } from './consistency';
 
 /**

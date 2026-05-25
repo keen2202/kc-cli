@@ -6,6 +6,7 @@ import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { isExecError, getErrorMessage } from '../../types/errors';
 import { taskStore } from '../TaskStore';
 
 const execAsync = promisify(exec);

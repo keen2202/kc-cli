@@ -6,6 +6,9 @@ import type { ToolUseContext, ToolResult as ToolResultType } from '../../types/t
 import type { PermissionResult } from '../../types/permissions';
 import { hasPermissionsToUseTool } from '../../permissions/engine';
 import { DANGEROUS_BASH_PATTERNS, isReadOnlyBashCommand } from '../../permissions/readonlyCommands';
+import { isAlreadySandboxWrapped } from '../../executors/toolExecutor';
+import { isExecError, getErrorMessage } from '../../types/errors';
+import { DEFAULT_MAX_BUFFER } from '../../constants';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
@@ -40,9 +43,9 @@ export const tool = buildTool<BashInput, string>({
       // The ToolExecutor pre-wraps commands for 'Bash' tool at the executor level
       // (the authoritative sandbox enforcement point). If the command has already
       // been wrapped, we use it as-is to avoid double-wrapping.
-      // Check for the executor's wrapping marker on the input.
-      const SANDBOX_WRAPPED_MARKER = Symbol.for('kc-cli.sandbox-wrapped');
-      const alreadyWrapped = (input as any)[SANDBOX_WRAPPED_MARKER] === true;
+      // Check for the executor's wrapping marker and HMAC signature on the input.
+      const inputRecord = input as Record<string, unknown>;
+      const alreadyWrapped = isAlreadySandboxWrapped(inputRecord, 'Bash');
 
       let wrappedCmd = input.command;
       let sandboxed = false;
@@ -68,7 +71,7 @@ export const tool = buildTool<BashInput, string>({
       const { stdout, stderr } = await execAsync(wrappedCmd, {
         cwd: workingDir,
         timeout,
-        maxBuffer: 10 * 1024 * 1024, // 10MB
+        maxBuffer: DEFAULT_MAX_BUFFER,
       });
 
       return toolResult(stdout, {
@@ -81,14 +84,12 @@ export const tool = buildTool<BashInput, string>({
         },
       });
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      // Extract stdout/stderr from exec error
-      if (error && typeof error === 'object' && 'stdout' in error) {
-        const execError = error as any;
-        return toolResult(execError.stdout || '', {
+      const errorMessage = getErrorMessage(error);
+      if (isExecError(error)) {
+        return toolResult(error.stdout || '', {
           isError: true,
-          message: `Command failed: ${execError.stderr || errorMessage}`,
-          metadata: { exitCode: execError.code || 1, stderr: execError.stderr || errorMessage },
+          message: `Command failed: ${error.stderr || errorMessage}`,
+          metadata: { exitCode: error.code || 1, stderr: error.stderr || errorMessage },
         });
       }
       return toolError(`Failed to execute command: ${errorMessage}`);

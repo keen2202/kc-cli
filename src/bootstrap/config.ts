@@ -4,6 +4,7 @@ import { z } from 'zod';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
+import { logger } from '../services/logger';
 
 export const ConfigSchema = z.object({
   // API Configuration
@@ -171,7 +172,7 @@ export async function loadConfigFile(filePath: string): Promise<Partial<Config> 
     return parsed;
   } catch (error) {
     if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
-    console.warn(`Failed to load config from ${filePath}:`, error);
+    logger.services.warn(`Failed to load config from ${filePath}: ` + String(error));
     return null;
   }
 }
@@ -228,7 +229,7 @@ export function loadEnvConfig(): Partial<Config> {
     try {
       sb.toolPolicies = JSON.parse(process.env.KC_SANDBOX_TOOL_POLICIES);
     } catch {
-      console.warn('Failed to parse KC_SANDBOX_TOOL_POLICIES environment variable');
+      logger.services.warn('Failed to parse KC_SANDBOX_TOOL_POLICIES environment variable');
     }
   }
 

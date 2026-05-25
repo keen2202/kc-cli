@@ -179,7 +179,8 @@ export function formatCodeBlock(code: string, language?: string): string {
     // Auto-detect language
     const highlighted = _hljs.highlightAuto(code).value;
     return highlighted;
-  } catch {
+  } catch (_err) {
+      console.error("Suppressed error:", _err);
     _hljsLoadFailed = true;
     return chalk.gray(code);
   }

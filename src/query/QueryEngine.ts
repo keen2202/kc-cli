@@ -1,27 +1,30 @@
+import { logger } from '../services/logger';
 // Query Engine - Refactored with state machine pattern
 // Inspired by OpenHarness's query loop architecture
+// Sub-modules (ConversationState, CompactionHandler, MemoryHandler, ErrorHandler)
+// handle specific phases to keep QueryEngine as a facade.
 
 import type { ChatMessage, StreamEvent, AssistantMessage, ToolCall, ToolResult } from '../types/message';
 import type { ToolDefinition, ToolUseContext } from '../types/tools';
 import { AgentStateMachine } from '../state/machine';
 import { ObservableStateStore, createInitialState } from '../state/store';
 import { ToolExecutor } from '../executors/toolExecutor';
-import { shouldCompact, microcompact, fullCompact, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES, CompactConfig } from '../services/compaction';
-import { estimateMessageTokensArray } from '../utils/tokenEstimation';
-import type { AgentEvent, TokenUsage } from '../state/types';
-import { hasPermissionsToUseTool } from '../permissions/engine';
+import type { AgentEvent } from '../state/types';
+import { hasPermissionsToUseTool, buildPermissionContext } from '../permissions/engine';
 import { getState } from '../bootstrap/state';
 import { createAPIClient, LLMProvider } from '../api';
 import type { BaseApiClient, LLMStreamEvent as APIStreamEvent, LLMRequestConfig } from '../api';
-import { MemoryIntegration, createMemoryIntegration } from '../memory/integration';
-import type { MemoryIntegrationConfig } from '../memory/integration';
-import { classifyApiError, getRetryDelay, RetryState } from '../services/error-classifier';
-import { CircuitBreakerRegistry } from '../services/circuitBreaker';
-import { StateValidator } from '../services/stateValidator';
 import { UserProfileService } from '../services/userProfile';
-import { getSystemPromptAdaptation, getToolHints } from '../services/behavioralAdapter';
+import { getSystemPromptAdaptation } from '../services/behavioralAdapter';
 import { CacheMetrics } from '../services/cacheMetrics';
 import { CachePrefixService, buildCacheStrategy } from '../services/cachePrefix';
+
+// Sub-modules
+import { ConversationState } from './QueryEngineState';
+import { CompactionHandler } from './QueryEngineCompaction';
+import { MemoryHandler } from './QueryEngineMemory';
+import { ErrorHandler } from './QueryEngineError';
+import { estimateMessageTokensArray } from '../utils/tokenEstimation';
 
 import { v4 as uuidv4 } from 'uuid';
 
@@ -33,9 +36,9 @@ export interface QueryEngineConfig {
   maxTurns: number;
   maxBudgetUsd: number | null;
   systemPrompt?: string;
-  contextWindow?: number; // For auto-compaction
-  maxMessages?: number; // Max messages to keep in history (prevents unbounded growth)
-  memory?: MemoryIntegrationConfig; // Memory system configuration
+  contextWindow?: number;
+  maxMessages?: number;
+  memory?: import('../memory/integration').MemoryIntegrationConfig;
   permissionRules?: {
     deny?: string[];
     ask?: string[];
@@ -47,6 +50,12 @@ export interface QueryEngineConfig {
  * Query Engine with explicit state machine pattern.
  * Manages the full query lifecycle through distinct phases:
  * idle → compacting → streaming → deciding → executing → (loop or complete)
+ *
+ * Sub-modules handle specific concerns:
+ * - ConversationState: message storage, token caching, trimming
+ * - CompactionHandler: auto-compaction with micro/full/force strategies
+ * - MemoryHandler: memory integration for context loading
+ * - ErrorHandler: circuit breaker, retry, error classification
  */
 export class QueryEngine {
   // State management
@@ -56,34 +65,23 @@ export class QueryEngine {
   // LLM API Client
   private apiClient: BaseApiClient;
 
-  // Memory Integration
-  private memoryIntegration: MemoryIntegration;
+  // Sub-modules (dependency injection points)
+  private conversation: ConversationState;
+  private compaction: CompactionHandler;
+  private memory: MemoryHandler;
+  private errorHandler: ErrorHandler;
 
   // Services
   private toolExecutor: ToolExecutor;
-  private compactFailureCount = 0;
-  private retryState = new RetryState();
-  private circuitBreakers = new CircuitBreakerRegistry();
-  private stateValidator = new StateValidator();
   private userProfile: UserProfileService;
-
-  // Conversation state
-  private messages: ChatMessage[] = [];
   private config: QueryEngineConfig;
   private abortController: AbortController;
-
-  // Performance: cached token estimate
-  private cachedTokenEstimate: number | null = null;
 
   // Cache metrics tracking
   private cacheMetrics = new CacheMetrics();
 
   // Cache prefix service for byte-stable prompt prefixes
   private cachePrefix: CachePrefixService;
-
-  // Constants
-  private static readonly DEFAULT_MAX_MESSAGES = 1000; // Hard limit to prevent memory exhaustion
-  private static readonly MESSAGE_TRIM_COUNT = 100; // Messages to remove when limit hit
 
   constructor(config: QueryEngineConfig, tools: ToolDefinition[]) {
     this.config = config;
@@ -97,10 +95,13 @@ export class QueryEngine {
       model: config.model,
     });
 
-    // Initialize memory integration
-    this.memoryIntegration = createMemoryIntegration(
-      config.memory || {}
-    );
+    // Initialize sub-modules
+    this.conversation = new ConversationState({
+      maxMessages: config.maxMessages,
+    });
+    this.compaction = new CompactionHandler();
+    this.memory = new MemoryHandler(config.memory || {});
+    this.errorHandler = new ErrorHandler(3);
 
     // Initialize state store
     this.stateStore = new ObservableStateStore(createInitialState({
@@ -142,13 +143,13 @@ export class QueryEngine {
       content: userMessage,
       timestamp: Date.now(),
     };
-    this.messages.push(userMsg);
-
-    // Performance: invalidate token cache
-    this.cachedTokenEstimate = null;
+    this.conversation.addMessage(userMsg);
 
     // Enforce message limit to prevent unbounded memory growth
-    this.trimMessages();
+    const trimmed = this.conversation.trimIfNeeded();
+    if (trimmed > 0) {
+      logger.query.warn(`[QueryEngine] Message history exceeded limit, trimmed ${trimmed} messages`);
+    }
 
     // State machine loop
     try {
@@ -157,7 +158,6 @@ export class QueryEngine {
 
         switch (currentState) {
           case 'idle':
-            // Transition to compacting phase
             this.stateMachine.transitionTo('compacting');
             break;
 
@@ -183,7 +183,6 @@ export class QueryEngine {
 
           case 'executing':
             yield* this.executingPhase();
-            // After execution, loop back to streaming
             if (!this.stateMachine.isTerminal()) {
               this.stateMachine.transitionTo('streaming');
             }
@@ -199,124 +198,58 @@ export class QueryEngine {
       }
     } catch (error) {
       this.stateMachine.forceTransitionTo('error');
-      yield this.createErrorEvent(error);
+      yield this.errorHandler.createErrorEvent(error);
     }
   }
 
   /**
    * Phase 1: Auto-compaction check
-   * Optimization: Uses cached token estimate to avoid redundant calculations.
-   * Includes retry for transient API errors during full compaction.
+   * Delegates to CompactionHandler for the actual compaction logic.
    */
   private async *compactingPhase(): AsyncGenerator<StreamEvent | AgentEvent> {
-    const config: CompactConfig = {
+    const config = {
       contextWindow: this.config.contextWindow || 200_000,
       model: this.config.model,
+      systemPrompt: this.config.systemPrompt,
     };
 
-    // Use cached estimate or calculate
-    const tokenCount = this.cachedTokenEstimate ?? estimateMessageTokensArray(this.messages);
-    this.cachedTokenEstimate = tokenCount;
-
-    const threshold = config.contextWindow - 20_000 - 13_000;
-    if (tokenCount < threshold || this.compactFailureCount >= MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES) {
+    if (!this.compaction.shouldAttemptCompaction(this.conversation.getMessages(), config)) {
       return;
     }
 
-    try {
-      // Validate state before compaction
-      const validation = this.stateValidator.validate(this.messages);
-      if (!validation.valid) {
-        console.warn(`State validation found ${validation.issues.length} issues before compaction, repairing...`);
-        this.messages = this.stateValidator.repair(this.messages, validation.issues);
-        this.cachedTokenEstimate = null; // Invalidate cache after repair
-      }
+    const result = yield* this.compaction.compact(
+      this.conversation.getMessages(),
+      this.apiClient,
+      config
+    );
 
-      // Try microcompact first (cheap, no LLM)
-      const result = microcompact(this.messages);
-
-      if (result.wasCompacted) {
-        this.messages = result.messages;
-        yield this.createCompactMicroEvent(result.tokensSaved);
-
-        // Update cached estimate
-        this.cachedTokenEstimate = estimateMessageTokensArray(this.messages);
-
-        // Check if microcompact was sufficient
-        if (this.cachedTokenEstimate < threshold) {
-          this.compactFailureCount = 0;
-          return;
-        }
-      }
-
-      // Full LLM-based compaction with retry
-      const maxCompactionRetries = 2;
-      let fullResult: { wasCompacted: boolean; messages: ChatMessage[]; tokensSaved: number } | null = null;
-
-      for (let retryAttempt = 0; retryAttempt <= maxCompactionRetries; retryAttempt++) {
-        try {
-          fullResult = await fullCompact(
-            this.messages,
-            this.apiClient,
-            config,
-            this.config.systemPrompt
-          );
-          break; // Success, exit retry loop
-        } catch (compactError) {
-          const err = compactError instanceof Error ? compactError : new Error(String(compactError));
-          const classified = classifyApiError(err);
-
-          if (classified.retryable && retryAttempt < maxCompactionRetries) {
-            const delay = classified.retryAfterMs ?? getRetryDelay(retryAttempt);
-            console.warn(`Compaction retry ${retryAttempt + 1}/${maxCompactionRetries} after ${delay}ms: ${err.message}`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            continue;
-          }
-
-          throw compactError; // Re-throw if not retryable or retries exhausted
-        }
-      }
-
-      if (fullResult && fullResult.wasCompacted) {
-        this.messages = fullResult.messages;
-        this.cachedTokenEstimate = estimateMessageTokensArray(this.messages);
-        yield this.createCompactFullEvent(
-          estimateMessageTokensArray(this.messages) + fullResult.tokensSaved,
-          this.cachedTokenEstimate
-        );
-      }
-
-      this.compactFailureCount = 0;
-    } catch (error) {
-      this.compactFailureCount++;
-      if (this.compactFailureCount >= MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES) {
-        console.warn('Auto-compaction disabled after repeated failures');
-      }
+    // If compaction modified messages, update conversation state
+    if ('messages' in result) {
+      this.conversation.setMessages(result.messages);
     }
   }
 
   /**
    * Phase 2: Stream response from LLM
-   * Uses loop-based retry to prevent stack overflow
+   * Uses ErrorHandler for retry/circuit-breaker logic.
+   * Uses MemoryHandler for context loading.
    */
   private async *streamingPhase(): AsyncGenerator<StreamEvent | AgentEvent> {
     const maxRetries = 3;
 
-    // Cache tool definitions outside retry loop - they don't change between retries
+    // Cache tool definitions outside retry loop
     const toolsDef = this.toolExecutor.getRegisteredTools().map(toolName => {
       const tool = this.toolExecutor.getTool(toolName);
       return tool;
     }).filter((t): t is ToolDefinition => t !== undefined);
 
-    // Get last user message for memory lookup
-    const lastUserMessage = [...this.messages].reverse().find(m => m.role === 'user');
-
-    // Load relevant memories (pre-query) - cached outside retry loop
+    // Load relevant memories via MemoryHandler
+    const lastUserMsg = this.conversation.findLastUserMessage();
     let memoryContext = '';
-    if (lastUserMessage && this.memoryIntegration.isEnabled()) {
+    if (lastUserMsg && this.memory.isEnabled()) {
       const recentTools = toolsDef.slice(0, 5).map(t => t.name);
-      memoryContext = await this.memoryIntegration.loadRelevantMemories(
-        lastUserMessage.content || '',
+      memoryContext = await this.memory.loadRelevantMemories(
+        lastUserMsg.content || '',
         recentTools
       );
     }
@@ -325,7 +258,6 @@ export class QueryEngine {
     const level = this.userProfile.getLevel();
     const levelAdaptation = getSystemPromptAdaptation(level, toolsDef);
 
-    // Freeze prefix on first call
     if (!this.cachePrefix.isFrozen()) {
       this.cachePrefix.freezePrefix(this.config.systemPrompt || '', toolsDef);
     }
@@ -337,516 +269,258 @@ export class QueryEngine {
       : undefined;
 
     for (let retryAttempt = 0; retryAttempt <= maxRetries; retryAttempt++) {
-      // Build API request - only messages change between retries
       const apiMessages = this.buildApiMessages();
 
-      // Call LLM with streaming
       const requestConfig: LLMRequestConfig = {
         model: this.config.model,
-        messages: apiMessages as unknown as ChatMessage[],
+        messages: apiMessages,
         tools: toolsDef,
         systemPrompt: stableSystemPrompt,
         ephemeralContent,
-        stream: true,
         abortSignal: this.abortController.signal,
       };
 
-      // Stream response
-      let fullContent = '';
-      const toolCalls: ToolCall[] = [];
-
-      // Check circuit breaker before making API call
-      const apiBreaker = this.circuitBreakers.getBreaker('api');
-      if (!apiBreaker.canExecute()) {
-        console.warn(`API circuit breaker is ${apiBreaker.getState()}, skipping request`);
-        yield this.createErrorEvent(new Error(`API service is temporarily unavailable (circuit breaker ${apiBreaker.getState()})`));
-        return;
-      }
-
       try {
-        for await (const event of this.apiClient.streamChat(requestConfig)) {
-          if (event.type === 'text_delta') {
-            fullContent += event.text || '';
-            yield this.createTextDeltaEvent(event.text || '');
-          } else if (event.type === 'tool_use') {
-            if (event.toolCall) {
-              toolCalls.push(event.toolCall);
-              yield this.createToolStartedEvent(event.toolCall);
-            }
-          } else if (event.type === 'error') {
-            yield this.createErrorEvent(event.error || new Error('Unknown error'));
-            return;
-          } else if (event.type === 'stop') {
-            // Capture cache metrics from stream usage data
-            if (event.usage) {
-              const cacheUsage = event.usage as { cacheReadTokens?: number; cacheCreationTokens?: number };
-              this.cacheMetrics.record(
-                this.config.model,
-                event.usage.inputTokens || 0,
-                cacheUsage.cacheReadTokens || 0,
-                cacheUsage.cacheCreationTokens || 0,
-                this.config.provider,
-              );
-            }
-            // Stream complete
-            break;
-          }
-        }
-
-        // Add assistant message
-        const assistantMsg: AssistantMessage = {
-          id: uuidv4(),
-          role: 'assistant',
-          content: fullContent || null,
-          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-          timestamp: Date.now(),
-        };
-        this.messages.push(assistantMsg);
-
-        // Update state
-        this.stateStore.incrementTurn();
-
-        // Reset retry counter on success
-        this.retryState.reset('streaming');
-
-        // Record success with circuit breaker
-        apiBreaker.recordSuccess();
-
-        yield this.createTurnCompleteEvent(assistantMsg);
-        return; // Success, exit retry loop
+        yield* this.streamLLMResponse(requestConfig, toolsDef);
+        this.errorHandler.recordApiSuccess();
+        return;
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
-        const classified = classifyApiError(err);
 
-        // Record failure with circuit breaker for transient errors
-        if (classified.retryable) {
-          apiBreaker.recordFailure();
-        }
-
-        // Handle degraded errors: log warning and continue without retrying
-        if (classified.errorClass === 'degraded') {
-          console.warn(`Degraded error in streaming: ${err.message}`);
-          return;
-        }
-
-        // Check if we can retry
-        if (classified.retryable && retryAttempt < maxRetries) {
-          const delay = classified.retryAfterMs ?? getRetryDelay(retryAttempt);
-          yield this.createErrorEvent(new Error(`Retrying (${retryAttempt + 1}/${maxRetries}) after ${classified.context}: ${err.message}`));
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue; // Loop-based retry
-        }
-
-        // Final failure
-        this.retryState.reset('streaming');
-        yield this.createErrorEvent(err);
-        return;
-      }
-    }
-  }
-
-  /**
-   * Phase 3: Decide whether to execute tools or complete
-   */
-  private async decidingPhase(): Promise<boolean> {
-    const lastMessage = this.messages[this.messages.length - 1];
-
-    // Check for tool calls
-    if (lastMessage?.role === 'assistant' && lastMessage.toolCalls && lastMessage.toolCalls.length > 0) {
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Phase 4: Execute tool calls (single or parallel)
-   */
-  private async *executingPhase(): AsyncGenerator<StreamEvent | AgentEvent> {
-    const lastMessage = this.messages[this.messages.length - 1] as AssistantMessage;
-    const toolCalls = lastMessage?.toolCalls || [];
-
-    if (toolCalls.length === 0) {
-      return;
-    }
-
-    // Tool execution context. Permission decisions are made by
-    // ToolExecutor.checkPermission() using ToolExecutor.permissionConfig
-    // (populated from the same config at construction time). The arrays
-    // below are empty because this context object's permission fields
-    // are not used for authorization; they exist for interface compliance.
-    const context: ToolUseContext = {
-      cwd: getState().cwd,
-      abortController: this.abortController,
-      permissions: {
-        mode: getState().permissionMode,
-        cwd: getState().cwd,
-        toolName: '',
-        input: {},
-        alwaysDenyRules: [],
-        alwaysAskRules: [],
-        alwaysAllowRules: [],
-        bypassPermissions: getState().permissionMode === 'bypassPermissions',
-      },
-    };
-
-    if (toolCalls.length === 1) {
-      // Single tool - sequential execution
-      const toolCall = toolCalls[0];
-      yield this.createToolStartedEvent(toolCall);
-
-      const result = await this.toolExecutor.executeSingle(toolCall, context);
-
-      if (result.isError) {
-        yield this.createToolFailedEvent(toolCall, new Error(result.output));
-      } else {
-        yield this.createToolCompletedEvent(toolCall, result);
-      }
-
-      // Level-based tool hints
-      const level = this.userProfile.getLevel();
-      const hint = getToolHints(toolCall.toolName, level, !result.isError);
-      if (hint) {
-        yield this.createToolHintEvent(toolCall.toolName, hint.hint);
-      }
-
-      // Add tool result to messages
-      this.messages.push({
-        id: uuidv4(),
-        role: 'tool',
-        content: null,
-        toolResults: [result],
-        timestamp: Date.now(),
-      });
-    } else {
-      // Multiple tools - parallel execution
-      // Emit started events for all
-      for (const toolCall of toolCalls) {
-        yield this.createToolStartedEvent(toolCall);
-      }
-
-      // Execute in parallel
-      const results = await this.toolExecutor.executeParallel(toolCalls, context);
-
-      // Emit completion events and build results array
-      const toolResults: ToolResult[] = [];
-
-      for (const toolCall of toolCalls) {
-        const result = results.get(toolCall.id);
-
-        if (!result) {
+        // Check if retry is possible
+        const retryInfo = this.errorHandler.shouldRetry(err, retryAttempt);
+        if (retryInfo) {
+          logger.query.warn(`Streaming retry ${retryAttempt + 1}/${maxRetries} after ${retryInfo.delay}ms: ${err.message}`);
+          await new Promise(resolve => setTimeout(resolve, retryInfo.delay));
           continue;
         }
 
-        if (result instanceof Error) {
-          yield this.createToolFailedEvent(toolCall, result);
-          toolResults.push({
-            toolCallId: toolCall.id,
-            output: result.message,
-            isError: true,
-          });
-        } else {
-          if (result.isError) {
-            yield this.createToolFailedEvent(toolCall, new Error(result.output));
-          } else {
-            yield this.createToolCompletedEvent(toolCall, result);
-          }
-          toolResults.push(result);
+        // Non-retryable - check if degraded (non-fatal)
+        if (this.errorHandler.isDegradedError(err)) {
+          logger.query.warn(`Degraded error in streaming: ${err.message}`);
+          yield this.createTextDeltaEvent('\n[Response degraded — continuing with partial result]\n');
+          return;
         }
-      }
 
-      // Add all tool results to messages
-      this.messages.push({
-        id: uuidv4(),
-        role: 'tool',
-        content: null,
-        toolResults,
-        timestamp: Date.now(),
-      });
+        this.errorHandler.recordApiFailure(err);
+
+        // Check circuit breaker
+        if (!this.errorHandler.canExecuteApi()) {
+          logger.query.warn('API circuit breaker is open, skipping request');
+          yield this.createTextDeltaEvent('\n[API temporarily unavailable — please retry later]\n');
+          return;
+        }
+
+        throw err;
+      }
     }
   }
 
-  // ========== Event Creation Helpers ==========
+  private async *streamLLMResponse(
+    requestConfig: LLMRequestConfig,
+    _toolsDef: ToolDefinition[]
+  ): AsyncGenerator<StreamEvent | AgentEvent> {
+    let currentContent = '';
+    let currentToolCalls: ToolCall[] = [];
 
-  private createTextDeltaEvent(text: string): AgentEvent {
-    return {
-      type: 'agent:text_delta',
-      text,
+    for await (const event of this.apiClient.streamChat(requestConfig)) {
+      switch (event.type) {
+        case 'text_delta':
+          if (event.text) {
+            currentContent += event.text;
+            yield this.createTextDeltaEvent(event.text);
+          }
+          break;
+        case 'tool_use':
+          if (event.toolCall) {
+            currentToolCalls.push(event.toolCall);
+          }
+          break;
+        case 'error':
+          if (event.error) throw event.error;
+          break;
+        case 'stop':
+          break;
+      }
+    }
+
+    // Build assistant message
+    const assistantMsg: AssistantMessage = {
+      id: uuidv4(),
+      role: 'assistant',
+      content: currentContent,
+      toolCalls: currentToolCalls.length > 0 ? currentToolCalls : undefined,
       timestamp: Date.now(),
+    };
+
+    this.conversation.addMessage(assistantMsg);
+    yield this.createTurnCompleteEvent(assistantMsg);
+  }
+
+  private async decidingPhase(): Promise<boolean> {
+    const lastMsg = this.conversation.getLastMessage();
+    if (!lastMsg || lastMsg.role !== 'assistant') return false;
+
+    const assistantMsg = lastMsg as AssistantMessage;
+    return !!(assistantMsg.toolCalls && assistantMsg.toolCalls.length > 0);
+  }
+
+  private async *executingPhase(): AsyncGenerator<StreamEvent | AgentEvent> {
+    const lastMsg = this.conversation.getLastMessage();
+    if (!lastMsg || lastMsg.role !== 'assistant') return;
+
+    const assistantMsg = lastMsg as AssistantMessage;
+    const toolCalls = assistantMsg.toolCalls || [];
+
+    const results = await this.toolExecutor.executeParallel(
+      toolCalls,
+      this.createToolContext()
+    );
+
+    for (const [toolCallId, result] of results) {
+      const toolCall = toolCalls.find(tc => tc.id === toolCallId);
+      if (!toolCall) continue;
+
+      if (result instanceof Error) {
+        yield this.createToolFailedEvent(toolCall, result);
+      } else if (result.isError) {
+        yield this.createToolFailedEvent(toolCall, new Error(result.output));
+      } else {
+        yield this.createToolCompletedEvent(toolCall, result as ToolResult);
+      }
+
+      // Add tool result as message
+      const toolResultMsg: ChatMessage = {
+        id: uuidv4(),
+        role: 'tool',
+        content: result instanceof Error ? result.message : (result as ToolResult).output,
+        toolResults: [result instanceof Error ? { output: result.message, isError: true } : result as ToolResult],
+        timestamp: Date.now(),
+      };
+      this.conversation.addMessage(toolResultMsg);
+    }
+  }
+
+  private buildApiMessages(): ChatMessage[] {
+    const messages = this.conversation.getMessagesCopy();
+    const systemMsg = messages.find(m => m.role === 'system');
+    const userMsgs = messages.filter(m => m.role !== 'system');
+
+    return systemMsg ? [systemMsg, ...userMsgs] : userMsgs;
+  }
+
+  private createToolContext(): ToolUseContext {
+    return {
+      cwd: getState().cwd,
+      abortController: this.abortController,
+      permissions: buildPermissionContext(),
+      sandbox: this.toolExecutor.getSandboxManager(),
     };
   }
 
-  private createTurnCompleteEvent(message: AssistantMessage): AgentEvent {
-    const usage: TokenUsage = {
-      inputTokens: 0, // Would calculate from messages
-      outputTokens: 0,
-      totalTokens: 0,
-    };
+  // Event factory methods
+  private createTextDeltaEvent(text: string): AgentEvent {
+    return { type: 'agent:text_delta', text, timestamp: Date.now() };
+  }
 
+  private createTurnCompleteEvent(message: AssistantMessage): AgentEvent {
     return {
       type: 'agent:turn_complete',
       message,
-      usage,
+      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       timestamp: Date.now(),
     };
   }
 
   private createToolStartedEvent(toolCall: ToolCall): AgentEvent {
-    return {
-      type: 'agent:tool_started',
-      toolCall,
-      timestamp: Date.now(),
-    };
+    return { type: 'agent:tool_started', toolCall, timestamp: Date.now() };
   }
 
   private createToolCompletedEvent(toolCall: ToolCall, result: ToolResult): AgentEvent {
-    return {
-      type: 'agent:tool_completed',
-      toolCall,
-      result,
-      timestamp: Date.now(),
-    };
+    return { type: 'agent:tool_completed', toolCall, result, timestamp: Date.now() };
   }
 
   private createToolFailedEvent(toolCall: ToolCall, error: Error): AgentEvent {
-    return {
-      type: 'agent:tool_failed',
-      toolCall,
-      error,
-      timestamp: Date.now(),
-    };
-  }
-
-  private createToolPermissionDeniedEvent(toolCall: ToolCall, reason: string): AgentEvent {
-    return {
-      type: 'agent:tool_permission_denied',
-      toolCall,
-      reason,
-      timestamp: Date.now(),
-    };
-  }
-
-  private createCompactMicroEvent(tokensSaved: number): AgentEvent {
-    return {
-      type: 'agent:compact_micro',
-      tokensSaved,
-      timestamp: Date.now(),
-    };
-  }
-
-  private createCompactFullEvent(originalTokens: number, compactedTokens: number): AgentEvent {
-    return {
-      type: 'agent:compact_full',
-      originalTokens,
-      compactedTokens,
-      timestamp: Date.now(),
-    };
-  }
-
-  private createErrorEvent(error: unknown): AgentEvent {
-    return {
-      type: 'agent:error',
-      error: error instanceof Error ? error : new Error(String(error)),
-      recoverable: false,
-      timestamp: Date.now(),
-    };
+    return { type: 'agent:tool_failed', toolCall, error, timestamp: Date.now() };
   }
 
   private createCompleteEvent(): AgentEvent {
-    return {
-      type: 'agent:complete',
-      timestamp: Date.now(),
-    };
+    return { type: 'agent:complete', timestamp: Date.now() };
   }
 
-  private createToolHintEvent(toolName: string, hint: string): AgentEvent {
-    return {
-      type: 'agent:tool_hint',
-      toolName,
-      hint,
-      timestamp: Date.now(),
-    };
+  private _aborted = false;
+
+  /** Abort the current query */
+  abort(reason?: string): void {
+    this._aborted = true;
+    this.abortController.abort(reason);
+    this.abortController = new AbortController();
   }
 
-  // ========== Legacy Methods (for backward compatibility) ==========
-
-  /**
-   * Build messages for API call
-   */
-  private buildApiMessages(): Array<{ role: string; content: string | null; tool_calls?: unknown[]; tool_call_id?: string }> {
-    // Pre-allocate: system prompt + messages + potential tool result expansion
-    const messages: Array<{ role: string; content: string | null; tool_calls?: unknown[]; tool_call_id?: string }> = [];
-
-    if (this.config.systemPrompt) {
-      messages.push({
-        role: 'system',
-        content: this.config.systemPrompt,
-      });
-    }
-
-    const len = this.messages.length;
-    for (let i = 0; i < len; i++) {
-      const msg = this.messages[i];
-      if (msg.role === 'user') {
-        messages.push({
-          role: 'user',
-          content: msg.content,
-        });
-      } else if (msg.role === 'assistant') {
-        messages.push({
-          role: 'assistant',
-          content: msg.content,
-          tool_calls: msg.toolCalls?.map(tc => ({
-            id: tc.id,
-            type: 'function',
-            function: {
-              name: tc.toolName,
-              arguments: JSON.stringify(tc.input),
-            },
-          })),
-        });
-      } else if (msg.role === 'tool') {
-        const results = msg.toolResults;
-        if (results) {
-          for (let j = 0; j < results.length; j++) {
-            messages.push({
-              role: 'tool',
-              tool_call_id: results[j].toolCallId,
-              content: results[j].output,
-            });
-          }
-        }
-      }
-    }
-
-    return messages;
+  /** Check if the current query is aborted */
+  isAborted(): boolean {
+    return this._aborted;
   }
 
-  /**
-   * Get conversation history
-   */
-  getMessages(): ChatMessage[] {
-    return [...this.messages];
-  }
-
-  /**
-   * Clear conversation
-   */
+  /** Clear conversation history and reset state */
   clear(): void {
-    this.messages = [];
-    this.stateMachine.reset();
+    this.conversation.clear();
+    this.compaction.reset();
+    this.errorHandler.reset();
+    this._aborted = false;
+    this.abortController = new AbortController();
+    if (this.stateMachine.currentState !== 'idle') {
+      this.stateMachine.forceTransitionTo('idle');
+    }
   }
 
-  /**
-   * Get state store for observation
-   */
-  getStateStore(): ObservableStateStore {
-    return this.stateStore;
+  /** Get the current message count */
+  get messageCount(): number {
+    return this.conversation.messageCount;
   }
 
-  /**
-   * Get state machine for inspection
-   */
+  /** Get the state machine (for testing) */
   getStateMachine(): AgentStateMachine {
     return this.stateMachine;
   }
 
-  /**
-   * Get memory integration instance
-   */
-  getMemoryIntegration(): MemoryIntegration {
-    return this.memoryIntegration;
+  /** Get the state store (for testing) */
+  getStateStore(): ObservableStateStore {
+    return this.stateStore;
   }
 
-  /**
-   * Abort the current query
-   */
-  abort(reason?: string): void {
-    this.abortController.abort(reason);
+  /** Expose the tool executor (for testing) */
+  getToolExecutor(): ToolExecutor {
+    return this.toolExecutor;
   }
 
-  /**
-   * Check if the query has been aborted
-   */
-  isAborted(): boolean {
-    return this.abortController.signal.aborted;
+  /** Get messages (backward compat) */
+  getMessages(): ChatMessage[] {
+    return this.conversation.getMessages();
   }
 
-  /**
-   * Get cache metrics for this query engine session.
-   * Tracks prompt cache hit rates across all API calls.
-   */
-  getCacheMetrics() {
-    return this.cacheMetrics;
+  /** Get memory integration (backward compat) */
+  getMemoryIntegration() {
+    return this.memory.getIntegration();
   }
 
-  /**
-   * Get the cache prefix service for this session.
-   */
-  getCachePrefix() {
-    return this.cachePrefix;
+  /** Get messages as getter (backward compat) */
+  get messages(): ChatMessage[] {
+    return this.conversation.getMessages();
   }
 
-  /**
-   * Enforce message history limit to prevent unbounded memory growth.
-   * Removes oldest messages when limit is exceeded.
-   */
-  /**
-   * Trim messages to stay within the max limit.
-   * Protects anchor messages (system prompt + first user message) from being trimmed.
-   */
-  private trimMessages(): void {
-    const maxMessages = this.config.maxMessages ?? QueryEngine.DEFAULT_MAX_MESSAGES;
+  /** Set messages (backward compat, delegates to conversation state) */
+  set messages(msgs: ChatMessage[]) {
+    this.conversation.setMessages(msgs);
+  }
 
-    if (this.messages.length <= maxMessages) {
-      return;
-    }
+  /** Get memory integration as getter (backward compat) */
+  get memoryIntegration() {
+    return this.memory.getIntegration();
+  }
 
-    // Single pass: find anchor indices (first system + first user message)
-    let firstSystemIdx = -1;
-    let firstUserIdx = -1;
-    for (let i = 0; i < this.messages.length; i++) {
-      if (firstSystemIdx === -1 && this.messages[i].role === 'system') {
-        firstSystemIdx = i;
-      }
-      if (firstUserIdx === -1 && this.messages[i].role === 'user') {
-        firstUserIdx = i;
-      }
-      if (firstSystemIdx !== -1 && firstUserIdx !== -1) break;
-    }
-
-    const excess = this.messages.length - maxMessages;
-
-    // If no anchors or anchors are beyond the trim window, just slice
-    if (firstSystemIdx === -1 && firstUserIdx === -1) {
-      this.messages = this.messages.slice(excess);
-    } else {
-      // Build set of protected indices
-      const protectedIndices = new Set<number>();
-      if (firstSystemIdx !== -1) protectedIndices.add(firstSystemIdx);
-      if (firstUserIdx !== -1) protectedIndices.add(firstUserIdx);
-
-      // Collect removable indices (oldest first)
-      const removable: number[] = [];
-      for (let i = 0; i < this.messages.length; i++) {
-        if (!protectedIndices.has(i)) {
-          removable.push(i);
-        }
-      }
-
-      if (removable.length >= excess) {
-        // Remove the oldest `excess` non-anchor messages
-        const toRemove = new Set(removable.slice(0, excess));
-        this.messages = this.messages.filter((_, idx) => !toRemove.has(idx));
-      } else {
-        // Not enough non-anchor messages, trim from front
-        this.messages = this.messages.slice(excess);
-      }
-    }
-
-    // Invalidate cached estimate after trim
-    this.cachedTokenEstimate = null;
-
-    console.warn(`[QueryEngine] Message history exceeded ${maxMessages} limit, trimmed ${excess} messages`);
+  /** Trim messages (backward compat, delegates to conversation state) */
+  trimMessages(): void {
+    this.conversation.trimIfNeeded();
   }
 }

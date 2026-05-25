@@ -3,6 +3,10 @@
 import type { ChatMessage, ToolCall, ToolResult } from '../types/message';
 import type { PermissionMode } from '../types/permissions';
 import type { LLMProvider } from '../api';
+import type { TokenUsage } from '../types/events';
+
+// Re-export event types from shared module for backward compatibility
+export type { AgentEvent, MultiAgentEvent, SubAgentResult, TokenUsage } from '../types/events';
 
 /**
  * Agent state names - represents the current phase of the query loop
@@ -15,15 +19,6 @@ export type AgentStateName =
   | 'executing'
   | 'completed'
   | 'error';
-
-/**
- * Token usage tracking
- */
-export interface TokenUsage {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-}
 
 /**
  * Tool execution state tracking
@@ -75,28 +70,6 @@ export interface AgentState {
   createdAt: number;
   lastActivityAt: number;
 }
-
-import type { MultiAgentEvent } from '../types/orchestrator';
-
-export type { SubAgentResult, MultiAgentEvent } from '../types/orchestrator';
-
-/**
- * Rich agent events - discriminated union for type-safe event handling
- * Includes both single-agent and multi-agent events
- */
-export type AgentEvent =
-  | { type: 'agent:text_delta'; text: string; timestamp: number }
-  | { type: 'agent:turn_complete'; message: ChatMessage; usage: TokenUsage; timestamp: number }
-  | { type: 'agent:tool_started'; toolCall: ToolCall; timestamp: number }
-  | { type: 'agent:tool_completed'; toolCall: ToolCall; result: ToolResult; timestamp: number }
-  | { type: 'agent:tool_failed'; toolCall: ToolCall; error: Error; timestamp: number }
-  | { type: 'agent:tool_permission_denied'; toolCall: ToolCall; reason: string; timestamp: number }
-  | { type: 'agent:compact_micro'; tokensSaved: number; timestamp: number }
-  | { type: 'agent:compact_full'; originalTokens: number; compactedTokens: number; timestamp: number }
-  | { type: 'agent:error'; error: Error; recoverable: boolean; timestamp: number }
-  | { type: 'agent:complete'; timestamp: number }
-  | { type: 'agent:tool_hint'; toolName: string; hint: string; timestamp: number }
-  | MultiAgentEvent;
 
 /**
  * State transition validation rules

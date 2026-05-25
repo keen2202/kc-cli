@@ -229,35 +229,4 @@ describe('CacheManager', () => {
     });
   });
 
-  describe('recordAccess', () => {
-    it('should adapt TTL on high hit rate', () => {
-      const cache = manager.getOrCreate<string>('test', 'general', { defaultTtlMs: 1000 });
-
-      // Generate high hit rate (>0.9) with enough accesses (>50)
-      cache.set('key', 'value');
-      for (let i = 0; i < 55; i++) {
-        cache.get('key');
-      }
-
-      manager.recordAccess('test', true);
-      // TTL should have been adapted (increased)
-      // We can't directly check the internal adaptive TTL, but we can verify no errors
-    });
-
-    it('should adapt TTL on low hit rate', () => {
-      const cache = manager.getOrCreate<string>('test', 'general', { defaultTtlMs: 1000 });
-
-      // Generate low hit rate (<0.5) with enough accesses (>50)
-      for (let i = 0; i < 60; i++) {
-        cache.get('missing');
-      }
-
-      manager.recordAccess('test', false);
-      // TTL should have been adapted (decreased)
-    });
-
-    it('should ignore unknown cache names', () => {
-      expect(() => manager.recordAccess('unknown', true)).not.toThrow();
-    });
-  });
 });

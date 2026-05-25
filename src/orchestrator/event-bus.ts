@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 // In-memory event bus for multi-agent communication
 
 import type { AgentEvent } from '../state/types.js';
@@ -43,7 +44,7 @@ export class EventBus {
         try {
           handler(event);
         } catch (error) {
-          console.error(`EventBus handler error for agent ${agentId}:`, error);
+          logger.orchestrator.error(`EventBus handler error for agent ${agentId}: ` + String(error));
         }
       }
     }
@@ -53,7 +54,7 @@ export class EventBus {
       try {
         handler(agentId, event);
       } catch (error) {
-        console.error(`EventBus any-handler error:`, error);
+        logger.orchestrator.error(`EventBus any-handler error: ` + String(error));
       }
     }
   }

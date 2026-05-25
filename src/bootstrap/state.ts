@@ -2,6 +2,7 @@
 
 import type { PermissionMode } from '../types/permissions';
 import type { Config } from './config';
+import { getServiceContainer } from '../services/ServiceContainer';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -21,6 +22,11 @@ export interface GlobalState {
 let state: GlobalState | null = null;
 
 export function getState(): GlobalState {
+  // First try the container (if initialized via container)
+  const container = getServiceContainer();
+  if (container.has('globalState')) {
+    return container.resolve<GlobalState>('globalState');
+  }
   if (!state) {
     throw new Error('Global state not initialized');
   }
@@ -41,6 +47,8 @@ export function initializeState(overrides: Partial<GlobalState> = {}): GlobalSta
     config: null,
     ...overrides,
   };
+  // Register with container for DI consumers
+  getServiceContainer().register('globalState', () => state!, 'singleton');
   return state;
 }
 

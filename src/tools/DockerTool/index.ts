@@ -5,6 +5,8 @@ import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
 import { exec } from 'child_process';
+import { isExecError, getErrorMessage } from '../../types/errors';
+import { DEFAULT_MAX_BUFFER } from '../../constants';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
@@ -41,16 +43,18 @@ export const tool = buildTool<DockerInput, string>({
 
       const { stdout, stderr } = await execAsync(`docker ${input.command}`, {
         timeout,
-        maxBuffer: 10 * 1024 * 1024,
+        maxBuffer: DEFAULT_MAX_BUFFER,
       });
 
       return toolResult((stdout || stderr).trim(), {
         metadata: { command: input.command },
       });
     } catch (error) {
-      const err = error as Record<string, unknown>;
-      const output = String(err.stdout || err.stderr || (error instanceof Error ? error.message : '') || '').trim();
-      return toolError(`Docker failed: ${output}`);
+      if (isExecError(error)) {
+        const output = String(error.stdout || error.stderr || error.message || '').trim();
+        return toolError(`Docker failed: ${output}`);
+      }
+      return toolError(`Docker failed: ${getErrorMessage(error)}`);
     }
   },
 

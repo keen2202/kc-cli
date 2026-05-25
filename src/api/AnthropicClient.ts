@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 // Anthropic Claude API Client
 
 import { BaseApiClient, ApiError } from './BaseApiClient';
@@ -419,7 +420,7 @@ export class AnthropicClient extends BaseApiClient {
       const data = JSON.parse(dataStr);
       yield* this.parseStreamEvent(resolvedEventType!, data, ctx);
     } catch (error) {
-      console.warn('Failed to parse SSE event data:', error);
+      logger.api.warn('Failed to parse SSE event data: ' + String(error));
     }
   }
 
@@ -495,7 +496,7 @@ export class AnthropicClient extends BaseApiClient {
             ctx.currentToolCall = null;
             ctx.toolInputBuffer = '';
           } catch (error) {
-            console.warn('Failed to parse tool input:', error);
+            logger.api.warn('Failed to parse tool input: ' + String(error));
           }
         }
         break;
