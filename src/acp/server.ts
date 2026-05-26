@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 // ACP JSON-RPC Server over stdio
 
 import type { ACPRequest, ACPResponse, ACPNotification, ACPSessionInfo } from './types';

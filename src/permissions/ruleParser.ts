@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 // Enhanced permission rule parser with YAML support and complex conditions
 
 import type { PermissionBehavior } from '../types/permissions';

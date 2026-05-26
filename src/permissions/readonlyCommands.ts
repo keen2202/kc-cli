@@ -1,3 +1,5 @@
+import { normalizeCommand } from './commandNormalizer';
+
 // Centralized read-only and low-risk command patterns
 // Single source of truth used by BashTool, GitTool, and PermissionClassifier
 
@@ -87,9 +89,11 @@ export const DANGEROUS_GIT_PATTERNS: RegExp[] = [
  * Check if a bash command matches any read-only pattern
  */
 export function isReadOnlyBashCommand(command: string): boolean {
+  // Normalize first to prevent pattern-matching bypass via formatting tricks
+  const normalized = normalizeCommand(command);
   // Commands with output redirect are NOT read-only (they write to files)
-  if (/[|>]/.test(command)) return false;
-  return READONLY_BASH_PATTERNS.some(p => p.test(command));
+  if (/[|>]/.test(normalized)) return false;
+  return READONLY_BASH_PATTERNS.some(p => p.test(normalized));
 }
 
 /**

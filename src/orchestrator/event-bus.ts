@@ -197,7 +197,7 @@ export function eventsForAgent(
       closed = true;
       unsubscribe();
       if (resolveNext) {
-        resolveNext({ value: undefined as any, done: true });
+        resolveNext({ value: undefined as unknown as AgentEvent | MultiAgentEvent, done: true });
         resolveNext = null;
       }
     });
@@ -206,7 +206,7 @@ export function eventsForAgent(
   return {
     async next(): Promise<IteratorResult<AgentEvent | MultiAgentEvent>> {
       if (closed) {
-        return { value: undefined as any, done: true };
+        return { value: undefined as unknown as AgentEvent | MultiAgentEvent, done: true };
       }
       if (queue.length > 0) {
         // Use index-based read instead of O(n) shift()
@@ -221,7 +221,7 @@ export function eventsForAgent(
     async return(): Promise<IteratorResult<AgentEvent | MultiAgentEvent>> {
       closed = true;
       unsubscribe();
-      return { value: undefined as any, done: true };
+      return { value: undefined as unknown as AgentEvent | MultiAgentEvent, done: true };
     },
     [Symbol.asyncIterator]() {
       return this;

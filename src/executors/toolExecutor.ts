@@ -33,6 +33,24 @@ export const SANDBOX_SIGNATURE_KEY = '__sandboxSignature' as const;
 const SESSION_SECRET = randomBytes(32);
 
 /**
+ * Adapt a tool's typed checkPermissions function to the untyped signature
+ * expected by hasPermissionsToUseTool. The input is checked against the
+ * tool's Zod schema at the call site, so this adapter is type-safe at runtime.
+ */
+function createPermissionAdapter(tool: ToolDefinition): (
+  input: Record<string, unknown>,
+  context: import('../types/permissions').PermissionContext
+) => import('../types/permissions').PermissionResult {
+  return (input, context) =>
+    tool.checkPermissions
+      ? tool.checkPermissions(
+          input as Record<string, unknown> as Parameters<NonNullable<typeof tool.checkPermissions>>[0],
+          context as unknown as Parameters<NonNullable<typeof tool.checkPermissions>>[1]
+        )
+      : { behavior: 'passthrough' as const, message: 'No permission check defined' };
+}
+
+/**
  * Create an HMAC signature for a sandbox-wrapped tool ID.
  * Used to prevent external code from forging the sandbox marker.
  */
@@ -436,7 +454,7 @@ export class ToolExecutor {
       }
 
       const permission = await hasPermissionsToUseTool(toolCall.toolName, toolCall.input, {
-        toolCheckPermissions: tool.checkPermissions as unknown as (input: Record<string, unknown>, context: import('../types/permissions').PermissionContext) => import('../types/permissions').PermissionResult,
+        toolCheckPermissions: createPermissionAdapter(tool),
         content: this.extractContentForPermission(toolCall.toolName, toolCall.input),
         config: this.permissionConfig,
       });
@@ -456,7 +474,7 @@ export class ToolExecutor {
     context: ToolUseContext
   ): Promise<PermissionResult> {
     return await hasPermissionsToUseTool(toolCall.toolName, toolCall.input, {
-      toolCheckPermissions: tool.checkPermissions as unknown as (input: Record<string, unknown>, context: import('../types/permissions').PermissionContext) => import('../types/permissions').PermissionResult,
+      toolCheckPermissions: createPermissionAdapter(tool),
       content: this.extractContentForPermission(toolCall.toolName, toolCall.input),
       config: this.permissionConfig,
     });

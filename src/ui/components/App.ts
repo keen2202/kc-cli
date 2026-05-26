@@ -446,8 +446,7 @@ export class App {
   private handleEvent(event: AgentEvent | StreamEvent, assistantMsg: ChatMessage): void {
     // Normalize agent:* prefixed events to canonical types
     const type = event.type.replace(/^agent:/, '');
-    // After normalization, cast to any for property access (discriminated union is broken)
-    const ev = event as any;
+    const ev = event as any; // discriminated union broken by prefix normalization — refactor event types to fix
 
     switch (type) {
       case 'text_delta':

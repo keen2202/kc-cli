@@ -5,6 +5,7 @@ import {
   detectBypassAttempts,
   prepareCommandForPermissionCheck,
 } from './commandNormalizer';
+import { isReadOnlyBashCommand, DANGEROUS_BASH_PATTERNS } from './readonlyCommands';
 
 describe('normalizeCommand', () => {
   it('normalizes multi-spaces to single space', () => {
@@ -126,5 +127,51 @@ describe('prepareCommandForPermissionCheck', () => {
     expect(result.normalized).toBe('ls -la');
     expect(result.subCommands).toEqual(['ls -la']);
     expect(result.hasBypassAttempt).toBe(false);
+  });
+});
+
+describe('integration: normalized commands with pattern matching', () => {
+  it('normalized escape-bypassed dangerous command is denied', () => {
+    const bypassed = 'r\\m -rf /tmp';
+    const normalized = normalizeCommand(bypassed);
+    const isDangerous = DANGEROUS_BASH_PATTERNS.some(p => p.test(normalized));
+    expect(isDangerous).toBe(true);
+  });
+
+  it('normalized multi-space dangerous command is denied', () => {
+    const bypassed = 'rm     -rf     /tmp';
+    const normalized = normalizeCommand(bypassed);
+    const isDangerous = DANGEROUS_BASH_PATTERNS.some(p => p.test(normalized));
+    expect(isDangerous).toBe(true);
+  });
+
+  it('normalized read-only commands are still recognized', () => {
+    expect(isReadOnlyBashCommand('ls   -la')).toBe(true);
+    expect(isReadOnlyBashCommand('cat    /etc/passwd')).toBe(true);
+  });
+
+  it('escape-bypassed command chaining caught via normalization', () => {
+    const bypassed = 'r\\m -rf / ; ls';
+    const result = prepareCommandForPermissionCheck(bypassed);
+    expect(result.hasBypassAttempt).toBe(true);
+    expect(result.subCommands.length).toBeGreaterThanOrEqual(2);
+    const hasDangerous = result.subCommands.some(cmd =>
+      DANGEROUS_BASH_PATTERNS.some(p => p.test(cmd))
+    );
+    expect(hasDangerous).toBe(true);
+  });
+
+  it('backslash-escaped dangerous command caught by pattern after normalization', () => {
+    const bypassed = 'r\\m -rf /';
+    const normalized = normalizeCommand(bypassed);
+    const isDangerous = DANGEROUS_BASH_PATTERNS.some(p => p.test(normalized));
+    expect(isDangerous).toBe(true);
+  });
+
+  it('zero-width characters do not prevent dangerous pattern detection', () => {
+    const bypassed = 'rm​ -rf /tmp';
+    const normalized = normalizeCommand(bypassed);
+    const isDangerous = DANGEROUS_BASH_PATTERNS.some(p => p.test(normalized));
+    expect(isDangerous).toBe(true);
   });
 });

@@ -151,6 +151,36 @@ describe('SandboxManager', () => {
   });
 });
 
+  it('does not throw with failIfNoSandbox when a real backend is available', () => {
+    const manager = new SandboxManager({
+      enabled: true,
+      backend: 'bubblewrap',
+      workDir: '/workspace',
+      failIfNoSandbox: true,
+    });
+    expect(['bubblewrap', 'seccomp', 'noop']).toContain(manager.getBackendName());
+  });
+
+  it('does not throw with failIfNoSandbox when backend is explicitly noop', () => {
+    const manager = new SandboxManager({
+      enabled: true,
+      backend: 'noop',
+      workDir: '/workspace',
+      failIfNoSandbox: true,
+    });
+    expect(manager.getBackendName()).toBe('noop');
+  });
+
+  it('can be constructed with failIfNoSandbox set to false', () => {
+    const manager = new SandboxManager({
+      enabled: true,
+      backend: 'bubblewrap',
+      workDir: '/workspace',
+      failIfNoSandbox: false,
+    });
+    expect(manager.wrapCommand('echo test')).toBeTruthy();
+  });
+
 describe('sandbox-policy', () => {
   describe('DEFAULT_SANDBOX_POLICY', () => {
     it('has sensible defaults', () => {

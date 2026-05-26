@@ -12,6 +12,7 @@ import {
   getErrorCode,
 } from './errorHandling';
 import { ExecError } from '../types/errors';
+import { logger } from '../services/logger';
 
 describe('withToolErrorHandling', () => {
   beforeEach(() => {
@@ -26,7 +27,7 @@ describe('withToolErrorHandling', () => {
   });
 
   it('returns fallback on error', async () => {
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(logger.tools, 'error').mockImplementation(() => {});
 
     const result = await withToolErrorHandling(
       'TestTool',
@@ -37,11 +38,11 @@ describe('withToolErrorHandling', () => {
     );
 
     expect(result).toBe('fallback');
-    expect(consoleSpy).toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalled();
   });
 
   it('rethrows error when rethrow is true', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(logger.tools, 'error').mockImplementation(() => {});
 
     await expect(
       withToolErrorHandling(
@@ -55,7 +56,7 @@ describe('withToolErrorHandling', () => {
   });
 
   it('logs error by default', async () => {
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(logger.tools, 'error').mockImplementation(() => {});
 
     try {
       await withToolErrorHandling('TestTool', async () => {
@@ -65,13 +66,13 @@ describe('withToolErrorHandling', () => {
       // Expected
     }
 
-    expect(consoleSpy).toHaveBeenCalled();
-    const firstCall = consoleSpy.mock.calls[0];
+    expect(logSpy).toHaveBeenCalled();
+    const firstCall = logSpy.mock.calls[0];
     expect(firstCall[0]).toContain('[TestTool] Tool execution failed: Test error');
   });
 
   it('does not log error when logError is false', async () => {
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(logger.tools, 'error').mockImplementation(() => {});
 
     try {
       await withToolErrorHandling(
@@ -85,11 +86,11 @@ describe('withToolErrorHandling', () => {
       // Expected
     }
 
-    expect(consoleSpy).not.toHaveBeenCalled();
+    expect(logSpy).not.toHaveBeenCalled();
   });
 
   it('uses custom message prefix', async () => {
-    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(logger.tools, 'error').mockImplementation(() => {});
 
     try {
       await withToolErrorHandling(
@@ -103,8 +104,8 @@ describe('withToolErrorHandling', () => {
       // Expected
     }
 
-    expect(consoleSpy).toHaveBeenCalled();
-    const firstCall = consoleSpy.mock.calls[0];
+    expect(logSpy).toHaveBeenCalled();
+    const firstCall = logSpy.mock.calls[0];
     expect(firstCall[0]).toContain('Custom prefix: Test error');
   });
 });
@@ -156,7 +157,7 @@ describe('withSyncErrorHandling', () => {
   });
 
   it('returns fallback on error', () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(logger.tools, 'error').mockImplementation(() => {});
 
     const result = withSyncErrorHandling(
       'TestTool',

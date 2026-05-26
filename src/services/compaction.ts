@@ -13,6 +13,10 @@ const MAX_OUTPUT_TOKENS_FOR_SUMMARY = 20_000;
 export const MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3;
 const PRESERVE_RECENT = 6; // Keep last N messages during full compact
 const DEFAULT_KEEP_RECENT = 5; // Keep last N tool results during microcompact
+/** Absolute token limit — force truncation when total estimated tokens exceed this */
+export const MAX_TOKEN_LIMIT = 128_000;
+/** Message count threshold for force truncation (fallback when token estimation unavailable) */
+const MAX_MESSAGE_COUNT = 500;
 
 // Tools with large outputs that are good compaction candidates
 export const COMPACTABLE_TOOLS = new Set([
@@ -256,16 +260,39 @@ Keep the summary under 500 words.`;
  * Format compact summary from LLM response
  * Extracts content from <summary> tags if present
  */
-export function needsForceTruncation(messages: any[]): boolean {
-  return messages.length > 500;
+export function needsForceTruncation(messages: ChatMessage[]): boolean {
+  // Primary check: token-based limit
+  try {
+    const tokenCount = estimateMessageTokensArray(messages);
+    if (tokenCount > MAX_TOKEN_LIMIT) return true;
+  } catch {
+    // Fall through to message count check if token estimation fails
+  }
+  // Fallback: message count limit
+  return messages.length > MAX_MESSAGE_COUNT;
 }
 
-export function forceTruncate(messages: any[]): { messages: any[]; tokensSaved: number; wasCompacted: boolean } {
-  const half = Math.floor(messages.length / 2);
+export function forceTruncate(messages: ChatMessage[]): { messages: ChatMessage[]; tokensSaved: number; wasCompacted: boolean } {
+  // Truncate to half the token limit
+  const targetTokens = Math.floor(MAX_TOKEN_LIMIT / 2);
+  const originalTokens = estimateMessageTokensArray(messages);
+
+  // Keep messages from the end until we're under the target
+  const kept: ChatMessage[] = [];
+  let runningTokens = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msgTokens = estimateMessageTokens(messages[i]);
+    if (runningTokens + msgTokens > targetTokens && kept.length > 10) break;
+    kept.unshift(messages[i]);
+    runningTokens += msgTokens;
+  }
+
+  const tokensSaved = Math.max(0, originalTokens - runningTokens);
+
   return {
-    messages: messages.slice(half),
-    tokensSaved: half * 100,
-    wasCompacted: true,
+    messages: kept,
+    tokensSaved,
+    wasCompacted: tokensSaved > 0,
   };
 }
 

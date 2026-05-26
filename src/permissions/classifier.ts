@@ -3,16 +3,52 @@
 import type { PermissionResult, PermissionContext } from '../types/permissions';
 import { LOW_RISK_BASH_PATTERNS, MEDIUM_RISK_BASH_PATTERNS } from './readonlyCommands';
 import { containsProtectedPath } from './protectedPaths';
+import { normalizeCommand } from './commandNormalizer';
 
 // Module-level constants (avoid allocation per call)
 const SAFE_TOOLS = new Set(['FileRead', 'Glob', 'Grep', 'Monitor']);
 const RM_RF_REGEX = /\brm\s+-rf/;
 const DESTRUCTIVE_REGEX = /\b(mkfs|dd|Format)\b/;
+const CLASSIFIER_TIMEOUT_MS = 5000;
+const MAX_CLASSIFICATIONS_PER_SEC = 10;
 
 export interface ClassifierDecision {
   behavior: 'allow' | 'deny' | 'ask';
   confidence: number; // 0-1
   reason: string;
+}
+
+/**
+ * Simple token-bucket rate limiter for classifier calls.
+ */
+class RateLimiter {
+  private tokens: number;
+  private lastRefill: number;
+  private readonly maxTokens: number;
+  private readonly refillRate: number; // tokens per ms
+
+  constructor(maxTokens: number, perSecond: number) {
+    this.maxTokens = maxTokens;
+    this.tokens = maxTokens;
+    this.lastRefill = Date.now();
+    this.refillRate = perSecond / 1000;
+  }
+
+  tryConsume(): boolean {
+    this.refill();
+    if (this.tokens >= 1) {
+      this.tokens -= 1;
+      return true;
+    }
+    return false;
+  }
+
+  private refill(): void {
+    const now = Date.now();
+    const elapsed = now - this.lastRefill;
+    this.tokens = Math.min(this.maxTokens, this.tokens + elapsed * this.refillRate);
+    this.lastRefill = now;
+  }
 }
 
 /**
@@ -23,23 +59,47 @@ export class PermissionClassifier {
   private consecutiveDenials = 0;
   private totalDenials = 0;
   private readonly maxConsecutiveDenials = 5;
+  private rateLimiter = new RateLimiter(MAX_CLASSIFICATIONS_PER_SEC, MAX_CLASSIFICATIONS_PER_SEC);
 
   /**
-   * Classify permission request
+   * Classify permission request with timeout and rate limiting.
+   * Falls back to 'ask' if the classifier times out or is rate-limited.
    */
   async classify(
     toolName: string,
     input: Record<string, unknown>,
     context: PermissionContext
   ): Promise<ClassifierDecision> {
-    // Stage 1: Quick path (low cost checks)
+    // Stage 1: Quick path (low cost checks) — bypasses rate limit
     const quickDecision = this.quickPathCheck(toolName, input);
     if (quickDecision) {
       return quickDecision;
     }
 
-    // Stage 2: Run classifier (would call LLM in production)
-    return this.runClassifier(toolName, input, context);
+    // Rate limit check
+    if (!this.rateLimiter.tryConsume()) {
+      return {
+        behavior: 'ask',
+        confidence: 0.3,
+        reason: 'Rate limit exceeded, defaulting to ask',
+      };
+    }
+
+    // Stage 2: Run classifier with timeout, fallback to 'ask'
+    try {
+      return await Promise.race([
+        this.runClassifier(toolName, input, context),
+        new Promise<ClassifierDecision>((_, reject) =>
+          setTimeout(() => reject(new Error('Classifier timeout')), CLASSIFIER_TIMEOUT_MS)
+        ),
+      ]);
+    } catch {
+      return {
+        behavior: 'ask',
+        confidence: 0.3,
+        reason: 'Classifier timeout, defaulting to ask',
+      };
+    }
   }
 
   /**
@@ -59,7 +119,8 @@ export class PermissionClassifier {
     }
 
     // Always deny known dangerous patterns (pre-compiled regex)
-    const command = (input.command as string) || '';
+    const rawCommand = (input.command as string) || '';
+    const command = normalizeCommand(rawCommand);
 
     if (RM_RF_REGEX.test(command)) {
       return {
@@ -94,7 +155,8 @@ export class PermissionClassifier {
     // 3. Returns allow/deny/ask with confidence
 
     // Simple heuristic for now
-    const command = (input.command as string) || '';
+    const rawCommand = (input.command as string) || '';
+    const command = normalizeCommand(rawCommand);
 
     // Low-risk commands
     for (const pattern of LOW_RISK_BASH_PATTERNS) {

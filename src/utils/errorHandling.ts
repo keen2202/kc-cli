@@ -1,6 +1,7 @@
 // Unified error handling utilities
 
 import { isExecError, getErrorMessage, getErrorStack } from '../types/errors';
+import { logger } from '../services/logger';
 
 /**
  * Options for withToolErrorHandling wrapper.
@@ -45,11 +46,7 @@ export async function withToolErrorHandling<T>(
 
     if (logError) {
       const logMessage = `[${toolName}] ${messagePrefix}: ${errorMessage}`;
-      if (errorStack) {
-        console.error(logMessage, '\n', errorStack);
-      } else {
-        console.error(logMessage);
-      }
+      logger.tools.error(logMessage, errorStack ? { stack: errorStack } : undefined);
     }
 
     if (rethrow) {
@@ -126,7 +123,7 @@ export function withSyncErrorHandling<T>(
     return operation();
   } catch (error) {
     const errorMessage = getErrorMessage(error);
-    console.error(`[${toolName}] Sync operation failed: ${errorMessage}`);
+    logger.tools.error(`[${toolName}] Sync operation failed: ${errorMessage}`);
     return fallback;
   }
 }

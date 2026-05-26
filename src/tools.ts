@@ -2,17 +2,22 @@
 
 import type { ToolDefinition, ToolName, ToolRegistry } from './types/tools';
 import { logger } from './services/logger';
+import {
+  TOOL_MANIFEST,
+  ToolPriority,
+  loadToolModule,
+  type ToolManifestEntry,
+} from './tools/registry';
 
-// Import implemented tools statically to avoid Windows path issues with dynamic imports
-// Note: Using .js extension for ESM compatibility with tsx
+// Import eagerly-loaded tools statically (CRITICAL + HIGH priority)
+// These are always needed and benefit from static analysis / tree-shaking.
 
-// Core tools
+// Core tools (CRITICAL)
 import { tool as BashTool } from './tools/BashTool/index.js';
 import { tool as FileReadTool } from './tools/FileReadTool/index.js';
+// HIGH priority
 import { tool as FileWriteTool } from './tools/FileWriteTool/index.js';
 import { tool as WebSearchTool } from './tools/WebSearchTool/index.js';
-
-// Batch 1: Core editing and search tools
 import { tool as FileEditTool } from './tools/FileEditTool/index.js';
 import { tool as GrepTool } from './tools/GrepTool/index.js';
 import { tool as GlobTool } from './tools/GlobTool/index.js';
@@ -20,35 +25,84 @@ import { tool as WebFetchTool } from './tools/WebFetchTool/index.js';
 import { tool as GitTool } from './tools/GitTool/index.js';
 import { tool as RunTool } from './tools/RunTool/index.js';
 
-// Batch 2: System tools
-import { tool as SqlTool } from './tools/SqlTool/index.js';
-import { tool as DockerTool } from './tools/DockerTool/index.js';
-import { tool as MonitorTool } from './tools/MonitorTool/index.js';
-import { tool as ConfigTool } from './tools/ConfigTool/index.js';
-
-// Batch 3: Task management tools
-import { tool as TodoWriteTool } from './tools/TodoWriteTool/index.js';
-import { tool as TaskCreateTool } from './tools/TaskCreateTool/index.js';
-import { tool as TaskGetTool } from './tools/TaskGetTool/index.js';
-import { tool as AskUserTool } from './tools/AskUserTool/index.js';
-
-// Batch 4: Advanced tools
-import { tool as AgentTool } from './tools/AgentTool/index.js';
-import { tool as DeployTool } from './tools/DeployTool/index.js';
-
-// Batch 5: Multi-agent coordination
-import { tool as TeamCreateTool } from './orchestrator/team-create-tool.js';
-
-// Batch 6: LSP integration
-import { tool as LSPTool } from './lsp/tool.js';
+// MEDIUM, LOW, and DEFERRED priority tools are lazily loaded on first use
+// via the TOOL_MANIFEST and loadToolModule(). See getTool() below.
 
 class ToolRegistryImpl implements ToolRegistry {
   tools: Map<ToolName, ToolDefinition> = new Map();
   mcpTools: Map<string, ToolDefinition> = new Map();
   pluginTools: Map<string, ToolDefinition> = new Map();
 
+  /** Manifest entries for tools not yet loaded (lazy loading queue) */
+  private lazyManifest: Map<string, ToolManifestEntry> = new Map();
+
+  /** Tracks in-flight lazy loads to avoid duplicate imports */
+  private pendingLoads: Map<string, Promise<ToolDefinition | undefined>> = new Map();
+
+  constructor() {
+    // Populate lazy manifest from non-eager entries
+    for (const entry of TOOL_MANIFEST) {
+      if (!entry.eager) {
+        this.lazyManifest.set(entry.name, entry);
+      }
+    }
+  }
+
   getTool(name: ToolName): ToolDefinition | undefined {
     return this.tools.get(name) || this.mcpTools.get(name) || this.pluginTools.get(name);
+  }
+
+  /**
+   * Ensure a tool is loaded, loading it lazily from the manifest if needed.
+   * Call this before getTool() for tools that may not be eagerly registered.
+   * Deduplicates concurrent loads for the same tool.
+   */
+  async ensureTool(name: string): Promise<ToolDefinition | undefined> {
+    // Already registered (eager or previously lazy-loaded)
+    const existing = this.tools.get(name as ToolName) || this.mcpTools.get(name) || this.pluginTools.get(name);
+    if (existing) return existing;
+
+    // Check if it's in the lazy manifest
+    const entry = this.lazyManifest.get(name);
+    if (!entry) return undefined;
+
+    // Deduplicate in-flight loads
+    const pending = this.pendingLoads.get(name);
+    if (pending) return pending;
+
+    const loadPromise = loadToolModule(entry);
+    this.pendingLoads.set(name, loadPromise);
+
+    try {
+      const toolDef = await loadPromise;
+      if (toolDef) {
+        this.registerTool(toolDef);
+        this.lazyManifest.delete(name);
+        logger.tools.info(`Lazy-loaded tool: ${name}`);
+      }
+      this.pendingLoads.delete(name);
+      return toolDef ?? undefined;
+    } catch (err) {
+      this.pendingLoads.delete(name);
+      logger.tools.warn(`Failed to lazy-load tool ${name}: ${String(err)}`);
+      return undefined;
+    }
+  }
+
+  /**
+   * Pre-load all lazy tools in the background.
+   * Call after startup to warm the tool cache.
+   */
+  async preloadAllTools(): Promise<void> {
+    const entries = Array.from(this.lazyManifest.values());
+    await Promise.all(entries.map(entry => this.ensureTool(entry.name)));
+  }
+
+  /**
+   * Get the list of tool names that are available for lazy loading.
+   */
+  getLazyToolNames(): string[] {
+    return Array.from(this.lazyManifest.keys());
   }
 
   getAllTools(): ToolDefinition[] {
@@ -145,32 +199,29 @@ import { getServiceContainer } from './services/ServiceContainer';
 getServiceContainer().register('toolRegistry', () => toolRegistry, 'singleton');
 
 /**
- * Register all built-in tools
+ * Register all built-in tools.
+ * Eagerly loaded tools (CRITICAL + HIGH priority) are registered immediately.
+ * MEDIUM, LOW, and DEFERRED tools are lazily loaded on first use via getTool().
  */
 export async function registerBuiltInTools(): Promise<void> {
-  // Register all implemented tools
-  const implementedTools = [
-    // Original core tools
-    BashTool, FileReadTool, FileWriteTool, WebSearchTool,
-    // Batch 1: Core editing and search
-    FileEditTool, GrepTool, GlobTool, WebFetchTool, GitTool, RunTool,
-    // Batch 2: System tools
-    SqlTool, DockerTool, MonitorTool, ConfigTool,
-    // Batch 3: Task management
-    TodoWriteTool, TaskCreateTool, TaskGetTool, AskUserTool,
-    // Batch 4: Advanced tools
-    AgentTool, DeployTool,
-    // Batch 5: Multi-agent coordination
-    TeamCreateTool,
-    // Batch 6: LSP integration
-    LSPTool,
+  // Eagerly register critical and high-priority tools
+  const eagerTools = [
+    // CRITICAL
+    BashTool, FileReadTool,
+    // HIGH
+    FileWriteTool, WebSearchTool, FileEditTool, GrepTool, GlobTool,
+    WebFetchTool, GitTool, RunTool,
   ];
-  
-  for (const tool of implementedTools) {
+
+  for (const tool of eagerTools) {
     try {
       toolRegistry.registerTool(tool);
     } catch (error) {
       logger.tools.warn(`Warning: Failed to register tool ${tool.name}: ` + String(error));
     }
   }
+
+  // Remaining tools (Sql, Docker, Monitor, Config, TodoWrite, TaskCreate,
+  // TaskGet, AskUser, Agent, Deploy, TeamCreate, LSP) are registered in
+  // the lazy manifest and loaded on first use via getTool().
 }

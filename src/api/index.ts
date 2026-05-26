@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 // API Client Factory and Index
 // Creates appropriate client based on provider configuration
 

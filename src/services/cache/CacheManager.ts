@@ -2,6 +2,7 @@
 // Manages all TieredCache instances, provides unified metrics and adaptive tuning
 
 import { TieredCache, type CacheStats, type TieredCacheOptions } from './TieredCache';
+import { globalCacheMetrics } from '../../metrics/cacheMetrics';
 
 export type CacheCategory =
   | 'token'       // Token estimation cache
@@ -76,7 +77,8 @@ export class CacheManager {
   }
 
   /**
-   * Create or get a named cache with category-based defaults
+   * Create or get a named cache with category-based defaults.
+   * Automatically records metrics via globalCacheMetrics.
    */
   getOrCreate<V>(
     name: string,
@@ -84,7 +86,12 @@ export class CacheManager {
     overrides: Partial<TieredCacheOptions> = {}
   ): TieredCache<V> {
     const existing = this.caches.get(name);
-    if (existing) return existing.cache as TieredCache<V>;
+    if (existing) {
+      // Record metrics for cache access
+      const stats = existing.cache.getStats();
+      globalCacheMetrics.updateSize(name, stats.size, stats.maxSize);
+      return existing.cache as TieredCache<V>;
+    }
 
     const baseTtl = BASE_TTL[category];
     const maxSize = overrides.maxSize ?? BASE_MAX_SIZE[category];
@@ -98,6 +105,9 @@ export class CacheManager {
     });
 
     this.caches.set(name, { name, category, cache });
+
+    // Initialize metrics for this cache
+    globalCacheMetrics.updateSize(name, 0, maxSize);
 
     return cache;
   }
@@ -120,7 +130,7 @@ export class CacheManager {
   }
 
   /**
-   * Get global cache statistics
+   * Get global cache statistics. Also syncs metrics to globalCacheMetrics.
    */
   getGlobalStats(): GlobalCacheStats {
     let totalHits = 0;
@@ -132,6 +142,9 @@ export class CacheManager {
       cacheStats[name] = stats;
       totalHits += stats.hits;
       totalMisses += stats.misses;
+
+      // Sync to global cache metrics
+      globalCacheMetrics.updateSize(name, stats.size, stats.maxSize);
     }
 
     const globalHitRate = totalHits + totalMisses > 0
@@ -145,6 +158,38 @@ export class CacheManager {
       caches: cacheStats,
       recommendations: this.generateRecommendations(cacheStats),
     };
+  }
+
+  /**
+   * Sync current cache stats to the global metrics collector.
+   * Call periodically or before reporting.
+   */
+  syncMetrics(): void {
+    for (const [name, reg] of this.caches) {
+      const stats = reg.cache.getStats();
+      // Record hits and misses based on stats diff
+      const existing = globalCacheMetrics.getMetrics(name);
+      const prevHits = existing?.hits ?? 0;
+      const prevMisses = existing?.misses ?? 0;
+
+      const newHits = stats.hits - prevHits;
+      const newMisses = stats.misses - prevMisses;
+
+      for (let i = 0; i < newHits; i++) globalCacheMetrics.recordHit(name);
+      for (let i = 0; i < newMisses; i++) globalCacheMetrics.recordMiss(name);
+      for (let i = 0; i < stats.evictions - (existing?.evictions ?? 0); i++) {
+        globalCacheMetrics.recordEviction(name);
+      }
+
+      globalCacheMetrics.updateSize(name, stats.size, stats.maxSize);
+    }
+  }
+
+  /**
+   * Get the global cache metrics collector for external reporting.
+   */
+  getMetricsCollector() {
+    return globalCacheMetrics;
   }
 
   /**

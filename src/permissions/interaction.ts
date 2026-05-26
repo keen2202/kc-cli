@@ -1,3 +1,4 @@
+import { logger } from '../services/logger';
 // Permission interaction handler
 // Handles user prompts for permission decisions
 
@@ -51,7 +52,7 @@ export class PermissionHandler {
 
     // Log if verbose
     if (this.options.verbose) {
-      console.log(chalk.gray(`[Permission] ${toolCall.toolName}: ${behavior} - ${message}`));
+      logger.permissions.info(chalk.gray(`[Permission] ${toolCall.toolName}: ${behavior} - ${message}`));
     }
 
     // Already allowed or passthrough
@@ -83,12 +84,12 @@ export class PermissionHandler {
   ): Promise<PermissionResult> {
     // Format prompt
     const prompt = this.formatPrompt(toolCall, message);
-    console.log(chalk.yellow(`\n🔒 ${prompt}`));
+    logger.permissions.info(chalk.yellow(`\n🔒 ${prompt}`));
 
     // Show tool input details
     const inputSummary = this.formatInputSummary(toolCall.input);
     if (inputSummary) {
-      console.log(chalk.gray(`   Details: ${inputSummary}`));
+      logger.permissions.info(chalk.gray(`   Details: ${inputSummary}`));
     }
 
     // Ask user
@@ -205,7 +206,7 @@ export class PermissionHandler {
 
       if (timeout > 0) {
         const timer = setTimeout(() => {
-          console.log(chalk.yellow('\n⏱️  Timeout - defaulting to deny'));
+          logger.permissions.info(chalk.yellow('\n⏱️  Timeout - defaulting to deny'));
           resolve('no');
           this.rl.close();
         }, timeout);
@@ -237,7 +238,7 @@ export class PermissionHandler {
     });
 
     if (this.options.verbose) {
-      console.log(chalk.gray(`[Decision] ${tool} -> ${decision}`));
+      logger.permissions.info(chalk.gray(`[Decision] ${tool} -> ${decision}`));
     }
   }
 

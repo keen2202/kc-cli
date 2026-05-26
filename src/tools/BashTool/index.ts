@@ -6,6 +6,7 @@ import type { ToolUseContext, ToolResult as ToolResultType } from '../../types/t
 import type { PermissionResult } from '../../types/permissions';
 import { hasPermissionsToUseTool } from '../../permissions/engine';
 import { DANGEROUS_BASH_PATTERNS, isReadOnlyBashCommand } from '../../permissions/readonlyCommands';
+import { normalizeCommand } from '../../permissions/commandNormalizer';
 import { isAlreadySandboxWrapped } from '../../executors/toolExecutor';
 import { isExecError, getErrorMessage } from '../../types/errors';
 import { DEFAULT_MAX_BUFFER } from '../../constants';
@@ -97,7 +98,7 @@ export const tool = buildTool<BashInput, string>({
   },
 
   checkPermissions: (input, context): PermissionResult => {
-    const command = input.command.trim();
+    const command = normalizeCommand(input.command.trim());
 
     // Check for dangerous commands
     for (const pattern of DANGEROUS_BASH_PATTERNS) {

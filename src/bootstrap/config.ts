@@ -65,6 +65,8 @@ export const ConfigSchema = z.object({
     allowNetwork: z.boolean().default(false),
     maxMemoryMb: z.number().default(512),
     cpuTimeLimitSec: z.number().default(60),
+    /** If true, throw an error instead of silently falling back to noop sandbox */
+    failIfNoSandbox: z.boolean().default(false),
     /** Default enforcement level for tools not explicitly configured */
     defaultEnforcement: z.enum(['required', 'preferred', 'optional', 'excluded', 'inherit']).default('preferred'),
     /** Per-tool sandbox policy overrides keyed by tool name */
@@ -206,12 +208,13 @@ export function loadEnvConfig(): Partial<Config> {
   }
 
   // Sandbox environment variables
-  const sb = config.sandbox ??= {} as any;
+  if (!config.sandbox) config.sandbox = {} as Partial<Config['sandbox']> as Config['sandbox'];
+  const sb = config.sandbox;
   if (process.env.KC_SANDBOX_ENABLED) {
     sb.enabled = process.env.KC_SANDBOX_ENABLED === 'true' || process.env.KC_SANDBOX_ENABLED === '1';
   }
   if (process.env.KC_SANDBOX_BACKEND) {
-    sb.backend = process.env.KC_SANDBOX_BACKEND;
+    sb.backend = process.env.KC_SANDBOX_BACKEND as Config['sandbox']['backend'];
   }
   if (process.env.KC_SANDBOX_ALLOW_NETWORK) {
     sb.allowNetwork = process.env.KC_SANDBOX_ALLOW_NETWORK === 'true' || process.env.KC_SANDBOX_ALLOW_NETWORK === '1';
@@ -222,8 +225,11 @@ export function loadEnvConfig(): Partial<Config> {
   if (process.env.KC_SANDBOX_CPU_TIME_LIMIT_SEC) {
     sb.cpuTimeLimitSec = parseInt(process.env.KC_SANDBOX_CPU_TIME_LIMIT_SEC, 10);
   }
+  if (process.env.KC_SANDBOX_FAIL_IF_NO_SANDBOX) {
+    sb.failIfNoSandbox = process.env.KC_SANDBOX_FAIL_IF_NO_SANDBOX === 'true' || process.env.KC_SANDBOX_FAIL_IF_NO_SANDBOX === '1';
+  }
   if (process.env.KC_SANDBOX_DEFAULT_ENFORCEMENT) {
-    sb.defaultEnforcement = process.env.KC_SANDBOX_DEFAULT_ENFORCEMENT;
+    sb.defaultEnforcement = process.env.KC_SANDBOX_DEFAULT_ENFORCEMENT as Config['sandbox']['defaultEnforcement'];
   }
   if (process.env.KC_SANDBOX_TOOL_POLICIES) {
     try {
@@ -234,7 +240,8 @@ export function loadEnvConfig(): Partial<Config> {
   }
 
   // Memory environment variables
-  const mem = config.memory ??= {} as any;
+  if (!config.memory) config.memory = {} as Partial<Config['memory']> as Config['memory'];
+  const mem = config.memory;
   if (process.env.KC_MEMORY_ENABLED) {
     mem.enabled = process.env.KC_MEMORY_ENABLED === 'true' || process.env.KC_MEMORY_ENABLED === '1';
   }
@@ -251,7 +258,7 @@ export function mergeConfigLayers(layers: ConfigLayer[]): Partial<Config> {
   }, {} as Partial<Config>);
 }
 
-export function deepMerge<T extends Record<string, any>>(target: T, source: Partial<T>): T {
+export function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial<T>): T {
   const result = { ...target };
 
   for (const key in source) {
@@ -265,9 +272,13 @@ export function deepMerge<T extends Record<string, any>>(target: T, source: Part
       target[key] !== null &&
       !Array.isArray(target[key])
     ) {
-      result[key] = deepMerge(target[key], source[key] as any);
+      // Recursive merge for nested objects — cast needed because TypeScript
+      // cannot track that both sides are Record<string, unknown>
+      const nestedTarget = target[key] as Record<string, unknown>;
+      const nestedSource = source[key] as Record<string, unknown>;
+      (result as Record<string, unknown>)[key] = deepMerge(nestedTarget, nestedSource);
     } else {
-      result[key] = source[key] as any;
+      (result as Record<string, unknown>)[key] = source[key];
     }
   }
 

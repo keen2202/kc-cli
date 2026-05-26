@@ -22,6 +22,18 @@ import { Spinner } from './ui/spinner';
 import { updateStatus, clearStatus } from './ui/statusline';
 import { MCPClientManager, convertMCPTool, loadMCPConfig } from './mcp';
 import { UserProfileService } from './services/userProfile';
+import type { UserLevel } from './services/userProfile';
+import { setLogLevel } from './services/logger';
+import type { LogLevel } from './services/logger';
+
+// Apply LOG_LEVEL env var at startup
+if (process.env.LOG_LEVEL) {
+  const validLevels: LogLevel[] = ['debug', 'info', 'warn', 'error'];
+  const level = process.env.LOG_LEVEL.toLowerCase() as LogLevel;
+  if (validLevels.includes(level)) {
+    setLogLevel(level);
+  }
+}
 
 let currentSpinner: Spinner | null = null;
 
@@ -508,7 +520,7 @@ async function handleCommand(
       await profileService.load();
       const levelArg = parts[1];
       if (levelArg && (levelArg === 'beginner' || levelArg === 'intermediate' || levelArg === 'advanced')) {
-        profileService.updateLevel(levelArg as any);
+        profileService.updateLevel(levelArg as UserLevel);
         await profileService.persist();
         console.log(chalk.green(`✓ Level set to: ${levelArg}\n`));
       } else {

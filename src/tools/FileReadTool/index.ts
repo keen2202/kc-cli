@@ -6,6 +6,8 @@ import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
 import * as path from 'path';
 import * as fs from 'fs';
+import { createReadStream } from 'fs';
+import { createInterface } from 'readline';
 import { assertPathWithinWorkspace } from '../../utils/path';
 
 const FileReadInputSchema = z.object({
@@ -19,9 +21,72 @@ const FileReadInputSchema = z.object({
 
 type FileReadInput = z.infer<typeof FileReadInputSchema>;
 
+/** Lines of head/tail preview for oversized files */
+const PREVIEW_LINES = 50;
+
+/**
+ * Stream the first `count` lines from a file.
+ */
+async function readHeadLines(filePath: string, count: number): Promise<string> {
+  const stream = createReadStream(filePath, { encoding: 'utf-8', highWaterMark: 64 * 1024 });
+  const rl = createInterface({ input: stream, crlfDelay: Infinity });
+
+  const lines: string[] = [];
+  for await (const line of rl) {
+    lines.push(line);
+    if (lines.length >= count) break;
+  }
+  rl.close();
+  stream.destroy();
+  return lines.join('\n');
+}
+
+/**
+ * Stream the last `count` lines from a file using a ring buffer.
+ */
+async function readTailLines(filePath: string, count: number): Promise<string> {
+  const stream = createReadStream(filePath, { encoding: 'utf-8', highWaterMark: 64 * 1024 });
+  const rl = createInterface({ input: stream, crlfDelay: Infinity });
+
+  const buffer: string[] = [];
+  for await (const line of rl) {
+    buffer.push(line);
+    if (buffer.length > count) buffer.shift();
+  }
+  rl.close();
+  stream.destroy();
+  return buffer.join('\n');
+}
+
+/**
+ * Read a large file as a stream, returning a head+tail preview.
+ * Never loads the entire file into memory.
+ */
+async function readLargeFilePreview(filePath: string, size: number, maxSize: number): Promise<string> {
+  const [head, tail] = await Promise.all([
+    readHeadLines(filePath, PREVIEW_LINES),
+    readTailLines(filePath, PREVIEW_LINES),
+  ]);
+
+  const sizeKB = (size / 1024).toFixed(1);
+  const maxKB = (maxSize / 1024).toFixed(1);
+
+  return [
+    `[File is ${sizeKB} KB (limit: ${maxKB} KB). Showing first and last ${PREVIEW_LINES} lines.]`,
+    '',
+    `--- First ${PREVIEW_LINES} lines ---`,
+    head,
+    '',
+    '...',
+    '',
+    `--- Last ${PREVIEW_LINES} lines ---`,
+    tail,
+  ].join('\n');
+}
+
 export const tool = buildTool<FileReadInput, string>({
   name: 'FileRead',
-  description: 'Read file contents',
+  description: 'Read file contents. For large files, shows head+tail preview.',
 
   inputSchema: FileReadInputSchema,
 
@@ -39,10 +104,18 @@ export const tool = buildTool<FileReadInput, string>({
 
       // Check file size (async)
       const stat = await fs.promises.stat(filePath);
+
+      // For files exceeding maxSize, stream a head+tail preview
       if (stat.size > input.maxSize) {
-        return toolError(
-          `File too large (${stat.size} bytes). Max: ${input.maxSize} bytes`
-        );
+        const preview = await readLargeFilePreview(filePath, stat.size, input.maxSize);
+        return toolResult(preview, {
+          metadata: {
+            path: filePath,
+            size: stat.size,
+            lines: PREVIEW_LINES * 2,
+            previewOnly: true,
+          },
+        });
       }
 
       // Read file
@@ -77,7 +150,6 @@ export const tool = buildTool<FileReadInput, string>({
   },
 
   checkPermissions: (input, context): PermissionResult => {
-    // Read-only by default
     return {
       behavior: 'allow',
       updatedInput: input,
@@ -91,8 +163,9 @@ export const tool = buildTool<FileReadInput, string>({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  prompt: () => 'Read file contents. Supports line ranges.',
+  prompt: () => 'Read file contents. Supports line ranges and large file preview via streaming.',
 
   getToolUseSummary: (input) => `Reading: ${input.path}`,
   getActivityDescription: (input) => `Reading file ${input.path}`,
 });
+

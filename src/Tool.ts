@@ -8,15 +8,30 @@ import type {
   ToolCallProgress,
 } from './types/tools';
 import type { PermissionResult } from './types/permissions';
+import { withToolErrorHandling } from './utils/errorHandling';
 
 /**
- * Build a tool with sensible defaults
+ * Build a tool with sensible defaults.
+ * Automatically wraps call() with unified error handling for consistent
+ * error formatting and logging across all tools.
  */
 export function buildTool<Input, Output, Progress = unknown>(
   definition: ToolDefinition<Input, Output, Progress>
 ): ToolDefinition<Input, Output, Progress> {
+  const originalCall = definition.call;
+
+  const wrappedCall = originalCall
+    ? (input: Input, context: ToolUseContext, onProgress?: (progress: Progress) => void) =>
+        withToolErrorHandling(
+          definition.name,
+          () => originalCall(input, context, onProgress),
+          { messagePrefix: `${definition.name} execution failed` }
+        )
+    : undefined;
+
   return {
     ...definition,
+    ...(wrappedCall ? { call: wrappedCall } : {}),
     isReadOnly: definition.isReadOnly ?? (() => false),
     isConcurrencySafe: definition.isConcurrencySafe ?? (() => true),
     isDestructive: definition.isDestructive ?? (() => false),

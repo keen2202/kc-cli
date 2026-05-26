@@ -2,6 +2,7 @@
 
 import type { ChatMessage, ToolCall } from '../types/message';
 import type { ToolDefinition } from '../types/tools';
+import { z } from 'zod';
 import { zodToJsonSchema } from '../utils/zodToJsonSchema';
 
 export interface LLMStreamEvent {
@@ -136,10 +137,11 @@ export abstract class BaseApiClient {
     for (const msg of messages) {
       if (msg.role === 'tool') {
         // Pre-formatted tool message (from buildApiMessages) - pass through
-        if ((msg as any).tool_call_id) {
+        const toolMsg = msg as ChatMessage & { tool_call_id?: string };
+        if (toolMsg.tool_call_id) {
           result.push({
             role: 'tool',
-            tool_call_id: (msg as any).tool_call_id,
+            tool_call_id: toolMsg.tool_call_id,
             content: msg.content ?? '',
           });
           continue;
@@ -163,8 +165,9 @@ export abstract class BaseApiClient {
       };
 
       // Pre-formatted assistant message (from buildApiMessages) - preserve tool_calls
-      if (msg.role === 'assistant' && (msg as any).tool_calls) {
-        formatted.tool_calls = (msg as any).tool_calls;
+      const asstMsg = msg as ChatMessage & { tool_calls?: unknown };
+      if (msg.role === 'assistant' && asstMsg.tool_calls) {
+        formatted.tool_calls = asstMsg.tool_calls;
       } else if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
         formatted.tool_calls = msg.toolCalls.map(tc => ({
           id: tc.id,
@@ -222,7 +225,7 @@ export abstract class BaseApiClient {
 
     // Convert Zod schema to JSON Schema
     try {
-      return zodToJsonSchema(schema as any);
+      return zodToJsonSchema(schema as z.ZodType);
     } catch {
       // Fallback for unsupported schema types
       return { type: 'object', properties: {} };

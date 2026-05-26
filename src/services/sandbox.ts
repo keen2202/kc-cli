@@ -6,6 +6,7 @@ import { DEFAULT_SANDBOX_POLICY, getToolPolicy, shouldSandbox, mergeSandboxPolic
 import { SandboxProbe, type ProbeResult } from './sandbox-probe';
 import { SandboxMonitor, type SandboxMetrics, type ResourceLimits } from './sandbox-monitor';
 import { ImageManager } from './sandbox-images';
+import { logger } from './logger';
 
 export interface SandboxOptions {
   /** Whether sandboxing is enabled. When false, commands pass through unchanged. */
@@ -20,6 +21,8 @@ export interface SandboxOptions {
   maxMemoryMb: number;
   /** CPU time limit in seconds. Default: 60. */
   cpuTimeLimitSec: number;
+  /** If true, throw an error when no real sandbox backend is available instead of falling back to noop. */
+  failIfNoSandbox?: boolean;
   /** Per-tool sandbox policy. If not provided, uses DEFAULT_SANDBOX_POLICY. */
   policy?: SandboxPolicy;
   /** Whether to run escape detection probe on startup. Default: true. */
@@ -113,11 +116,19 @@ export class SandboxManager {
     const rawAvailable = this.backend.isAvailable();
     this._isAvailable = rawAvailable && this.backend.name !== 'noop';
 
-    // If no real sandbox backend is available, downgrade to noop with warning
+    // If no real sandbox backend is available, check failIfNoSandbox before downgrading
     if (!this._isAvailable) {
+      // Don't throw if user explicitly chose noop — they intentionally opted out
+      if (this.options.failIfNoSandbox && this.options.backend !== 'noop') {
+        throw new Error(
+          `Sandbox is required but no sandbox backend is available. ` +
+            `Requested backend: "${this.options.backend}". ` +
+            'Install bubblewrap (bwrap), seccomp, or docker, or disable failIfNoSandbox.'
+        );
+      }
       // If the resolved backend is already noop (requested or ultimate fallback), don't double-warn
       if (this.backend.name !== 'noop') {
-        console.warn(
+        logger.services.warn(
           `[sandbox] Requested backend "${this.options.backend}" is not available, ` +
             `falling back to noop — commands will run without isolation.`
         );
@@ -128,7 +139,7 @@ export class SandboxManager {
     // Run probe on startup if enabled and a real backend is available
     if (this.options.probeOnStart && this._isAvailable) {
       this.runProbe().catch(err => {
-        console.warn(`[sandbox] Probe failed: ${err.message}`);
+        logger.services.warn(`[sandbox] Probe failed: ${err.message}`);
       });
     }
   }
@@ -218,7 +229,7 @@ export class SandboxManager {
   async runProbe(): Promise<ProbeResult> {
     this.probeResult = await this.probe.verifyIsolation(this.backend, this.options);
     if (!this.probeResult.overallPassed) {
-      console.warn(
+      logger.services.warn(
         `[sandbox] Probe detected potential isolation issues: ${this.probeResult.failures.map(f => f.name).join(', ')}`
       );
     }
@@ -287,7 +298,7 @@ export class SandboxManager {
       const backend = factory();
       if (backend.isAvailable()) {
         if (i !== startIndex && startIndex >= 0) {
-          console.warn(
+          logger.services.warn(
             `[sandbox] Requested backend "${requested}" is not available, ` +
               `falling back to "${backend.name}"`
           );
