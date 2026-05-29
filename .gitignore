@@ -45,6 +45,7 @@ temp/
 
 # Documentation (generated/internal docs)
 docs/
+KC-CLI_IMPLEMENTATION_STATUS.md
 
 # Evaluation benchmarks
 evaluation/
@@ -52,6 +53,7 @@ evaluation/
 # Memory and session data (contains conversation transcripts)
 .kc-cli/memory/
 .kc-cli/sessions/
+.history/src
 
 # Generated reports (one-off review/audit documents)
 REVIEW-REPORT.md
