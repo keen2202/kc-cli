@@ -34,9 +34,11 @@ vi.mock('../../src/api', () => ({
 }));
 
 vi.mock('../../src/services/compaction', () => ({
-  shouldCompact: vi.fn(() => false),
+  shouldCompact: vi.fn(() => true),
   microcompact: vi.fn((msgs: any) => ({ wasCompacted: false, messages: msgs, tokensSaved: 0 })),
   fullCompact: vi.fn(async (msgs: any) => ({ wasCompacted: false, messages: msgs, tokensSaved: 0 })),
+  needsForceTruncation: vi.fn(() => false),
+  forceTruncate: vi.fn((msgs: any) => ({ messages: msgs, tokensSaved: 0, wasCompacted: false })),
   MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES: 3,
 }));
 
@@ -48,6 +50,16 @@ vi.mock('../../src/utils/tokenEstimation', () => ({
 
 vi.mock('../../src/permissions/engine', () => ({
   hasPermissionsToUseTool: vi.fn(async () => ({ behavior: 'allow', message: 'auto-allowed' })),
+  buildPermissionContext: vi.fn(() => ({
+    mode: 'bypassPermissions',
+    cwd: '/tmp',
+    toolName: '',
+    input: {},
+    alwaysDenyRules: [],
+    alwaysAskRules: [],
+    alwaysAllowRules: [],
+    bypassPermissions: true,
+  })),
 }));
 
 vi.mock('../../src/services/sandbox', () => {
@@ -176,7 +188,7 @@ describe('QueryEngine Coverage Part 3b', () => {
 
       const turnComplete = events.filter(e => e.type === 'agent:turn_complete');
       expect(turnComplete.length).toBe(1);
-      expect(turnComplete[0].message.content).toBeNull();
+      expect(turnComplete[0].message.content).toBe('[stream interrupted]');
     });
 
     it('should reset retry state on successful stream', async () => {

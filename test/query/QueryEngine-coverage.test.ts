@@ -44,7 +44,7 @@ vi.mock('../../src/api', () => ({
 }));
 
 vi.mock('../../src/services/compaction', () => ({
-  shouldCompact: vi.fn(() => false),
+  shouldCompact: vi.fn(() => true),
   microcompact: vi.fn((msgs: any) => ({
     wasCompacted: false,
     messages: msgs,
@@ -55,6 +55,8 @@ vi.mock('../../src/services/compaction', () => ({
     messages: msgs,
     tokensSaved: 0,
   })),
+  needsForceTruncation: vi.fn(() => false),
+  forceTruncate: vi.fn((msgs: any) => ({ messages: msgs, tokensSaved: 0, wasCompacted: false })),
   MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES: 3,
 }));
 
@@ -68,6 +70,16 @@ vi.mock('../../src/permissions/engine', () => ({
   hasPermissionsToUseTool: vi.fn(async () => ({
     behavior: 'allow',
     message: 'auto-allowed',
+  })),
+  buildPermissionContext: vi.fn(() => ({
+    mode: 'bypassPermissions',
+    cwd: '/tmp',
+    toolName: '',
+    input: {},
+    alwaysDenyRules: [],
+    alwaysAskRules: [],
+    alwaysAllowRules: [],
+    bypassPermissions: true,
   })),
 }));
 
@@ -127,6 +139,7 @@ import type { LLMStreamEvent } from '../../src/api/BaseApiClient';
 import { QueryEngine } from '../../src/query/QueryEngine';
 import { createAPIClient } from '../../src/api';
 import {
+  shouldCompact,
   microcompact,
   fullCompact,
   MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES,
@@ -288,6 +301,7 @@ describe('QueryEngine Coverage Part 1', () => {
 
   describe('compacting phase', () => {
     it('should skip compaction when tokens are below threshold', async () => {
+      (shouldCompact as ReturnType<typeof vi.fn>).mockReturnValueOnce(false);
       mockTokenEstimateRef.value = 1000;
       setStream(textEvents('ok'));
       engine = createEngine();
@@ -316,11 +330,8 @@ describe('QueryEngine Coverage Part 1', () => {
     });
 
     it('should stop after microcompact when it brings tokens below threshold', async () => {
-      const threshold = 200_000 - 20_000 - 13_000;
-      // First call returns high (triggers compaction), second call returns low (microcompact sufficient)
-      vi.mocked(estimateMessageTokensArray)
-        .mockReturnValueOnce(threshold + 1000)
-        .mockReturnValueOnce(1000);
+      // Post-microcompact token estimate returns low value (microcompact sufficient)
+      mockTokenEstimateRef.value = 1000;
       setStream(textEvents('ok'));
 
       (microcompact as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -339,6 +350,7 @@ describe('QueryEngine Coverage Part 1', () => {
     });
 
     it('should do full compaction if microcompact is insufficient', async () => {
+      // Post-microcompact token estimate returns high value (microcompact insufficient)
       const threshold = 200_000 - 20_000 - 13_000;
       mockTokenEstimateRef.value = threshold + 1000;
       setStream(textEvents('ok'));

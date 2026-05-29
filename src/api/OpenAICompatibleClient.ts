@@ -19,6 +19,8 @@ export interface OpenAICompatibleConfig {
 export class OpenAICompatibleClient extends BaseApiClient {
   private provider: 'openai' | 'qwen' | 'glm' | 'deepseek';
   private frozenToolSpecs: Array<Record<string, unknown>> | null = null;
+  // Buffer to accumulate incremental tool call arguments across stream chunks
+  private toolCallBuffer: Map<number, { id: string; name: string; args: string }> = new Map();
 
   constructor(config: OpenAICompatibleConfig) {
     super({
@@ -142,6 +144,9 @@ export class OpenAICompatibleClient extends BaseApiClient {
    * Stream chat completion response
    */
   async *streamChat(config: LLMRequestConfig): AsyncGenerator<LLMStreamEvent> {
+    // Clear tool call buffer from any previous stream
+    this.toolCallBuffer.clear();
+
     const requestBody = this.buildRequestBody({ ...config, stream: true });
     const headers = {
       ...this.buildHeaders(),
@@ -399,27 +404,30 @@ export class OpenAICompatibleClient extends BaseApiClient {
       };
     }
 
-    // Tool calls
+    // Tool calls - accumulate incremental argument chunks
     const rawToolCalls = delta?.tool_calls as Array<Record<string, unknown>> | undefined;
     if (rawToolCalls && Array.isArray(rawToolCalls)) {
       for (const tc of rawToolCalls) {
-        try {
-          const fn = tc.function as Record<string, unknown> | undefined;
-          const toolCall: ToolCall = {
-            id: (tc.id as string) || `tool_call_${Date.now()}`,
-            toolName: (fn?.name as string) || '',
-            input: fn?.arguments ? JSON.parse(fn.arguments as string) : {},
-            status: 'completed',
-          };
+        const index = (tc.index as number) ?? 0;
+        const fn = tc.function as Record<string, unknown> | undefined;
 
-          yield {
-            type: 'tool_use',
-            toolCall,
-          };
-        } catch (error) {
-          logger.api.warn('Failed to parse tool call chunk: ' + String(error));
+        // Get or create buffer entry for this tool call index
+        let entry = this.toolCallBuffer.get(index);
+        if (!entry) {
+          entry = { id: '', name: '', args: '' };
+          this.toolCallBuffer.set(index, entry);
         }
+
+        // Accumulate fields (id and name come in first chunk, args stream incrementally)
+        if (tc.id) entry.id = tc.id as string;
+        if (fn?.name) entry.name = fn.name as string;
+        if (fn?.arguments) entry.args += fn.arguments as string;
       }
+    }
+
+    // When finish_reason signals tool_calls or stop, flush the accumulated buffer
+    if (choice.finish_reason === 'tool_calls' || choice.finish_reason === 'stop') {
+      yield* this.flushToolCallBuffer();
     }
 
     // Finish reason
@@ -437,6 +445,27 @@ export class OpenAICompatibleClient extends BaseApiClient {
         };
       }
     }
+  }
+
+  /**
+   * Flush accumulated tool call buffer and yield complete tool calls
+   */
+  private *flushToolCallBuffer(): Generator<LLMStreamEvent> {
+    for (const [, entry] of this.toolCallBuffer) {
+      try {
+        const input = entry.args ? JSON.parse(entry.args) : {};
+        const toolCall: ToolCall = {
+          id: entry.id || `tool_call_${Date.now()}`,
+          toolName: entry.name,
+          input,
+          status: 'completed',
+        };
+        yield { type: 'tool_use', toolCall };
+      } catch (error) {
+        logger.api.warn('Failed to parse accumulated tool call arguments: ' + String(error));
+      }
+    }
+    this.toolCallBuffer.clear();
   }
 
   /**

@@ -291,6 +291,7 @@ export class QueryEngine {
         const retryInfo = this.errorHandler.shouldRetry(err, retryAttempt);
         if (retryInfo) {
           logger.query.warn(`Streaming retry ${retryAttempt + 1}/${maxRetries} after ${retryInfo.delay}ms: ${err.message}`);
+          yield { type: 'agent:error', error: err, recoverable: true, timestamp: Date.now() };
           await new Promise(resolve => setTimeout(resolve, retryInfo.delay));
           continue;
         }
@@ -298,6 +299,7 @@ export class QueryEngine {
         // Non-retryable - check if degraded (non-fatal)
         if (this.errorHandler.isDegradedError(err)) {
           logger.query.warn(`Degraded error in streaming: ${err.message}`);
+          yield { type: 'agent:error', error: err, recoverable: true, timestamp: Date.now() };
           yield this.createTextDeltaEvent('\n[Response degraded — continuing with partial result]\n');
           return;
         }
@@ -330,13 +332,19 @@ export class QueryEngine {
       ? STREAM_TIMEOUT_MS
       : 300000;
 
-    const streamPromise = (async () => {
+    const timeoutId = setTimeout(() => {
+      this.abort('LLM stream timeout');
+    }, streamTimeoutMs);
+    timeoutId.unref?.();
+
+    try {
       for await (const event of this.apiClient.streamChat(requestConfig)) {
         if (this._aborted) break;
         switch (event.type) {
           case 'text_delta':
             if (event.text) {
               currentContent += event.text;
+              yield this.createTextDeltaEvent(event.text);
             }
             break;
           case 'tool_use':
@@ -351,25 +359,14 @@ export class QueryEngine {
             break;
         }
       }
-    })();
-
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      const timer = setTimeout(() => {
-        this.abort('LLM stream timeout');
-        reject(new Error(`LLM stream timed out after ${streamTimeoutMs / 1000}s`));
-      }, streamTimeoutMs);
-      timer.unref?.();
-    });
-
-    try {
-      await Promise.race([streamPromise, timeoutPromise]);
     } catch (error) {
-      // If it's our timeout error, log and yield partial content instead of crashing
-      if (error instanceof Error && error.message.includes('LLM stream timed out')) {
-        logger.query.warn(`[QueryEngine] ${error.message}, continuing with partial response`);
+      if (this._aborted) {
+        logger.query.warn(`[QueryEngine] LLM stream timed out after ${streamTimeoutMs / 1000}s, continuing with partial response`);
       } else {
         throw error;
       }
+    } finally {
+      clearTimeout(timeoutId);
     }
 
     // Build assistant message (with whatever content we have)
@@ -399,6 +396,10 @@ export class QueryEngine {
 
     const assistantMsg = lastMsg as AssistantMessage;
     const toolCalls = assistantMsg.toolCalls || [];
+
+    for (const tc of toolCalls) {
+      yield this.createToolStartedEvent(tc);
+    }
 
     const results = await this.toolExecutor.executeParallel(
       toolCalls,
@@ -520,6 +521,11 @@ export class QueryEngine {
   /** Expose the tool executor (for testing) */
   getToolExecutor(): ToolExecutor {
     return this.toolExecutor;
+  }
+
+  /** Expose the error handler (for testing) */
+  getErrorHandler(): ErrorHandler {
+    return this.errorHandler;
   }
 
   /** Get messages (backward compat) */
