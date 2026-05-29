@@ -211,7 +211,7 @@ export class InProcessBackend implements SubAgentBackend {
     await agentContextStore.run(runtime, async () => {
       try {
         // Set up timeout
-        const timeoutMs = (Number.isFinite(config.timeoutSeconds) ? config.timeoutSeconds : 300) * 1000;
+        const timeoutMs = (Number.isFinite(config.timeoutSeconds ?? NaN) ? config.timeoutSeconds! : 300) * 1000;
         const timeoutId = setTimeout(() => {
           abortController.abort();
         }, timeoutMs);
