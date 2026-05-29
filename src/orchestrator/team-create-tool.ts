@@ -144,7 +144,7 @@ export const tool = buildTool<TeamCreateInput, string>({
       }
 
       // Wait for all agents to complete
-      const overallTimeoutMs = (input.timeout || 600) * 1000;
+      const overallTimeoutMs = (Number.isFinite(input.timeout) ? input.timeout : 600) * 1000;
       const aggregatedResult = await orchestrator.waitForAll(overallTimeoutMs);
 
       // Format aggregated result

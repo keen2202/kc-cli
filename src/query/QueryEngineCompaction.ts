@@ -117,16 +117,27 @@ export class CompactionHandler {
 
       // Full LLM-based compaction with retry
       const maxCompactionRetries = 2;
+      // Timeout for each compaction LLM call (default 60s)
+      const COMPACTION_TIMEOUT_MS = parseInt(process.env.KC_COMPACTION_TIMEOUT_MS || '60000', 10);
+      const compactionTimeoutMs = Number.isFinite(COMPACTION_TIMEOUT_MS) && COMPACTION_TIMEOUT_MS > 0
+        ? COMPACTION_TIMEOUT_MS
+        : 60000;
       let fullResult: { wasCompacted: boolean; messages: ChatMessage[]; tokensSaved: number } | null = null;
 
       for (let retryAttempt = 0; retryAttempt <= maxCompactionRetries; retryAttempt++) {
         try {
-          fullResult = await fullCompact(
-            workingMessages,
-            apiClient,
-            compactConfig,
-            config.systemPrompt
-          );
+          // Race compaction against a timeout to prevent infinite hangs
+          fullResult = await Promise.race([
+            fullCompact(
+              workingMessages,
+              apiClient,
+              compactConfig,
+              config.systemPrompt
+            ),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`Compaction timed out after ${compactionTimeoutMs / 1000}s`)), compactionTimeoutMs)
+            ),
+          ]);
           break;
         } catch (compactError) {
           const err = compactError instanceof Error ? compactError : new Error(String(compactError));

@@ -8,6 +8,7 @@ import type { SubAgentSpawnConfig } from '../../orchestrator/types';
 import { getOrchestrator } from '../../orchestrator/agent-orchestrator.js';
 import { createAgentConfig } from '../../orchestrator/agent-definitions.js';
 import { toolRegistry } from '../../tools.js';
+import { secondsToMs } from '../../utils/timeout';
 
 const AgentInputSchema = z.object({
   prompt: z.string().describe('Instructions for the sub-agent'),
@@ -78,7 +79,7 @@ export const tool = buildTool<AgentInput, string>({
       // Wait for the sub-agent to complete
       const result = await orchestrator.waitForCompletion(
         agentId,
-        input.timeout * 1000
+        secondsToMs(input.timeout, 300_000)
       );
 
       return toolResult(result.output, {

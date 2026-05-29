@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../../types/tools';
 import type { PermissionResult } from '../../types/permissions';
+import { secondsToMs } from '../../utils/timeout';
 import * as https from 'https';
 import * as http from 'http';
 
@@ -30,19 +31,30 @@ export const tool = buildTool<WebFetchInput, string>({
       const isHttps = url.protocol === 'https:';
       const client = isHttps ? https : http;
 
+      // Guard against NaN timeout (NaN * 1000 = NaN, and setTimeout(NaN) never fires)
+      const timeoutMs = secondsToMs(input.timeout, 30_000);
+
       const options: http.RequestOptions = {
         method: input.method,
         headers: {
           'User-Agent': 'kc-cli/0.1.0',
           ...input.headers,
         },
-        timeout: input.timeout * 1000,
+        timeout: timeoutMs,
       };
 
       return new Promise((resolve) => {
+        // Global timeout: ensure the entire Promise resolves even if
+        // the socket timeout or response stream hangs indefinitely.
+        const globalTimeout = setTimeout(() => {
+          req.destroy();
+          resolve(toolError(`Request timed out after ${timeoutMs / 1000}s (global)`));
+        }, timeoutMs + 5000);
+
         const req = client.request(url, options, (res) => {
           // Handle redirects
           if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            clearTimeout(globalTimeout);
             resolve(toolResult(`Redirect to: ${res.headers.location}`, {
               metadata: { status_code: res.statusCode, redirect: res.headers.location },
             }));
@@ -55,6 +67,7 @@ export const tool = buildTool<WebFetchInput, string>({
           res.on('data', (chunk) => {
             size += chunk.length;
             if (size > input.max_size) {
+              clearTimeout(globalTimeout);
               res.destroy();
               resolve(toolError(`Response too large (max ${input.max_size} bytes)`));
               return;
@@ -63,6 +76,7 @@ export const tool = buildTool<WebFetchInput, string>({
           });
 
           res.on('end', () => {
+            clearTimeout(globalTimeout);
             resolve(toolResult(
               `HTTP ${res.statusCode}\n\n${data.slice(0, input.max_size)}`,
               {
@@ -77,12 +91,14 @@ export const tool = buildTool<WebFetchInput, string>({
         });
 
         req.on('error', (error) => {
+          clearTimeout(globalTimeout);
           resolve(toolError(`HTTP request failed: ${error.message}`));
         });
 
         req.on('timeout', () => {
+          clearTimeout(globalTimeout);
           req.destroy();
-          resolve(toolError(`Request timed out after ${input.timeout}s`));
+          resolve(toolError(`Request timed out after ${timeoutMs / 1000}s`));
         });
 
         // Write body if present

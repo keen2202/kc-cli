@@ -140,7 +140,7 @@ export const tool = buildTool<GitInput, string>({
   call: async (input, context): Promise<ToolResultType<string>> => {
     try {
       const workingDir = input.cwd || context.cwd;
-      const timeout = (input.timeout || 60) * 1000;
+      const timeout = (Number.isFinite(input.timeout) ? input.timeout : 60) * 1000;
 
       const { stdout, stderr } = await spawnGit(input.command, workingDir, timeout);
 

@@ -1,9 +1,8 @@
-import { logger } from '../../services/logger';
 // In-process backend for sub-agent execution
 // Uses AsyncLocalStorage for async context isolation
 
 import { AsyncLocalStorage } from 'async_hooks';
-import type { SubAgentBackend } from './types.js';
+import type { SubAgentBackend } from './types';
 import type {
   SubAgentSpawnConfig,
   SubAgentRuntime,
@@ -12,30 +11,19 @@ import type {
   SubAgentMessage,
   SubAgentResult,
   QueryEngineLike,
-} from '../types.js';
-import type { ToolUseContext, ToolDefinition, ToolName } from '../../types/tools.js';
-import type { PermissionMode } from '../../types/permissions.js';
-import type { AgentEvent } from '../../state/types.js';
-import { EventBus } from '../event-bus.js';
+} from '../types';
+import type { ToolUseContext, ToolDefinition, ToolName } from '../../types/tools';
+import type { PermissionMode } from '../../types/permissions';
+import { EventBus } from '../event-bus';
 import {
   deriveChildPermissions,
   buildChildToolAllowList,
   createChildPermissionContext,
-} from '../permission-cascader.js';
-import { ResultAggregator } from '../result-aggregator.js';
+} from '../permission-cascader';
+import { ResultAggregator } from '../result-aggregator';
 
 // Async context store for sub-agent isolation
 const agentContextStore = new AsyncLocalStorage<SubAgentRuntime>();
-
-// Cached QueryEngine class to avoid repeated dynamic import on every spawn
-let CachedQueryEngine: (new (config: Record<string, unknown>, tools: unknown[]) => QueryEngineLike) | null = null;
-
-/**
- * Reset the cached QueryEngine (for testing)
- */
-export function resetCachedQueryEngine(): void {
-  CachedQueryEngine = null;
-}
 
 /**
  * Get current sub-agent context from AsyncLocalStorage
@@ -93,10 +81,9 @@ export class InProcessBackend implements SubAgentBackend {
         deniedTools: config.deniedTools,
       });
 
-      // Filter tools - use Set for O(1) lookup instead of O(n) Array.includes
-      const allowedToolNamesSet = new Set(allowedToolNames);
+      // Filter tools
       const childTools = Array.from(this.allTools.values()).filter((tool) =>
-        allowedToolNamesSet.has(tool.name as ToolName)
+        allowedToolNames.includes(tool.name as ToolName)
       );
 
       // Create abort controller
@@ -141,14 +128,10 @@ export class InProcessBackend implements SubAgentBackend {
       );
 
       // Create QueryEngine for sub-agent
-      // Cache the import to avoid repeated module resolution on every spawn
-      if (!CachedQueryEngine) {
-        const mod = await import('../../query/QueryEngine');
-        CachedQueryEngine = mod.QueryEngine as unknown as typeof CachedQueryEngine;
-      }
-      const QueryEngineClass = CachedQueryEngine!;
+      // Note: We need to dynamically import to avoid circular dependency
+      const { QueryEngine } = await import('../../query/QueryEngine');
 
-      const queryEngine = new QueryEngineClass(
+      const queryEngine = new QueryEngine(
         {
           model: config.model || 'claude-sonnet-4-20250514',
           provider: 'anthropic',
@@ -163,7 +146,7 @@ export class InProcessBackend implements SubAgentBackend {
 
       // Start agent loop asynchronously
       this.runAgentLoop(runtime, parentContext, queryEngine).catch((error) => {
-        logger.orchestrator.error(`Agent ${agentId} loop error:`, error);
+        console.error(`Agent ${agentId} loop error:`, error);
         runtime.status = 'failed';
         runtime.error = error;
         runtime.completedAt = Date.now();
@@ -211,7 +194,7 @@ export class InProcessBackend implements SubAgentBackend {
     await agentContextStore.run(runtime, async () => {
       try {
         // Set up timeout
-        const timeoutMs = (Number.isFinite(config.timeoutSeconds) ? config.timeoutSeconds : 300) * 1000;
+        const timeoutMs = (config.timeoutSeconds || 300) * 1000;
         const timeoutId = setTimeout(() => {
           abortController.abort();
         }, timeoutMs);
@@ -222,17 +205,16 @@ export class InProcessBackend implements SubAgentBackend {
         let lastAssistantMessage = '';
         let hasToolCalls = false;
 
-        for await (const rawEvent of eventGenerator) {
+        for await (const event of eventGenerator) {
           // Check if aborted
           if (abortController.signal.aborted) {
             break;
           }
 
           // Forward event to parent via EventBus
-          this.eventBus.emit(agentId, rawEvent as AgentEvent);
+          this.eventBus.emit(agentId, event);
 
-          // Collect final message from agent-prefixed events
-          const event = rawEvent as AgentEvent;
+          // Collect final message
           if (event.type === 'agent:text_delta') {
             lastAssistantMessage += event.text;
           } else if (event.type === 'agent:turn_complete') {
@@ -244,8 +226,7 @@ export class InProcessBackend implements SubAgentBackend {
               runtime.toolUseCount += event.message.toolCalls.length;
             }
           } else if (event.type === 'agent:tool_completed') {
-            const tokensUsed = Number(event.result?.metadata?.tokensUsed) || 0;
-            runtime.totalTokensUsed += tokensUsed;
+            runtime.totalTokensUsed += event.result?.metadata?.tokensUsed || 0;
           }
         }
 
@@ -295,12 +276,6 @@ export class InProcessBackend implements SubAgentBackend {
           error: runtime.error.message,
           timestamp: Date.now(),
         });
-      } finally {
-        // Clean up completed/failed agents from active map to prevent memory leak
-        // Keep in map briefly for any pending queries, then remove
-        setTimeout(() => {
-          this.activeAgents.delete(agentId);
-        }, 5000);
       }
     });
   }
@@ -316,7 +291,7 @@ export class InProcessBackend implements SubAgentBackend {
 
     // For now, just log the message
     // In full implementation, this would add to agent's message queue
-    logger.orchestrator.info(`Message to ${agentId}: ` + String(message));
+    console.log(`Message to ${agentId}:`, message);
   }
 
   /**

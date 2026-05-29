@@ -39,7 +39,7 @@ export const tool = buildTool<BashInput, string>({
       });
 
       const workingDir = input.workingDir || context.cwd;
-      const timeout = (input.timeout || 30) * 1000; // Convert to ms
+      const timeout = (Number.isFinite(input.timeout) ? input.timeout : 30) * 1000; // Convert to ms
 
       // The ToolExecutor pre-wraps commands for 'Bash' tool at the executor level
       // (the authoritative sandbox enforcement point). If the command has already

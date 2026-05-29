@@ -335,7 +335,7 @@ export class ToolExecutor {
   private getToolTimeout(tool: ToolDefinition): number {
     // Check if tool has a custom timeout in its metadata
     const timeout = tool.timeout;
-    if (typeof timeout === 'number' && timeout > 0) {
+    if (typeof timeout === 'number' && Number.isFinite(timeout) && timeout > 0) {
       return timeout * 1000; // Convert seconds to ms
     }
     return this.defaultTimeoutMs;

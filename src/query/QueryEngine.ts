@@ -323,32 +323,60 @@ export class QueryEngine {
     let currentContent = '';
     let currentToolCalls: ToolCall[] = [];
 
-    for await (const event of this.apiClient.streamChat(requestConfig)) {
-      switch (event.type) {
-        case 'text_delta':
-          if (event.text) {
-            currentContent += event.text;
-            yield this.createTextDeltaEvent(event.text);
-          }
-          break;
-        case 'tool_use':
-          if (event.toolCall) {
-            currentToolCalls.push(event.toolCall);
-          }
-          break;
-        case 'error':
-          if (event.error) throw event.error;
-          break;
-        case 'stop':
-          break;
+    // Global timeout for LLM streaming to prevent infinite hangs.
+    // Default 5 minutes; can be overridden via environment variable.
+    const STREAM_TIMEOUT_MS = parseInt(process.env.KC_STREAM_TIMEOUT_MS || '300000', 10);
+    const streamTimeoutMs = Number.isFinite(STREAM_TIMEOUT_MS) && STREAM_TIMEOUT_MS > 0
+      ? STREAM_TIMEOUT_MS
+      : 300000;
+
+    const streamPromise = (async () => {
+      for await (const event of this.apiClient.streamChat(requestConfig)) {
+        if (this._aborted) break;
+        switch (event.type) {
+          case 'text_delta':
+            if (event.text) {
+              currentContent += event.text;
+            }
+            break;
+          case 'tool_use':
+            if (event.toolCall) {
+              currentToolCalls.push(event.toolCall);
+            }
+            break;
+          case 'error':
+            if (event.error) throw event.error;
+            break;
+          case 'stop':
+            break;
+        }
+      }
+    })();
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      const timer = setTimeout(() => {
+        this.abort('LLM stream timeout');
+        reject(new Error(`LLM stream timed out after ${streamTimeoutMs / 1000}s`));
+      }, streamTimeoutMs);
+      timer.unref?.();
+    });
+
+    try {
+      await Promise.race([streamPromise, timeoutPromise]);
+    } catch (error) {
+      // If it's our timeout error, log and yield partial content instead of crashing
+      if (error instanceof Error && error.message.includes('LLM stream timed out')) {
+        logger.query.warn(`[QueryEngine] ${error.message}, continuing with partial response`);
+      } else {
+        throw error;
       }
     }
 
-    // Build assistant message
+    // Build assistant message (with whatever content we have)
     const assistantMsg: AssistantMessage = {
       id: uuidv4(),
       role: 'assistant',
-      content: currentContent,
+      content: currentContent || '[stream interrupted]',
       toolCalls: currentToolCalls.length > 0 ? currentToolCalls : undefined,
       timestamp: Date.now(),
     };

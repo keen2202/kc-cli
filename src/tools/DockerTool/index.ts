@@ -39,7 +39,7 @@ export const tool = buildTool<DockerInput, string>({
 
   call: async (input, context): Promise<ToolResultType<string>> => {
     try {
-      const timeout = (input.timeout || 60) * 1000;
+      const timeout = (Number.isFinite(input.timeout) ? input.timeout : 60) * 1000;
 
       const { stdout, stderr } = await execAsync(`docker ${input.command}`, {
         timeout,

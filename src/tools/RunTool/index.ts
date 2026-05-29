@@ -94,7 +94,7 @@ export const tool = buildTool<RunInput, string>({
   call: async (input, context): Promise<ToolResultType<string>> => {
     try {
       const workingDir = input.cwd || context.cwd;
-      const timeout = (input.timeout || 60) * 1000;
+      const timeout = (Number.isFinite(input.timeout) ? input.timeout : 60) * 1000;
 
       const env = {
         ...process.env,
