@@ -44,69 +44,77 @@ export const tool = buildTool<WebFetchInput, string>({
       };
 
       return new Promise((resolve) => {
+        let req: http.ClientRequest | undefined;
+
         // Global timeout: ensure the entire Promise resolves even if
         // the socket timeout or response stream hangs indefinitely.
         const globalTimeout = setTimeout(() => {
-          req.destroy();
+          if (req) req.destroy();
           resolve(toolError(`Request timed out after ${timeoutMs / 1000}s (global)`));
         }, timeoutMs + 5000);
 
-        const req = client.request(url, options, (res) => {
-          // Handle redirects
-          if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-            clearTimeout(globalTimeout);
-            resolve(toolResult(`Redirect to: ${res.headers.location}`, {
-              metadata: { status_code: res.statusCode, redirect: res.headers.location },
-            }));
-            return;
-          }
-
-          let data = '';
-          let size = 0;
-
-          res.on('data', (chunk) => {
-            size += chunk.length;
-            if (size > input.max_size) {
+        // client.request() throws synchronously for unsupported protocols (e.g. file:).
+        try {
+          req = client.request(url, options, (res) => {
+            // Handle redirects
+            if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
               clearTimeout(globalTimeout);
-              res.destroy();
-              resolve(toolError(`Response too large (max ${input.max_size} bytes)`));
+              resolve(toolResult(`Redirect to: ${res.headers.location}`, {
+                metadata: { status_code: res.statusCode, redirect: res.headers.location },
+              }));
               return;
             }
-            data += chunk.toString();
-          });
 
-          res.on('end', () => {
-            clearTimeout(globalTimeout);
-            resolve(toolResult(
-              `HTTP ${res.statusCode}\n\n${data.slice(0, input.max_size)}`,
-              {
-                metadata: {
-                  status_code: res.statusCode,
-                  content_type: res.headers['content-type'],
-                  content_length: data.length,
-                },
+            let data = '';
+            let size = 0;
+
+            res.on('data', (chunk) => {
+              size += chunk.length;
+              if (size > input.max_size) {
+                clearTimeout(globalTimeout);
+                res.destroy();
+                resolve(toolError(`Response too large (max ${input.max_size} bytes)`));
+                return;
               }
-            ));
+              data += chunk.toString();
+            });
+
+            res.on('end', () => {
+              clearTimeout(globalTimeout);
+              resolve(toolResult(
+                `HTTP ${res.statusCode}\n\n${data.slice(0, input.max_size)}`,
+                {
+                  metadata: {
+                    status_code: res.statusCode,
+                    content_type: res.headers['content-type'],
+                    content_length: data.length,
+                  },
+                }
+              ));
+            });
           });
-        });
 
-        req.on('error', (error) => {
+          req.on('error', (error) => {
+            clearTimeout(globalTimeout);
+            resolve(toolError(`HTTP request failed: ${error.message}`));
+          });
+
+          req.on('timeout', () => {
+            clearTimeout(globalTimeout);
+            req?.destroy();
+            resolve(toolError(`Request timed out after ${timeoutMs / 1000}s`));
+          });
+
+          // Write body if present
+          if (input.body) {
+            req.write(input.body);
+          }
+
+          req.end();
+        } catch (error) {
           clearTimeout(globalTimeout);
-          resolve(toolError(`HTTP request failed: ${error.message}`));
-        });
-
-        req.on('timeout', () => {
-          clearTimeout(globalTimeout);
-          req.destroy();
-          resolve(toolError(`Request timed out after ${timeoutMs / 1000}s`));
-        });
-
-        // Write body if present
-        if (input.body) {
-          req.write(input.body);
+          resolve(toolError(`HTTP request failed: ${error instanceof Error ? error.message : String(error)}`));
         }
-
-        req.end();
       });
     } catch (error) {
       return toolError(`WebFetch failed: ${error instanceof Error ? error.message : String(error)}`);
