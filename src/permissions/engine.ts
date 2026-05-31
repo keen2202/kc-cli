@@ -6,6 +6,7 @@ import type {
   PermissionRule,
   PermissionBehavior,
 } from '../types/permissions';
+import type { PluginPermissionRule } from '../plugins/types';
 import { getState } from '../bootstrap/state';
 import { containsProtectedPath } from './protectedPaths';
 import { parseRuleString } from './rules';
@@ -51,6 +52,7 @@ export async function hasPermissionsToUseTool(
     ) => PermissionResult;
     content?: string; // For content-specific rules
     config?: PermissionEngineConfig; // Permission engine configuration
+    pluginManager?: { getPluginPermissionRules(): PluginPermissionRule[] }; // Plugin manager for plugin rules
   } = {}
 ): Promise<PermissionResult> {
   const state = getState();
@@ -95,6 +97,15 @@ export async function hasPermissionsToUseTool(
         reason: 'Matched alwaysDenyRules',
       },
     };
+  }
+
+  // Step 1.5: Check plugin permission rules (after global deny, before tool-specific)
+  if (options.pluginManager) {
+    const pluginRules = options.pluginManager.getPluginPermissionRules();
+    const pluginMatch = matchPluginRules(pluginRules, toolName, options.content);
+    if (pluginMatch) {
+      return pluginMatch;
+    }
   }
 
   // Step 2: Tool-specific permission check
@@ -273,6 +284,46 @@ function matchPattern(pattern: string, content: string): boolean {
   const regex = new RegExp(`^${regexPattern}$`, 'i');
   patternCache.set(pattern, regex);
   return regex.test(content);
+}
+
+/**
+ * Match plugin permission rules against tool name and content.
+ * Returns a PermissionResult if a rule matches, null otherwise.
+ * Rules are expected to be sorted by priority (lower number = higher priority).
+ */
+function matchPluginRules(
+  rules: PluginPermissionRule[],
+  toolName: string,
+  content?: string
+): PermissionResult | null {
+  for (const rule of rules) {
+    // Check tool pattern (supports wildcard "*")
+    if (rule.toolPattern !== '*' && rule.toolPattern !== toolName) {
+      continue;
+    }
+
+    // Check content pattern if specified
+    if (rule.contentPattern && content) {
+      if (!matchPattern(rule.contentPattern, content)) {
+        continue;
+      }
+    } else if (rule.contentPattern && !content) {
+      // Rule has content pattern but no content to match - skip
+      continue;
+    }
+
+    // Rule matches - return result
+    return {
+      behavior: rule.behavior,
+      message: `Plugin rule: ${rule.behavior} for ${toolName}`,
+      decisionReason: {
+        type: 'plugin_rule',
+        reason: `Matched plugin rule: ${rule.toolPattern}${rule.contentPattern ? `:${rule.contentPattern}` : ''}`,
+      },
+    } as PermissionResult;
+  }
+
+  return null;
 }
 
 /**

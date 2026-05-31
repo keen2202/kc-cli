@@ -1,5 +1,6 @@
-import type { Plugin, PluginHooks, PluginStatus } from './types';
-import type { ToolDefinition } from '../types/tools';
+import type { Plugin, PluginHooks, PluginPermissionRule, PluginStatus } from './types';
+import type { ToolDefinition, ToolUseContext } from '../types/tools';
+import type { ChatMessage } from '../types/message';
 import { logger } from '../services/logger';
 import { discoverPlugins, loadPlugin } from './plugin-loader';
 import { registerPostTurnHook } from '../hooks/postTurnHooks';
@@ -112,8 +113,9 @@ export class PluginManager {
         const pluginHook = loaded.plugin.hooks.postToolUse;
         merged.postToolUse = existing
           ? async (toolName, input, result, context) => {
-              await existing(toolName, input, result, context);
-              await pluginHook(toolName, input, result, context);
+              const firstResult = await existing(toolName, input, result, context);
+              // If first hook returned a value, pass it to next; otherwise pass original
+              return pluginHook(toolName, input, firstResult ?? result, context);
             }
           : pluginHook;
       }
@@ -124,6 +126,29 @@ export class PluginManager {
           ? async (messages) => {
               await existing(messages);
               await pluginHook(messages);
+            }
+          : pluginHook;
+      }
+      if (loaded.plugin.hooks.preTurn) {
+        const existing = merged.preTurn;
+        const pluginHook = loaded.plugin.hooks.preTurn;
+        merged.preTurn = existing
+          ? async (messages, context) => {
+              const result = await existing(messages, context);
+              // If first hook returned null, pass original messages to next hook
+              return pluginHook(result ?? messages, context);
+            }
+          : pluginHook;
+      }
+      if (loaded.plugin.hooks.onError) {
+        const existing = merged.onError;
+        const pluginHook = loaded.plugin.hooks.onError;
+        merged.onError = existing
+          ? async (error, context) => {
+              const result = await existing(error, context);
+              // If first hook returned null (swallowed), stop chain
+              if (result === null) return null;
+              return pluginHook(result, context);
             }
           : pluginHook;
       }
@@ -141,6 +166,41 @@ export class PluginManager {
       status: loaded.status,
       error: loaded.error,
     }));
+  }
+
+  /**
+   * Collect permission rules from all initialized plugins.
+   * Returns rules sorted by priority (lower number = higher priority).
+   */
+  getPluginPermissionRules(): PluginPermissionRule[] {
+    const rules: PluginPermissionRule[] = [];
+    for (const [, loaded] of this.plugins) {
+      if (loaded.status === 'initialized' && loaded.plugin.permissionRules) {
+        rules.push(...loaded.plugin.permissionRules);
+      }
+    }
+    return rules.sort((a, b) => a.priority - b.priority);
+  }
+
+  /**
+   * Execute preTurn hooks across all initialized plugins.
+   * Returns modified messages, or original messages if no hooks modify them.
+   */
+  async executePreTurnHooks(messages: ChatMessage[], context: ToolUseContext): Promise<ChatMessage[]> {
+    const hooks = this.getPluginHooks();
+    if (!hooks.preTurn) return messages;
+    const result = await hooks.preTurn(messages, context);
+    return result ?? messages;
+  }
+
+  /**
+   * Execute onError hooks across all initialized plugins.
+   * Returns modified error, or null if the error was swallowed.
+   */
+  async executeOnErrorHooks(error: Error, context: ToolUseContext): Promise<Error | null> {
+    const hooks = this.getPluginHooks();
+    if (!hooks.onError) return error;
+    return hooks.onError(error, context);
   }
 
   /**

@@ -31,13 +31,21 @@ export const tool = buildTool<FileEditInput, string>({
       const filePath = path.resolve(context.cwd, input.file_path);
       assertPathWithinWorkspace(input.file_path, context.cwd);
 
-      // Check file exists
-      if (!fs.existsSync(filePath)) {
-        return toolError(`File not found: ${filePath}`);
+      // Check file exists - prefer ExecutionEnv abstraction when available
+      if (context.env) {
+        if (!(await context.env.fs.exists(filePath))) {
+          return toolError(`File not found: ${filePath}`);
+        }
+      } else {
+        if (!fs.existsSync(filePath)) {
+          return toolError(`File not found: ${filePath}`);
+        }
       }
 
       // Read file
-      let content = await fs.promises.readFile(filePath, 'utf-8');
+      let content = context.env
+        ? await context.env.fs.readFile(filePath, 'utf-8')
+        : await fs.promises.readFile(filePath, 'utf-8');
       const originalContent = content;
       const changes: string[] = [];
 
@@ -66,7 +74,11 @@ export const tool = buildTool<FileEditInput, string>({
       }
 
       // Write file
-      await fs.promises.writeFile(filePath, content, 'utf-8');
+      if (context.env) {
+        await context.env.fs.writeFile(filePath, content);
+      } else {
+        await fs.promises.writeFile(filePath, content, 'utf-8');
+      }
 
       return toolResult(
         `Applied ${changes.length} edit(s) to ${input.file_path}:\n${changes.join('\n')}`,

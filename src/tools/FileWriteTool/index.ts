@@ -27,25 +27,48 @@ export const tool = buildTool<FileWriteInput, string>({
       const filePath = path.resolve(context.cwd, input.path);
       assertPathWithinWorkspace(input.path, context.cwd);
 
-      // Ensure directory exists (async)
+      // Ensure directory exists - prefer ExecutionEnv abstraction when available
       const dir = path.dirname(filePath);
-      await fs.promises.mkdir(dir, { recursive: true });
+      if (context.env) {
+        await context.env.fs.mkdir(dir, { recursive: true });
+      } else {
+        await fs.promises.mkdir(dir, { recursive: true });
+      }
 
       // Capture old content before write (for diff preview)
       let oldContent: string | null = null;
       if (!input.append) {
-        try {
-          oldContent = await fs.promises.readFile(filePath, 'utf-8');
-        } catch {
-          oldContent = null; // New file
+        if (context.env) {
+          oldContent = await context.env.fs.exists(filePath)
+            ? await context.env.fs.readFile(filePath, 'utf-8')
+            : null;
+        } else {
+          try {
+            oldContent = await fs.promises.readFile(filePath, 'utf-8');
+          } catch {
+            oldContent = null; // New file
+          }
         }
       }
 
       // Write file
-      if (input.append) {
-        await fs.promises.appendFile(filePath, input.content, 'utf-8');
+      if (context.env) {
+        let writeContent = input.content;
+        if (input.append) {
+          try {
+            const existing = await context.env.fs.readFile(filePath, 'utf-8');
+            writeContent = existing + input.content;
+          } catch {
+            // File doesn't exist yet, just write
+          }
+        }
+        await context.env.fs.writeFile(filePath, writeContent);
       } else {
-        await fs.promises.writeFile(filePath, input.content, 'utf-8');
+        if (input.append) {
+          await fs.promises.appendFile(filePath, input.content, 'utf-8');
+        } else {
+          await fs.promises.writeFile(filePath, input.content, 'utf-8');
+        }
       }
 
       return toolResult(

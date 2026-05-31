@@ -95,23 +95,32 @@ export const tool = buildTool<FileReadInput, string>({
       const filePath = path.resolve(context.cwd, input.path);
       assertPathWithinWorkspace(input.path, context.cwd);
 
-      // Check file exists (async)
-      try {
-        await fs.promises.access(filePath);
-      } catch {
-        return toolError(`File not found: ${filePath}`);
+      // Check file exists - prefer ExecutionEnv abstraction when available
+      if (context.env) {
+        if (!(await context.env.fs.exists(filePath))) {
+          return toolError(`File not found: ${filePath}`);
+        }
+      } else {
+        try {
+          await fs.promises.access(filePath);
+        } catch {
+          return toolError(`File not found: ${filePath}`);
+        }
       }
 
-      // Check file size (async)
-      const stat = await fs.promises.stat(filePath);
+      // Check file size
+      const fileStat = context.env
+        ? await context.env.fs.stat(filePath)
+        : await fs.promises.stat(filePath);
 
       // For files exceeding maxSize, stream a head+tail preview
-      if (stat.size > input.maxSize) {
-        const preview = await readLargeFilePreview(filePath, stat.size, input.maxSize);
+      // Note: preview uses streaming which is hard to abstract, fall back to direct fs
+      if (fileStat.size > input.maxSize) {
+        const preview = await readLargeFilePreview(filePath, fileStat.size, input.maxSize);
         return toolResult(preview, {
           metadata: {
             path: filePath,
-            size: stat.size,
+            size: fileStat.size,
             lines: PREVIEW_LINES * 2,
             previewOnly: true,
           },
@@ -119,7 +128,9 @@ export const tool = buildTool<FileReadInput, string>({
       }
 
       // Read file
-      let content = await fs.promises.readFile(filePath, 'utf-8');
+      let content = context.env
+        ? await context.env.fs.readFile(filePath, 'utf-8')
+        : await fs.promises.readFile(filePath, 'utf-8');
       let lineCount: number;
 
       // Apply range if specified
@@ -140,7 +151,7 @@ export const tool = buildTool<FileReadInput, string>({
       return toolResult(content, {
         metadata: {
           path: filePath,
-          size: stat.size,
+          size: fileStat.size,
           lines: lineCount,
         },
       });

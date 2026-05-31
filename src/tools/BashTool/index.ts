@@ -68,7 +68,34 @@ export const tool = buildTool<BashInput, string>({
         }
       }
 
-      // Execute wrapped command
+      // Execute wrapped command - prefer ExecutionEnv abstraction when available
+      if (context.env) {
+        const result = await context.env.shell.exec(wrappedCmd, {
+          cwd: workingDir,
+          timeout,
+          signal: context.abortController?.signal,
+        });
+
+        if (result.exitCode !== 0) {
+          return toolResult(result.stdout, {
+            isError: true,
+            message: `Command failed: ${result.stderr || 'non-zero exit code'}`,
+            metadata: { exitCode: result.exitCode, stderr: result.stderr },
+          });
+        }
+
+        return toolResult(result.stdout, {
+          isError: false,
+          metadata: {
+            exitCode: 0,
+            stderr: result.stderr.trim() || undefined,
+            sandboxed,
+            sandboxBackend,
+          },
+        });
+      }
+
+      // Fallback: direct child_process exec
       const { stdout, stderr } = await execAsync(wrappedCmd, {
         cwd: workingDir,
         timeout,

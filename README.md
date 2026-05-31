@@ -1,29 +1,43 @@
 # KC-CLI: Intelligent CLI Agent System
 
-An AI-powered intelligent CLI assistant for software development, inspired by Claude Code's architecture.
+An AI-powered intelligent CLI assistant for software development, inspired by Claude Code's architecture. Architecture patterns derived from comparative analysis of PilotDeck (OpenBMB) and pi (earendil-works) projects.
 
-## v3 Highlights
+## v3.2 Highlights
 
 - 🔒 **Sandbox Security**: All shell commands run in isolated sandboxes (Docker/Bubblewrap/seccomp) with network isolation, resource limits, and escape detection
 - 🎨 **Redesigned UI**: Sidebar with file tree (LSP markers), diff preview, command palette, model selector, theme system, mouse support, multi-panel layout
 - 🔌 **LSP Integration**: Code completions, diagnostics, go-to-definition, find references, rename, quick fixes for 9 languages
 - 🧠 **Smart Model Adaptation**: Provider-specific prompts, dynamic parameter tuning, tiktoken-based token estimation
-- 🧪 **3131 Tests**: Comprehensive test suite across 152 files with 92.9% line coverage
+- 🧪 **3899 Tests**: Comprehensive test suite across 178 files
 - 🛡️ **Runtime Monitoring**: Sandbox resource monitoring (Docker stats, /proc), image management, and probe-based isolation verification
 - 🪟 **Windows Sandbox**: Native Windows sandbox support via job objects
+- 🌳 **Session Tree**: Non-linear conversations with branching, checkout, merge, and branch summaries
+- 🎯 **Budget Enforcement**: Proactive token budget limits per session, turn, tool result, and sub-agent
+- ⚡ **Tiered Compaction**: Four-engine compaction system (CachedMicro, Snip, Full, Force) with priority-based selection
+- 🔀 **Steering System**: Inject messages mid-execution via `steer()` or after completion via `followUp()` (Ctrl+I)
+- 🔌 **Contribution Plugins**: Plugin system with 5 contribution types (tools, hooks, permissionRules, prompts, mcpServers)
+- 📐 **Protocol-First Design**: Per-module protocol.ts files for clean interface boundaries
+- 🧩 **ExecutionEnv Abstraction**: Swappable FileSystem/Shell backends for testable, isolatable tools
+- ❌ **Typed Error Handling**: Result<T,E> sum type and KCError with 18 stable error codes
 
 ## Features
 
-- **Modular Tools**: 21 built-in tools — Bash, file I/O, search, Git, SQL, Docker, deployment, task management, and sub-agent spawning
-- **Multi-LLM Support**: Anthropic Claude, OpenAI GPT, Qwen (DashScope), GLM (Zhipu AI), Google Gemini, DeepSeek, and Ollama (local)
-- **Permission System**: 6-step deny-first security with bypass-immune safety checks, protected paths, and auto-classifier
+- **Modular Tools**: 21 built-in tools with two-phase execution (prepare/execute/finalize) — Bash, file I/O, search, Git, SQL, Docker, deployment, task management, and sub-agent spawning
+- **Multi-LLM Support**: Anthropic Claude, OpenAI GPT, Qwen (DashScope), GLM (Zhipu AI), Google Gemini, DeepSeek, and Ollama (local); 9 stream event types including thinking_delta
+- **Permission System**: 6-step deny-first security with bypass-immune safety checks, protected paths, auto-classifier, and plugin-contributed rules (Step 1.5)
 - **Sandbox Isolation**: Docker/Bubblewrap/seccomp backends with per-tool policies, seccomp profiles, and resource limits
 - **LSP Code Intelligence**: Language server integration for TypeScript, Go, Python, Rust, Java, C++, Ruby
-- **Multi-Agent Orchestration**: Spawn sub-agents with isolated QueryEngine instances, permission cascading, and event bus coordination
+- **Multi-Agent Orchestration**: Spawn sub-agents with isolated QueryEngine instances, permission cascading, event bus coordination, and budget enforcement
 - **Memory System**: File-based persistent memory with YAML frontmatter, relevance search, and 4 discrete types (user/feedback/project/reference)
-- **Auto-Compaction**: Micro-compact (clear old tool results) and full-compact (LLM summarization) to manage context windows
+- **Tiered Compaction**: Four-engine system (CachedMicro → Snip → Full → Force) with priority-based selection and result caching
+- **Session Tree**: Non-linear conversations with branching (`/branch`), checkout (`/checkout`), merge, and tree visualization (`/history`)
+- **Steering**: Inject messages mid-execution via `steer()` or after completion via `followUp()`; Ctrl+I toggle in UI
+- **Budget Enforcement**: Proactive token limits per session/turn/tool-result/sub-agent with opt-in BudgetConfig
+- **Plugin Contributions**: Plugins can contribute tools, hooks, permission rules, prompt templates, and MCP server configs
+- **Typed Errors**: `Result<T,E>` for explicit error handling; `KCError` with 18 stable codes (api_rate_limit, tool_timeout, budget_exceeded, etc.)
+- **ExecutionEnv**: Swappable FileSystem/Shell abstraction; MockExecutionEnv for testing without real I/O
 - **Session Management**: Session persistence, archival, pruning, and recovery with configurable retention
-- **Interactive REPL**: Terminal UI with sidebar, diff preview, command palette, and model selector
+- **Interactive REPL**: Terminal UI with sidebar, diff preview, command palette, model selector, and steer mode
 - **Node.js Compatible**: Works with Node.js 16+ (no Bun required)
 
 ## Quick Start
@@ -126,6 +140,9 @@ Options:
 - `/diff` — View pending file diffs
 - `/accept` / `/reject` — Accept/reject file changes
 - `/permission [mode]` — View/switch permission mode
+- `/branch` — List or create conversation branches
+- `/checkout <id>` — Switch to a different branch
+- `/history` — Show conversation tree visualization
 - `/exit` — Exit
 
 ## Architecture
@@ -367,11 +384,12 @@ src/
 The permission system implements defense-in-depth:
 
 1. **Deny-first**: Deny rules are checked first and cannot be bypassed
-2. **Tool-specific**: Each tool can implement custom permission checks via `checkPermissions()`
-3. **Security-critical**: Protected paths (`/etc/passwd`, `.ssh`, `.gnupg`, etc.) always require explicit approval — even in bypass mode
-4. **Dangerous commands**: Patterns like `rm -rf /`, `mkfs`, `dd to /dev/` are hard-denied
-5. **Read-only commands**: Safe commands (`ls`, `cat`, `grep`, `find`, `git status`, etc.) are auto-allowed
-6. **Permission cascading**: Sub-agents inherit permission modes that never exceed the parent's level
+2. **Plugin rules** (Step 1.5): Plugins can contribute permission rules with priority-based evaluation
+3. **Tool-specific**: Each tool can implement custom permission checks via `checkPermissions()`
+4. **Security-critical**: Protected paths (`/etc/passwd`, `.ssh`, `.gnupg`, etc.) always require explicit approval — even in bypass mode
+5. **Dangerous commands**: Patterns like `rm -rf /`, `mkfs`, `dd to /dev/` are hard-denied
+6. **Read-only commands**: Safe commands (`ls`, `cat`, `grep`, `find`, `git status`, etc.) are auto-allowed
+7. **Permission cascading**: Sub-agents inherit permission modes that never exceed the parent's level
 
 ## Multi-Agent Orchestration
 
@@ -382,6 +400,36 @@ Sub-agents run with isolated QueryEngine instances using Node.js `AsyncLocalStor
 - **Event bus**: In-memory pub/sub routes events between agents with namespace partitioning
 - **Lifecycle management**: Spawn, monitor, wait for completion, cancel, or shutdown sub-agents
 - **Result aggregation**: Collects and formats results from multiple sub-agents into a summary
+- **Budget enforcement**: Per-sub-agent token budgets with KCError on exceeded limits
+
+## Session Tree (Branching Conversations)
+
+Non-linear conversation model with full branching support:
+
+```bash
+/branch              # List all branches
+/branch feature-x    # Create a new branch
+/checkout <id>       # Switch to a branch (prefix matching supported)
+/history             # Show ASCII tree visualization
+```
+
+API:
+```typescript
+engine.branch();                    // Fork at current point
+engine.checkout(nodeId);            // Switch branch
+engine.getTree();                   // Get full tree structure
+```
+
+## Steering (Mid-Execution Injection)
+
+Inject messages during agent execution without aborting:
+
+```typescript
+engine.steer("Wait, also check the tests");      // Inject between tool phases
+engine.followUp("Now do the same for module B");  // Queue after turn completes
+```
+
+UI: Press `Ctrl+I` to toggle steer mode. The input prompt changes to `steer>` and messages are injected into the running agent.
 
 ## Memory System
 
@@ -397,11 +445,20 @@ Persistent file-based memory stored in `~/.kc-cli/memory/<project-hash>/`:
 
 ## Context Window Management
 
-- **Micro-compact**: Clears old tool results (cheap, no LLM) — replaces large outputs with placeholder text
-- **Full-compact**: LLM-based conversation summarization preserving key decisions and context
+Four-tier compaction engine with priority-based selection:
+
+- **CachedMicrocompact** (priority 0): Hash-cached microcompact results, no LLM required
+- **Snip** (priority 10): Targeted removal of large tool outputs (>5000 chars) without touching conversation flow
+- **Full-compact** (priority 20): LLM-based conversation summarization with retry logic
+- **Force truncate** (priority 30): Last-resort absolute token limit
+
+Engines are tried in priority order; chaining occurs when an engine reduces tokens but not enough.
+
+Additional mechanisms:
 - **Token estimation**: Character-based heuristic (`length/4 * 4/3`) for cross-platform compatibility
 - **Message trimming**: Hard limit of 1000 messages prevents unbounded memory growth
 - **Cached estimates**: Token counts are cached and invalidated on change to avoid redundant calculations
+- **Budget enforcement**: Optional proactive limits per session/turn/tool-result/sub-agent
 
 ## Development
 
@@ -416,7 +473,7 @@ npm run test:coverage # Run tests with coverage report
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) — System architecture and design patterns
+- [Architecture](docs/ARCHITECTURE.md) — System architecture and design patterns
 - [Tool Development](docs/tool-development.md) — Guide to building custom tools
 - [Configuration](docs/configuration.md) — Configuration system and settings
 - [API Clients](docs/api-clients.md) — LLM provider integration
@@ -425,7 +482,8 @@ npm run test:coverage # Run tests with coverage report
 - [LSP Integration](docs/lsp-integration.md) — Language server integration
 - [UI Guide](docs/ui-guide.md) — Terminal UI usage guide
 - [Plugin Development](docs/plugin-development.md) — Plugin authoring guide
-- [Changelog](CHANGELOG.md) — Version history
+- [Architecture Optimization Spec](docs/specs/architecture-optimization-spec.md) — v3.2 design decisions and implementation details
+- [Optimization Tasks](docs/specs/optimization-tasks.md) — Task breakdown with dependency tracking
 
 ## License
 

@@ -9,6 +9,8 @@ import type { PluginHooks } from '../plugins/types';
 import { hasPermissionsToUseTool } from '../permissions/engine';
 import { SandboxManager } from '../services/sandbox';
 import { mergeSandboxPolicy } from '../services/sandbox-policy';
+import { createLocalExecutionEnv } from '../services/execution-env-local';
+import type { ExecutionEnv } from '../services/execution-env';
 import { Semaphore } from '../utils/semaphore';
 import { DEFAULT_TOOL_TIMEOUT_MS } from '../constants';
 import { getErrorMessage } from '../types/errors';
@@ -103,6 +105,7 @@ export class ToolExecutor {
   private pluginHooks?: PluginHooks;
   private sandboxManager: SandboxManager;
   private concurrencySemaphore: Semaphore;
+  private executionEnv: ExecutionEnv;
   private readonly defaultTimeoutMs = DEFAULT_TOOL_TIMEOUT_MS;
 
   constructor(
@@ -135,6 +138,9 @@ export class ToolExecutor {
     // Initialize concurrency semaphore
     const maxConcurrent = concurrencyOptions?.maxConcurrentTools ?? DEFAULT_MAX_CONCURRENT_TOOLS;
     this.concurrencySemaphore = new Semaphore(maxConcurrent);
+
+    // Initialize local execution environment
+    this.executionEnv = createLocalExecutionEnv(cwd);
 
     // Initialize sandbox manager with config
     const policy = sandboxOptions?.policy ? mergeSandboxPolicy(sandboxOptions.policy) : undefined;
@@ -184,6 +190,24 @@ export class ToolExecutor {
           effectiveInput = modifiedInput;
         } catch (err) {
           logger.tools.error('[Plugin] preToolUse hook error: ' + String(err));
+        }
+      }
+
+      // 2b. Tool prepare hook (may modify input, skip execution, or provide early result)
+      if (tool.prepare) {
+        try {
+          const prepareResult = await tool.prepare(effectiveInput, context);
+          if (prepareResult.skip) {
+            const skipResult = (prepareResult.result ?? {
+              toolCallId: toolCall.id,
+              output: 'Tool execution skipped by prepare hook',
+              isError: false,
+            }) as ToolResult;
+            return skipResult;
+          }
+          effectiveInput = prepareResult.input;
+        } catch (err) {
+          logger.tools.error('[Prepare] hook error: ' + String(err));
         }
       }
 
@@ -245,16 +269,29 @@ export class ToolExecutor {
         };
       }
 
-      // 5. Plugin postToolUse hook
+      // 5. Tool finalize hook (may transform result)
+      let finalResult = result;
+      if (tool.finalize) {
+        try {
+          finalResult = (await tool.finalize(effectiveInput, result, context)) as ToolResult;
+        } catch (err) {
+          logger.tools.error('[Finalize] hook error: ' + String(err));
+        }
+      }
+
+      // 6. Plugin postToolUse hook (may override result)
       if (this.pluginHooks?.postToolUse) {
         try {
-          await this.pluginHooks.postToolUse(toolCall.toolName, effectiveInput, result, context);
+          const postResult = await this.pluginHooks.postToolUse(toolCall.toolName, effectiveInput, finalResult, context);
+          if (postResult != null) {
+            finalResult = postResult as ToolResult;
+          }
         } catch (err) {
           logger.tools.error('[Plugin] postToolUse hook error: ' + String(err));
         }
       }
 
-      return result;
+      return finalResult;
     } catch (error) {
       return {
         toolCallId: toolCall.id,
@@ -297,11 +334,12 @@ export class ToolExecutor {
       }, timeoutMs);
     });
 
-    // Create tool execution promise with abort signal and sandbox
+    // Create tool execution promise with abort signal, sandbox, and execution env
     const execPromise = tool.call(input, {
       ...context,
       abortController: toolAbortController,
       sandbox: this.sandboxManager,
+      env: context.env ?? this.executionEnv,
     });
 
     // Race between timeout and execution
@@ -351,10 +389,11 @@ export class ToolExecutor {
   ): Promise<Map<string, ToolResult | Error>> {
     const results = new Map<string, ToolResult | Error>();
 
-    // Enrich context with sandbox manager
+    // Enrich context with sandbox manager and execution env
     const enrichedContext: ToolUseContext = {
       ...context,
       sandbox: this.sandboxManager,
+      env: context.env ?? this.executionEnv,
     };
 
     // Group tools by concurrency safety

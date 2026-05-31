@@ -2,6 +2,7 @@
 
 import type { ChatMessage } from '../types/message';
 import { estimateMessageTokensArray } from '../utils/tokenEstimation';
+import { SessionTree, type SessionNode } from '../state/session-tree';
 
 /**
  * Configuration for conversation state management.
@@ -16,50 +17,77 @@ const DEFAULT_MAX_MESSAGES = 1000;
 /**
  * Manages conversation state for QueryEngine.
  * Handles message storage, token estimation caching, and message trimming.
+ *
+ * Internally uses a SessionTree for non-linear branching support.
+ * The public API is preserved for backward compatibility.
  */
 export class ConversationState {
-  private messages: ChatMessage[] = [];
+  /**
+   * Backward-compatible reference to the active node's messages array.
+   * Tests and external code that access this property directly (via `(engine as any).messages`)
+   * will still work. This reference is updated when the active branch changes.
+   */
+  messages: ChatMessage[] = [];
+  private tree: SessionTree;
   private cachedTokenEstimate: number | null = null;
   private maxMessages: number;
 
   constructor(config: ConversationStateConfig = {}) {
     this.maxMessages = config.maxMessages ?? DEFAULT_MAX_MESSAGES;
+    this.tree = new SessionTree();
+    this.messages = this.getActiveNodeMessages();
   }
 
-  /** Add a message to the conversation */
+  /** Get the messages array of the active tree node */
+  private getActiveNodeMessages(): ChatMessage[] {
+    const node = this.tree.getNode(this.tree.getActiveNodeId());
+    return node ? node.messages : [];
+  }
+
+  /** Synchronize the messages reference with the active node */
+  private syncMessagesRef(): void {
+    this.messages = this.getActiveNodeMessages();
+  }
+
+  /** Add a message to the conversation (appends to active branch) */
   addMessage(msg: ChatMessage): void {
     this.messages.push(msg);
     this.cachedTokenEstimate = null;
   }
 
-  /** Get all messages */
+  /** Get all messages for the active branch */
   getMessages(): ChatMessage[] {
     return this.messages;
   }
 
-  /** Get a copy of all messages */
+  /** Get a copy of all messages for the active branch */
   getMessagesCopy(): ChatMessage[] {
     return [...this.messages];
   }
 
-  /** Set all messages (e.g., after compaction) */
+  /** Set all messages (e.g., after compaction) -- replaces active branch messages */
   setMessages(messages: ChatMessage[]): void {
+    const activeNode = this.tree.getNode(this.tree.getActiveNodeId());
+    if (activeNode) {
+      activeNode.messages = messages;
+    }
     this.messages = messages;
     this.cachedTokenEstimate = null;
   }
 
-  /** Get the last message */
+  /** Get the last message in the active branch */
   getLastMessage(): ChatMessage | undefined {
     return this.messages[this.messages.length - 1];
   }
 
-  /** Clear all messages */
+  /** Clear all messages -- creates a fresh tree */
   clear(): void {
-    this.messages = [];
+    this.tree = new SessionTree();
+    this.messages = this.getActiveNodeMessages();
     this.cachedTokenEstimate = null;
   }
 
-  /** Get the number of messages */
+  /** Get the number of messages in the active branch */
   get messageCount(): number {
     return this.messages.length;
   }
@@ -77,7 +105,7 @@ export class ConversationState {
     this.cachedTokenEstimate = null;
   }
 
-  /** Find the last user message */
+  /** Find the last user message in the active branch */
   findLastUserMessage(): ChatMessage | undefined {
     for (let i = this.messages.length - 1; i >= 0; i--) {
       if (this.messages[i].role === 'user') return this.messages[i];
@@ -121,7 +149,40 @@ export class ConversationState {
       }
     }
 
+    // Update the tree node's messages to match
+    const activeNode = this.tree.getNode(this.tree.getActiveNodeId());
+    if (activeNode) {
+      activeNode.messages = this.messages;
+    }
+
     this.cachedTokenEstimate = null;
     return excess;
+  }
+
+  // --- Branching methods (new) ---
+
+  /** Create a new branch from the active node. Returns the new branch node ID. */
+  branch(): string {
+    this.cachedTokenEstimate = null;
+    const nodeId = this.tree.branch();
+    this.syncMessagesRef();
+    return nodeId;
+  }
+
+  /** Switch to a different branch by node ID. */
+  checkout(nodeId: string): void {
+    this.cachedTokenEstimate = null;
+    this.tree.checkout(nodeId);
+    this.syncMessagesRef();
+  }
+
+  /** Get the full tree structure. */
+  getTree(): SessionNode[] {
+    return this.tree.getTree();
+  }
+
+  /** Get the underlying SessionTree (for advanced operations). */
+  getSessionTree(): SessionTree {
+    return this.tree;
   }
 }

@@ -25,6 +25,7 @@ import { UserProfileService } from './services/userProfile';
 import type { UserLevel } from './services/userProfile';
 import { setLogLevel } from './services/logger';
 import type { LogLevel } from './services/logger';
+import { handleBranch, handleCheckout, handleHistory } from './commands/branch';
 
 // Apply LOG_LEVEL env var at startup
 if (process.env.LOG_LEVEL) {
@@ -468,6 +469,9 @@ async function handleCommand(
       console.log(chalk.gray('  /tools         - List available tools'));
       console.log(chalk.gray('  /level [level] - Show/set user level (beginner|intermediate|advanced)'));
       console.log(chalk.gray('  /status        - Show current status'));
+      console.log(chalk.gray('  /branch [name] - List or create branches'));
+      console.log(chalk.gray('  /checkout <id> - Switch to a branch'));
+      console.log(chalk.gray('  /history       - Show conversation tree'));
       console.log(chalk.gray('  /exit          - Exit\n'));
       break;
 
@@ -513,6 +517,22 @@ async function handleCommand(
       console.log(chalk.yellow('\n👋 Goodbye!'));
       rl.close();
       process.exit(0);
+      break;
+
+    case '/branch':
+      handleBranch(queryEngine, parts[1]);
+      break;
+
+    case '/checkout':
+      if (parts[1]) {
+        handleCheckout(queryEngine, parts[1]);
+      } else {
+        console.log(chalk.yellow('Usage: /checkout <branch-id>\n'));
+      }
+      break;
+
+    case '/history':
+      handleHistory(queryEngine);
       break;
 
     case '/level': {

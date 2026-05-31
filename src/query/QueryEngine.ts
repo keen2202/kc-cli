@@ -83,6 +83,11 @@ export class QueryEngine {
   // Cache prefix service for byte-stable prompt prefixes
   private cachePrefix: CachePrefixService;
 
+  // Dual-queue steering system
+  private steerQueue: ChatMessage[] = [];
+  private followUpQueue: ChatMessage[] = [];
+  private steeringEnabled = true;
+
   constructor(config: QueryEngineConfig, tools: ToolDefinition[]) {
     this.config = config;
     this.abortController = new AbortController();
@@ -176,6 +181,16 @@ export class QueryEngine {
             if (hasTools) {
               this.stateMachine.transitionTo('executing');
             } else {
+              // Turn complete — drain followUpQueue before finishing
+              const followUps = this.drainFollowUpQueue();
+              if (followUps.length > 0) {
+                for (const msg of followUps) {
+                  this.conversation.addMessage(msg);
+                }
+                // Reset state machine to continue processing
+                this.stateMachine.forceTransitionTo('streaming');
+                break;
+              }
               this.stateMachine.transitionTo('completed');
               yield this.createCompleteEvent();
             }
@@ -184,6 +199,14 @@ export class QueryEngine {
           case 'executing':
             yield* this.executingPhase();
             if (!this.stateMachine.isTerminal()) {
+              // Drain steerQueue after execution before going back to streaming
+              const steered = this.drainSteerQueue();
+              if (steered.length > 0) {
+                for (const msg of steered) {
+                  this.conversation.addMessage(msg);
+                  yield { type: 'agent:steered', message: msg, timestamp: Date.now() };
+                }
+              }
               this.stateMachine.transitionTo('streaming');
             }
             break;
@@ -497,10 +520,77 @@ export class QueryEngine {
     this.compaction.reset();
     this.errorHandler.reset();
     this._aborted = false;
+    this.steerQueue = [];
+    this.followUpQueue = [];
     this.abortController = new AbortController();
     if (this.stateMachine.currentState !== 'idle') {
       this.stateMachine.forceTransitionTo('idle');
     }
+  }
+
+  // ── Dual-Queue Steering System ──
+
+  /**
+   * Enqueue a steer message. Steer messages are injected into the conversation
+   * between tool execution phases, redirecting the agent mid-turn.
+   * Thread-safe: messages are queued and drained at controlled points in the loop.
+   */
+  steer(message: string): void {
+    this.steerQueue.push({
+      role: 'user',
+      content: message,
+      timestamp: Date.now(),
+    } as ChatMessage);
+  }
+
+  /**
+   * Enqueue a follow-up message. Follow-up messages are injected after the
+   * current turn completes (no more tool calls), starting a new implicit turn.
+   * Thread-safe: messages are queued and drained at controlled points in the loop.
+   */
+  followUp(message: string): void {
+    this.followUpQueue.push({
+      role: 'user',
+      content: message,
+      timestamp: Date.now(),
+    } as ChatMessage);
+  }
+
+  /** Whether the steering system is enabled */
+  isSteeringEnabled(): boolean {
+    return this.steeringEnabled;
+  }
+
+  /** Get the current steer queue length */
+  getSteerQueueLength(): number {
+    return this.steerQueue.length;
+  }
+
+  /** Get the current followUp queue length */
+  getFollowUpQueueLength(): number {
+    return this.followUpQueue.length;
+  }
+
+  /**
+   * Drain all messages from the steer queue (atomically).
+   * Returns the drained messages and resets the queue.
+   */
+  private drainSteerQueue(): ChatMessage[] {
+    if (this.steerQueue.length === 0) return [];
+    const drained = this.steerQueue;
+    this.steerQueue = [];
+    return drained;
+  }
+
+  /**
+   * Drain all messages from the followUp queue (atomically).
+   * Returns the drained messages and resets the queue.
+   */
+  private drainFollowUpQueue(): ChatMessage[] {
+    if (this.followUpQueue.length === 0) return [];
+    const drained = this.followUpQueue;
+    this.followUpQueue = [];
+    return drained;
   }
 
   /** Get the current message count */
@@ -556,5 +646,25 @@ export class QueryEngine {
   /** Trim messages (backward compat, delegates to conversation state) */
   trimMessages(): void {
     this.conversation.trimIfNeeded();
+  }
+
+  /** Create a new conversation branch. Returns the new branch node ID. */
+  branch(): string {
+    return this.conversation.branch();
+  }
+
+  /** Switch to a different branch by node ID. */
+  checkout(nodeId: string): void {
+    this.conversation.checkout(nodeId);
+  }
+
+  /** Get the session tree structure for visualization. */
+  getTree() {
+    return this.conversation.getTree();
+  }
+
+  /** Get the underlying SessionTree instance (for branch label management). */
+  getSessionTree() {
+    return this.conversation.getSessionTree();
   }
 }
