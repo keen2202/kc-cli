@@ -6,6 +6,7 @@
  */
 
 import chalk from 'chalk';
+import type { Theme } from '../theme';
 
 // Pre-compiled regex for ANSI escape stripping (reused across render calls)
 const ANSI_STRIP_REGEX = /\x1B\[[0-9;]*m/g;
@@ -92,6 +93,48 @@ export function getKnownProviders(): ProviderInfo[] {
       ],
     },
     {
+      id: 'mimo',
+      label: 'MiMo (小米)',
+      description: 'Xiaomi AI models',
+      models: [
+        { id: 'mimo-v2.5-pro', name: 'MiMo V2.5 Pro', description: 'Flagship reasoning model', contextWindow: 1048576, maxOutput: 8192 },
+        { id: 'mimo-v2.5', name: 'MiMo V2.5', description: 'General purpose', contextWindow: 1048576, maxOutput: 8192 },
+        { id: 'mimo-v2-flash', name: 'MiMo V2 Flash', description: 'Fast and efficient', contextWindow: 262144, maxOutput: 4096 },
+      ],
+    },
+    {
+      id: 'kimi',
+      label: 'Kimi (月之暗面)',
+      description: 'Moonshot AI — agentic MoE models',
+      models: [
+        { id: 'kimi-k2.6', name: 'Kimi K2.6', description: 'Latest flagship, 262K ctx', contextWindow: 262144, maxOutput: 8192 },
+        { id: 'kimi-k2.5', name: 'Kimi K2.5', description: 'Strong reasoning', contextWindow: 262144, maxOutput: 8192 },
+        { id: 'kimi-k2', name: 'Kimi K2', description: '1T MoE, agentic', contextWindow: 131072, maxOutput: 8192 },
+        { id: 'kimi-k2-thinking', name: 'Kimi K2 Thinking', description: 'Extended thinking mode', contextWindow: 262144, maxOutput: 8192 },
+      ],
+    },
+    {
+      id: 'step',
+      label: 'Step (阶跃星辰)',
+      description: 'StepFun AI models',
+      models: [
+        { id: 'step-3.7-flash', name: 'Step 3.7 Flash', description: 'Latest fast model, 256K ctx', contextWindow: 256000, maxOutput: 8192 },
+        { id: 'step-3.5-flash', name: 'Step 3.5 Flash', description: '262K context', contextWindow: 262144, maxOutput: 8192 },
+        { id: 'step-2-16k', name: 'Step 2 16K', description: 'Previous gen', contextWindow: 16384, maxOutput: 4096 },
+      ],
+    },
+    {
+      id: 'gemini',
+      label: 'Gemini (Google)',
+      description: 'Google AI models, 1M+ context',
+      models: [
+        { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'Most capable, thinking model', contextWindow: 1048576, maxOutput: 65536 },
+        { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Fast and capable', contextWindow: 1048576, maxOutput: 65536 },
+        { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', description: 'Cost-efficient', contextWindow: 1048576, maxOutput: 65536 },
+        { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', description: 'Previous gen', contextWindow: 1048576, maxOutput: 8192 },
+      ],
+    },
+    {
       id: 'openai-compatible',
       label: 'OpenAI Compatible',
       description: 'Any OpenAI-compatible endpoint',
@@ -142,8 +185,9 @@ export function createModelSelectorState(
  */
 export function renderModelSelector(
   state: ModelSelectorState,
-  options: { maxWidth?: number; maxHeight?: number } = {}
+  options: { maxWidth?: number; maxHeight?: number; theme?: Theme } = {}
 ): string {
+  const tokens = options.theme?.resolve();
   const maxWidth = options.maxWidth ?? 60;
   const maxHeight = options.maxHeight ?? 12;
   const lines: string[] = [];
@@ -152,24 +196,26 @@ export function renderModelSelector(
   const currentModel = currentProvider?.models[state.modelIndex];
 
   // Header
+  const borderColor = tokens ? tokens['overlay.border'] : chalk.gray;
+  const headerColor = tokens ? tokens['overlay.selected'] : chalk.cyan.bold;
   lines.push(
-    chalk.cyan.bold('┌─ ') +
-    chalk.cyan.bold('Select Model') +
-    chalk.gray(' ─' + '─'.repeat(Math.max(0, maxWidth - 16)) + '┐')
+    headerColor('┌─ ') +
+    headerColor('Select Model') +
+    borderColor(' ─' + '─'.repeat(Math.max(0, maxWidth - 16)) + '┐')
   );
 
   // Current selection info
   lines.push(
-    chalk.gray('│ ') +
+    borderColor('│ ') +
     chalk.dim('Provider: ') +
     chalk.white(currentProvider?.label ?? '—') +
     chalk.gray('  →  ') +
     chalk.dim('Model: ') +
     chalk.white(currentModel?.name ?? '—') +
     ' '.repeat(Math.max(0, maxWidth - (currentProvider?.label.length ?? 2) - (currentModel?.name.length ?? 2) - 30)) +
-    chalk.gray('│')
+    borderColor('│')
   );
-  lines.push(chalk.gray('├' + '─'.repeat(maxWidth) + '┤'));
+  lines.push(borderColor('├' + '─'.repeat(maxWidth) + '┤'));
 
   // Provider list
   for (let i = 0; i < Math.min(state.providers.length, maxHeight - 4); i++) {
@@ -177,7 +223,7 @@ export function renderModelSelector(
     if (!provider) continue;
     const isSelected = i === state.providerIndex;
 
-    const marker = isSelected ? chalk.cyan.bold('❯ ') : '  ';
+    const marker = isSelected ? (tokens ? tokens['overlay.selected']('❯ ') : chalk.cyan.bold('❯ ')) : '  ';
     const label = isSelected ? chalk.white.bold(provider.label) : chalk.dim(provider.label);
     const desc = isSelected ? chalk.gray(` — ${provider.description}`) : '';
 
@@ -185,7 +231,7 @@ export function renderModelSelector(
     const plainRow = row.replace(ANSI_STRIP_REGEX, '');
     const padding = Math.max(0, maxWidth - plainRow.length + 1);
 
-    lines.push(chalk.gray('│') + ' ' + row + ' '.repeat(padding) + chalk.gray('│'));
+    lines.push(borderColor('│') + ' ' + row + ' '.repeat(padding) + borderColor('│'));
 
     // Show models for selected provider
     if (isSelected && provider.models.length > 0) {
@@ -193,8 +239,8 @@ export function renderModelSelector(
         const model = provider.models[j];
         if (!model) continue;
         const isModelSelected = j === (i === state.providerIndex ? state.modelIndex : 0);
-        const mMarker = isModelSelected ? chalk.cyan('  › ') : chalk.dim('    ');
-        const mLabel = isModelSelected ? chalk.green(model.name) : chalk.dim(model.name);
+        const mMarker = isModelSelected ? (tokens ? tokens['overlay.selected']('  › ') : chalk.cyan('  › ')) : chalk.dim('    ');
+        const mLabel = isModelSelected ? (tokens ? tokens['tool.success'](model.name) : chalk.green(model.name)) : chalk.dim(model.name);
         const mDesc = chalk.gray.dim(` ${model.description}`);
         const mContext = chalk.gray.dim(` [${model.contextWindow / 1000}K ctx]`);
 
@@ -202,7 +248,7 @@ export function renderModelSelector(
         const mPlain = mRow.replace(ANSI_STRIP_REGEX, '');
         const mPad = Math.max(0, maxWidth - mPlain.length - 1);
 
-        lines.push(chalk.gray('│') + ' ' + mRow + ' '.repeat(mPad) + chalk.gray('│'));
+        lines.push(borderColor('│') + ' ' + mRow + ' '.repeat(mPad) + borderColor('│'));
       }
     }
   }
@@ -210,18 +256,18 @@ export function renderModelSelector(
   // Fill empty rows
   const contentLines = lines.length;
   for (let i = contentLines; i < maxHeight + 1; i++) {
-    lines.push(chalk.gray('│') + ' '.repeat(maxWidth + 1) + chalk.gray('│'));
+    lines.push(borderColor('│') + ' '.repeat(maxWidth + 1) + borderColor('│'));
   }
 
   // Footer
-  lines.push(chalk.gray('├' + '─'.repeat(maxWidth) + '┤'));
+  lines.push(borderColor('├' + '─'.repeat(maxWidth) + '┤'));
   lines.push(
-    chalk.gray('│ ') +
+    borderColor('│ ') +
     chalk.dim('↑↓ Select  Enter Confirm  Esc Back  ') +
     ' '.repeat(Math.max(0, maxWidth - 40)) +
-    chalk.gray('│')
+    borderColor('│')
   );
-  lines.push(chalk.gray('└' + '─'.repeat(maxWidth) + '┘'));
+  lines.push(borderColor('└' + '─'.repeat(maxWidth) + '┘'));
 
   return lines.join('\n');
 }

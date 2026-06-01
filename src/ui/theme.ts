@@ -29,14 +29,81 @@ export interface ThemeDiff {
   context: string;
 }
 
+/**
+ * Semantic theme tokens for UI components.
+ * Each token maps to a chalk color function.
+ */
+export interface ThemeTokens {
+  'header.brand': typeof chalk;
+  'header.model': typeof chalk;
+  'chat.user': typeof chalk;
+  'chat.assistant': typeof chalk;
+  'chat.system': typeof chalk;
+  'chat.timestamp': typeof chalk;
+  'tool.running': typeof chalk;
+  'tool.success': typeof chalk;
+  'tool.failed': typeof chalk;
+  'tool.name': typeof chalk;
+  'sidebar.background': typeof chalk;
+  'sidebar.tab.active': typeof chalk;
+  'sidebar.tab.inactive': typeof chalk;
+  'status.model': typeof chalk;
+  'status.tokens': typeof chalk;
+  'status.duration': typeof chalk;
+  'input.prompt': typeof chalk;
+  'input.text': typeof chalk;
+  'input.steer': typeof chalk;
+  'diff.added': typeof chalk;
+  'diff.removed': typeof chalk;
+  'diff.context': typeof chalk;
+  'overlay.background': typeof chalk;
+  'overlay.border': typeof chalk;
+  'overlay.selected': typeof chalk;
+  'error.text': typeof chalk;
+  'warning.text': typeof chalk;
+}
+
 export interface Theme {
   name: string;
   colors: ThemeColors;
   syntax: ThemeSyntax;
   diff: ThemeDiff;
+  resolve(): ThemeTokens;
 }
 
 // Built-in themes
+
+function buildResolver(t: Theme): () => ThemeTokens {
+  return () => ({
+    'header.brand': chalk.hex(t.colors.primary).bold,
+    'header.model': chalk.hex(t.colors.muted),
+    'chat.user': chalk.hex(t.colors.primary).bold,
+    'chat.assistant': chalk.hex(t.colors.success),
+    'chat.system': chalk.hex(t.colors.muted).dim,
+    'chat.timestamp': chalk.hex(t.colors.muted).dim,
+    'tool.running': chalk.hex(t.colors.warning),
+    'tool.success': chalk.hex(t.colors.success),
+    'tool.failed': chalk.hex(t.colors.error),
+    'tool.name': chalk.hex(t.colors.primary).bold,
+    'sidebar.background': chalk.hex(t.colors.border),
+    'sidebar.tab.active': chalk.hex(t.colors.primary).bold,
+    'sidebar.tab.inactive': chalk.hex(t.colors.muted).dim,
+    'status.model': chalk.hex(t.colors.primary),
+    'status.tokens': chalk.hex(t.colors.muted),
+    'status.duration': chalk.hex(t.colors.muted),
+    'input.prompt': chalk.hex(t.colors.primary).bold,
+    'input.text': chalk.white,
+    'input.steer': chalk.hex(t.colors.warning).bold,
+    'diff.added': chalk.hex(t.colors.success),
+    'diff.removed': chalk.hex(t.colors.error),
+    'diff.context': chalk.hex(t.colors.muted),
+    'overlay.background': chalk.hex(t.colors.background),
+    'overlay.border': chalk.hex(t.colors.border),
+    'overlay.selected': chalk.hex(t.colors.highlight).bold,
+    'error.text': chalk.hex(t.colors.error),
+    'warning.text': chalk.hex(t.colors.warning),
+  });
+}
 
 const darkTheme: Theme = {
   name: 'dark',
@@ -63,6 +130,7 @@ const darkTheme: Theme = {
     removed: '#e06c75',
     context: '#5c6370',
   },
+  resolve: null as unknown as () => ThemeTokens,
 };
 
 const lightTheme: Theme = {
@@ -90,6 +158,7 @@ const lightTheme: Theme = {
     removed: '#dc2626',
     context: '#9ca3af',
   },
+  resolve: null as unknown as () => ThemeTokens,
 };
 
 const solarizedDarkTheme: Theme = {
@@ -117,6 +186,7 @@ const solarizedDarkTheme: Theme = {
     removed: '#dc322f',
     context: '#586e75',
   },
+  resolve: null as unknown as () => ThemeTokens,
 };
 
 const monokaiTheme: Theme = {
@@ -144,6 +214,7 @@ const monokaiTheme: Theme = {
     removed: '#f92672',
     context: '#75715e',
   },
+  resolve: null as unknown as () => ThemeTokens,
 };
 
 const draculaTheme: Theme = {
@@ -171,7 +242,15 @@ const draculaTheme: Theme = {
     removed: '#ff5555',
     context: '#6272a4',
   },
+  resolve: null as unknown as () => ThemeTokens,
 };
+
+// Patch resolve() onto each theme (deferred to avoid circular init)
+darkTheme.resolve = buildResolver(darkTheme);
+lightTheme.resolve = buildResolver(lightTheme);
+solarizedDarkTheme.resolve = buildResolver(solarizedDarkTheme);
+monokaiTheme.resolve = buildResolver(monokaiTheme);
+draculaTheme.resolve = buildResolver(draculaTheme);
 
 /**
  * All built-in themes.
@@ -194,14 +273,14 @@ export function getTheme(name: string): Theme {
 /**
  * Resolve a hex color string to a chalk function.
  */
-export function resolveColor(hex: string): chalk.Chalk {
+export function resolveColor(hex: string): typeof chalk {
   return chalk.hex(hex);
 }
 
 /**
  * Get a themed chalk color by path (e.g., 'colors.primary').
  */
-export function themeColor(theme: Theme, path: string): chalk.Chalk {
+export function themeColor(theme: Theme, path: string): typeof chalk {
   const parts = path.split('.');
   let value: any = theme;
 

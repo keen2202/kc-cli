@@ -174,8 +174,8 @@ export class ParameterTuningService {
       // Low recovery rate (<50%) → increase retries
       if (recoveryRate > 0.8 && currentRetries > 1) {
         this.parameters.maxRetries[service] = Math.max(1, currentRetries - 1);
-      } else if (recoveryRate < 0.5 && currentRetries < 5) {
-        this.parameters.maxRetries[service] = Math.min(5, currentRetries + 1);
+      } else if (recoveryRate < 0.5 && currentRetries < 10) {
+        this.parameters.maxRetries[service] = Math.min(10, currentRetries + 1);
       }
     }
   }

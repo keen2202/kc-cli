@@ -106,7 +106,7 @@ export class QueryEngine {
     });
     this.compaction = new CompactionHandler();
     this.memory = new MemoryHandler(config.memory || {});
-    this.errorHandler = new ErrorHandler(3);
+    this.errorHandler = new ErrorHandler();
 
     // Initialize state store
     this.stateStore = new ObservableStateStore(createInitialState({
@@ -158,6 +158,9 @@ export class QueryEngine {
 
     // State machine loop
     try {
+      let turnCount = 0;
+      const maxTurns = this.config.maxTurns;
+
       while (!this.stateMachine.isTerminal()) {
         const currentState = this.stateMachine.currentState;
 
@@ -173,11 +176,16 @@ export class QueryEngine {
 
           case 'streaming':
             yield* this.streamingPhase();
+            turnCount++;
+            if (turnCount >= maxTurns) {
+              logger.query.warn(`[QueryEngine] Max turns (${maxTurns}) reached, forcing completion`);
+              yield this.createTextDeltaEvent(`\n[Reached maximum turn limit (${maxTurns}) — stopping]\n`);
+            }
             this.stateMachine.transitionTo('deciding');
             break;
 
           case 'deciding':
-            const hasTools = await this.decidingPhase();
+            const hasTools = turnCount >= maxTurns ? false : await this.decidingPhase();
             if (hasTools) {
               this.stateMachine.transitionTo('executing');
             } else {
@@ -258,7 +266,7 @@ export class QueryEngine {
    * Uses MemoryHandler for context loading.
    */
   private async *streamingPhase(): AsyncGenerator<StreamEvent | AgentEvent> {
-    const maxRetries = 3;
+    const maxRetries = 10;
 
     // Cache tool definitions outside retry loop
     const toolsDef = this.toolExecutor.getRegisteredTools().map(toolName => {

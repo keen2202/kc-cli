@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import type { Theme } from '../theme';
 
 /**
  * Sidebar section types.
@@ -54,16 +55,13 @@ export function createSidebarData(): SidebarData {
 
 /**
  * Render the sidebar panel.
- *
- * @param data Sidebar data
- * @param width Column width (default: 30)
- * @returns Rendered sidebar as a string
  */
-export function renderSidebar(data: SidebarData, width: number = 30): string {
+export function renderSidebar(data: SidebarData, width: number = 30, theme?: Theme): string {
   if (!data.visible) {
     return '';
   }
 
+  const tokens = theme?.resolve();
   const lines: string[] = [];
   const divider = chalk.gray.dim('│');
 
@@ -79,9 +77,9 @@ export function renderSidebar(data: SidebarData, width: number = 30): string {
   const tabBar = sections.map(s => {
     const isActive = s.key === data.activeSection;
     if (isActive) {
-      return chalk.bold.cyan(`${s.icon} ${s.label}`);
+      return tokens ? tokens['sidebar.tab.active'](`${s.icon} ${s.label}`) : chalk.bold.cyan(`${s.icon} ${s.label}`);
     }
-    return chalk.gray.dim(`${s.icon} ${s.label}`);
+    return tokens ? tokens['sidebar.tab.inactive'](`${s.icon} ${s.label}`) : chalk.gray.dim(`${s.icon} ${s.label}`);
   }).join(chalk.gray.dim(' | '));
 
   lines.push(chalk.gray.dim('┌' + '─'.repeat(width - 2) + '┐'));
@@ -91,16 +89,16 @@ export function renderSidebar(data: SidebarData, width: number = 30): string {
   // Render active section content
   switch (data.activeSection) {
     case 'tools':
-      lines.push(...renderToolsSection(data.tools, width));
+      lines.push(...renderToolsSection(data.tools, width, theme));
       break;
     case 'files':
-      lines.push(...renderFilesSection(data.files, width));
+      lines.push(...renderFilesSection(data.files, width, theme));
       break;
     case 'tasks':
-      lines.push(...renderTasksSection(data.tasks, width));
+      lines.push(...renderTasksSection(data.tasks, width, theme));
       break;
     case 'memory':
-      lines.push(...renderMemorySection(data.memories, width));
+      lines.push(...renderMemorySection(data.memories, width, theme));
       break;
   }
 
@@ -115,7 +113,8 @@ export function renderSidebar(data: SidebarData, width: number = 30): string {
   return lines.join('\n');
 }
 
-function renderToolsSection(tools: SidebarTool[], width: number): string[] {
+function renderToolsSection(tools: SidebarTool[], width: number, theme?: Theme): string[] {
+  const tokens = theme?.resolve();
   const lines: string[] = [];
   const divider = chalk.gray.dim('│');
 
@@ -126,8 +125,8 @@ function renderToolsSection(tools: SidebarTool[], width: number): string[] {
   }
 
   for (const tool of tools.slice(-8)) {
-    const statusIcon = getStatusIcon(tool.status);
-    const statusColor = getStatusColor(tool.status);
+    const statusIcon = getStatusIcon(tool.status, tokens);
+    const statusColor = getStatusColor(tool.status, tokens);
     const name = tool.name.padEnd(Math.min(18, width - 12));
     const duration = tool.duration ? ` ${chalk.gray.dim(tool.duration)}` : '';
 
@@ -137,7 +136,8 @@ function renderToolsSection(tools: SidebarTool[], width: number): string[] {
   return lines;
 }
 
-function renderFilesSection(files: SidebarFile[], width: number): string[] {
+function renderFilesSection(files: SidebarFile[], width: number, theme?: Theme): string[] {
+  const tokens = theme?.resolve();
   const lines: string[] = [];
   const divider = chalk.gray.dim('│');
 
@@ -148,7 +148,11 @@ function renderFilesSection(files: SidebarFile[], width: number): string[] {
   }
 
   for (const file of files.slice(-10)) {
-    const icon = file.hasError ? chalk.red('✗') : file.hasWarning ? chalk.yellow('⚠') : chalk.gray('·');
+    const icon = file.hasError
+      ? (tokens ? tokens['error.text']('✗') : chalk.red('✗'))
+      : file.hasWarning
+        ? (tokens ? tokens['warning.text']('⚠') : chalk.yellow('⚠'))
+        : chalk.gray('·');
     const pathStr = chalk.dim(file.path.length > width - 8 ? '…' + file.path.slice(-(width - 9)) : file.path);
 
     lines.push(`${divider} ${icon} ${pathStr}${' '.repeat(Math.max(0, width - file.path.length - 6))}${divider}`);
@@ -157,7 +161,8 @@ function renderFilesSection(files: SidebarFile[], width: number): string[] {
   return lines;
 }
 
-function renderTasksSection(tasks: SidebarTask[], width: number): string[] {
+function renderTasksSection(tasks: SidebarTask[], width: number, theme?: Theme): string[] {
+  const tokens = theme?.resolve();
   const lines: string[] = [];
   const divider = chalk.gray.dim('│');
 
@@ -168,7 +173,7 @@ function renderTasksSection(tasks: SidebarTask[], width: number): string[] {
   }
 
   for (const task of tasks.slice(-8)) {
-    const icon = getTaskIcon(task.status);
+    const icon = getTaskIcon(task.status, tokens);
     const title = task.title.length > width - 8
       ? task.title.slice(0, width - 9) + '…'
       : task.title;
@@ -179,7 +184,8 @@ function renderTasksSection(tasks: SidebarTask[], width: number): string[] {
   return lines;
 }
 
-function renderMemorySection(memories: Array<{ name: string; type: string }>, width: number): string[] {
+function renderMemorySection(memories: Array<{ name: string; type: string }>, width: number, theme?: Theme): string[] {
+  const tokens = theme?.resolve();
   const lines: string[] = [];
   const divider = chalk.gray.dim('│');
 
@@ -190,7 +196,7 @@ function renderMemorySection(memories: Array<{ name: string; type: string }>, wi
   }
 
   for (const mem of memories.slice(-8)) {
-    const typeIcon = getMemoryTypeIcon(mem.type);
+    const typeIcon = getMemoryTypeIcon(mem.type, tokens);
     const name = mem.name.length > width - 8
       ? mem.name.slice(0, width - 9) + '…'
       : mem.name;
@@ -201,34 +207,34 @@ function renderMemorySection(memories: Array<{ name: string; type: string }>, wi
   return lines;
 }
 
-function getStatusIcon(status: string): string {
+function getStatusIcon(status: string, tokens?: ReturnType<Theme['resolve']>): string {
   switch (status) {
-    case 'running': return chalk.blue('⟳');
-    case 'completed': return chalk.green('✓');
-    case 'failed': return chalk.red('✗');
+    case 'running': return tokens ? tokens['tool.running']('⟳') : chalk.blue('⟳');
+    case 'completed': return tokens ? tokens['tool.success']('✓') : chalk.green('✓');
+    case 'failed': return tokens ? tokens['tool.failed']('✗') : chalk.red('✗');
     default: return chalk.gray('·');
   }
 }
 
-function getStatusColor(status: string): (s: string) => string {
+function getStatusColor(status: string, tokens?: ReturnType<Theme['resolve']>): (s: string) => string {
   switch (status) {
-    case 'running': return chalk.blue;
-    case 'completed': return chalk.green;
-    case 'failed': return chalk.red;
+    case 'running': return tokens ? tokens['tool.running'] : chalk.blue;
+    case 'completed': return tokens ? tokens['tool.success'] : chalk.green;
+    case 'failed': return tokens ? tokens['tool.failed'] : chalk.red;
     default: return chalk.gray;
   }
 }
 
-function getTaskIcon(status: string): string {
+function getTaskIcon(status: string, tokens?: ReturnType<Theme['resolve']>): string {
   switch (status) {
-    case 'in_progress': return chalk.blue('⟳');
-    case 'completed': return chalk.green('✓');
-    case 'blocked': return chalk.yellow('⏸');
+    case 'in_progress': return tokens ? tokens['tool.running']('⟳') : chalk.blue('⟳');
+    case 'completed': return tokens ? tokens['tool.success']('✓') : chalk.green('✓');
+    case 'blocked': return tokens ? tokens['warning.text']('⏸') : chalk.yellow('⏸');
     default: return chalk.gray('·');
   }
 }
 
-function getMemoryTypeIcon(type: string): string {
+function getMemoryTypeIcon(type: string, tokens?: ReturnType<Theme['resolve']>): string {
   switch (type) {
     case 'user': return chalk.cyan('👤');
     case 'feedback': return chalk.yellow('💬');

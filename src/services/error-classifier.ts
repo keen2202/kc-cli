@@ -12,8 +12,10 @@ export interface ClassifiedError {
   context: string;
 }
 
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 10;
 const BASE_DELAY_MS = 1000;
+const RATE_LIMIT_BASE_DELAY_MS = 5000;
+const MAX_BACKOFF_MS = 60_000;
 
 // Pre-compiled regex patterns for error classification (single test instead of multiple includes())
 const RATE_LIMIT_REGEX = /429|rate.?limit/;
@@ -59,7 +61,7 @@ export function classifyApiError(error: Error): ClassifiedError {
 
     // 429: rate limited
     if (status === 429) {
-      return { error, errorClass: 'transient', retryable: true, retryAfterMs: retryAfter ?? 2000, context: 'rate_limit' };
+      return { error, errorClass: 'transient', retryable: true, retryAfterMs: retryAfter ?? RATE_LIMIT_BASE_DELAY_MS, context: 'rate_limit' };
     }
 
     // 500-509: server errors (transient)
@@ -72,8 +74,17 @@ export function classifyApiError(error: Error): ClassifiedError {
       return { error, errorClass: 'permanent', retryable: false, context: 'auth' };
     }
 
-    // 400, 404, 422: client errors (permanent)
-    if (status >= 400 && status < 500) {
+    // 400: check for transient malformed request errors (e.g., mimo "missing function name")
+    if (status === 400) {
+      const body = error.message.toLowerCase();
+      if (body.includes('missing') && body.includes('function name')) {
+        return { error, errorClass: 'transient', retryable: true, retryAfterMs: 2000, context: 'malformed_tool_call' };
+      }
+      return { error, errorClass: 'permanent', retryable: false, context: 'bad_request' };
+    }
+
+    // 404, 422: client errors (permanent)
+    if (status >= 401 && status < 500) {
       return { error, errorClass: 'permanent', retryable: false, context: 'bad_request' };
     }
   }
@@ -83,7 +94,7 @@ export function classifyApiError(error: Error): ClassifiedError {
 
   // Transient: rate limit
   if (RATE_LIMIT_REGEX.test(message)) {
-    return { error, errorClass: 'transient', retryable: true, retryAfterMs: 2000, context: 'rate_limit' };
+    return { error, errorClass: 'transient', retryable: true, retryAfterMs: RATE_LIMIT_BASE_DELAY_MS, context: 'rate_limit' };
   }
 
   // Transient: server error
@@ -109,6 +120,11 @@ export function classifyApiError(error: Error): ClassifiedError {
   // Permanent: auth errors
   if (AUTH_ERROR_REGEX.test(message)) {
     return { error, errorClass: 'permanent', retryable: false, context: 'auth' };
+  }
+
+  // Transient: malformed tool call (mimo API quirk - model sometimes sends empty function name)
+  if (message.includes('missing') && message.includes('function name')) {
+    return { error, errorClass: 'transient', retryable: true, retryAfterMs: 2000, context: 'malformed_tool_call' };
   }
 
   // Permanent: bad request
@@ -143,10 +159,23 @@ export function classifyToolError(error: Error, toolName: string): ClassifiedErr
 }
 
 export function getRetryDelay(attemptNumber: number, baseMs: number = BASE_DELAY_MS): number {
-  // Exponential backoff with jitter: 1s, 2s, 4s
-  const delay = baseMs * Math.pow(2, attemptNumber);
+  // Exponential backoff with jitter, capped at MAX_BACKOFF_MS
+  const delay = Math.min(baseMs * Math.pow(2, attemptNumber), MAX_BACKOFF_MS);
   const jitter = Math.random() * 0.3 * delay;
   return Math.floor(delay + jitter);
+}
+
+/**
+ * Get retry delay specifically for rate limit errors.
+ * Uses higher base delay and longer cap to avoid hammering the API.
+ */
+export function getRateLimitRetryDelay(attemptNumber: number, retryAfterMs?: number): number {
+  if (retryAfterMs !== undefined) {
+    // Respect Retry-After header with a small jitter
+    const jitter = Math.random() * 0.1 * retryAfterMs;
+    return Math.floor(retryAfterMs + jitter);
+  }
+  return getRetryDelay(attemptNumber, RATE_LIMIT_BASE_DELAY_MS);
 }
 
 export class RetryState {

@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import type { Theme } from '../theme';
 
 export interface InputState {
   text: string;
@@ -8,10 +9,11 @@ export interface InputState {
   steerMode?: boolean;
 }
 
-export function renderInputBox(state: InputState, prompt: string = 'kc>'): string {
+export function renderInputBox(state: InputState, prompt: string = 'kc>', theme?: Theme): string {
+  const tokens = theme?.resolve();
   const prefix = state.steerMode
-    ? chalk.yellow.bold('steer> ')
-    : chalk.cyan.bold(`${prompt} `);
+    ? (tokens ? tokens['input.steer']('steer> ') : chalk.yellow.bold('steer> '))
+    : (tokens ? tokens['input.prompt'](`${prompt} `) : chalk.cyan.bold(`${prompt} `));
   return prefix + state.text + chalk.gray('█');
 }
 

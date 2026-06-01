@@ -24,8 +24,22 @@ import {
   modelSelectorGetSelected,
   type ModelSelectorState,
 } from './ModelSelector';
+import { parseKeypress } from '../keypress';
 import { VirtualScroller } from '../virtual-scroll';
 import { createThrottle, createDebounce } from '../renderer';
+import { getTheme, type Theme } from '../theme';
+import { UIEventBus } from '../event-bus';
+import { OverlayManager } from '../overlay-manager';
+import { renderHeader } from './Header';
+import { renderChatViewport } from './ChatViewport';
+import { CommandPaletteOverlay } from '../overlays/CommandPaletteOverlay';
+import { ModelSelectorOverlay } from '../overlays/ModelSelectorOverlay';
+import { HelpPanelOverlay } from '../overlays/HelpPanelOverlay';
+import { createDefaultKeybindings, type KeybindingManager } from '../keybinding-manager';
+import { createLogMiddleware } from '../middleware/log';
+import { createBudgetMiddleware } from '../middleware/budget';
+import { createBridgeMiddleware } from '../middleware/bridge';
+import { getBreakpoint, type Density } from '../layout';
 import type { QueryEngine } from '../../query/QueryEngine';
 import type { AgentEvent } from '../../state/types';
 import type { StreamEvent } from '../../types/message';
@@ -47,6 +61,7 @@ interface AppOptions {
   provider?: string;
   model?: string;
   maxTurns?: number;
+  themeName?: string;
 }
 
 export class App {
@@ -66,6 +81,15 @@ export class App {
   private activeDiffIndex: number = 0;
   private paletteState: PaletteState;
   private modelSelectorState: ModelSelectorState;
+  private theme: Theme;
+  private eventBus: UIEventBus;
+  private overlayManager: OverlayManager;
+  private keybindingManager: KeybindingManager;
+  private logMiddleware: ReturnType<typeof createLogMiddleware>;
+  private budgetMiddleware: ReturnType<typeof createBudgetMiddleware>;
+  private bridgeMiddleware: ReturnType<typeof createBridgeMiddleware>;
+  private _currentAssistantMsg: ChatMessage | null = null;
+  private density: Density = 'normal';
 
   // ── Performance: virtual scrolling ──
   private virtualScroller: VirtualScroller;
@@ -92,6 +116,24 @@ export class App {
     this.sidebarData = createSidebarData();
     this.paletteState = createPaletteState();
     this.modelSelectorState = createModelSelectorState(this.provider, this.model);
+    this.theme = getTheme(options.themeName || 'dark');
+    this.eventBus = new UIEventBus();
+    this.overlayManager = new OverlayManager();
+    this.keybindingManager = createDefaultKeybindings();
+
+    // Wire event pipeline: middlewares run before UI listener
+    this.logMiddleware = createLogMiddleware(false);
+    this.budgetMiddleware = createBudgetMiddleware(1_000_000);
+    this.bridgeMiddleware = createBridgeMiddleware();
+
+    this.eventBus.use(this.logMiddleware);
+    this.eventBus.use(this.budgetMiddleware);
+    this.eventBus.use(this.bridgeMiddleware);
+
+    // UI subscribes as a listener on the event bus
+    this.eventBus.on('*', (event) => {
+      this.handleEvent(event, this._currentAssistantMsg);
+    });
 
     // ── Performance: virtual scrolling for long conversations ──
     const viewportHeight = (process.stdout.rows || 24) - 8; // Reserve header/footer
@@ -122,6 +164,18 @@ export class App {
   async start(): Promise<void> {
     this.clearScreen();
     this.renderImmediate();
+
+    // Terminal resize handling (debounced)
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    process.stdout.on('resize', () => {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        resizeTimer = null;
+        this.applyBreakpoint();
+        this.clearScreen();
+        this.renderImmediate();
+      }, 100);
+    });
 
     // Graceful shutdown
     const cleanup = () => {
@@ -262,37 +316,31 @@ export class App {
     const mainWidth = terminalWidth - this.sidebarWidth - 2;
 
     // ── Header ──
-    const header = chalk.cyan.bold('kc ') +
-      chalk.gray.dim(`v2.0`) +
-      chalk.gray(' · ') +
-      chalk.dim(`${this.provider}/${this.model}`) +
-      chalk.gray(' · ') +
-      chalk.gray.dim(`Session #${this.sessionStartTime.toString(36)}`);
-    console.log(chalk.gray('┌' + '─'.repeat(terminalWidth - 2) + '┐'));
-    console.log(`${chalk.gray('│')} ${header.padEnd(terminalWidth - 4)} ${chalk.gray('│')}`);
+    const tokens = this.theme.resolve();
+    const borderColor = tokens['overlay.border'];
+    const headerResult = renderHeader({
+      provider: this.provider,
+      model: this.model,
+      sessionId: this.sessionStartTime.toString(36),
+      width: terminalWidth,
+      theme: this.theme,
+    });
+    for (const line of headerResult.lines) {
+      console.log(line);
+    }
 
     // ── Sidebar + Main content ──
-    const sidebarLines = renderSidebar(this.sidebarData, this.sidebarWidth).split('\n');
+    const sidebarLines = renderSidebar(this.sidebarData, this.sidebarWidth, this.theme).split('\n');
 
     // Chat content (main area) - use virtual scrolling for long conversations
-    let chatLines: string[];
-    if (this.messages.length > VIRTUAL_SCROLL_THRESHOLD) {
-      // Virtual scrolling: only render visible messages
-      this.virtualScroller.setTotalItems(this.messages.length);
-      this.virtualScroller.scrollToBottom(); // Auto-scroll to latest
-      chatLines = this.virtualScroller.render(
-        this.messages,
-        (msg, _index) => renderChatView([msg]).split('\n'),
-        mainWidth,
-      );
-    } else if (this.messages.length > 0) {
-      chatLines = renderChatView(this.messages).split('\n');
-    } else {
-      chatLines = [
-        chalk.gray.dim('  Ready. What would you like me to do?'),
-        chalk.gray.dim('  Type /help for commands, /exit to quit.'),
-      ];
-    }
+    const chatLines = renderChatViewport({
+      messages: this.messages,
+      scroller: this.virtualScroller,
+      width: mainWidth,
+      height: (process.stdout.rows || 24) - 8,
+      theme: this.theme,
+      virtualScrollThreshold: VIRTUAL_SCROLL_THRESHOLD,
+    });
 
     // Interleave sidebar and main content
     const maxLines = Math.max(sidebarLines.length, chatLines.length);
@@ -313,30 +361,24 @@ export class App {
     }
 
     // ── Separator ──
-    console.log(chalk.gray('├' + '─'.repeat(this.sidebarWidth - 2) + '┤' + '─'.repeat(terminalWidth - this.sidebarWidth - 1)));
+    const sepBorder = tokens['overlay.border'];
+    console.log(sepBorder('├' + '─'.repeat(this.sidebarWidth - 2) + '┤' + '─'.repeat(terminalWidth - this.sidebarWidth - 1)));
 
-    // ── Palette / Model Selector Overlay ──
-    if (this.paletteState.open) {
-      const paletteWidth = Math.min(60, terminalWidth - 4);
+    // ── Overlay Layer ──
+    if (!this.overlayManager.isEmpty()) {
       console.log('');
-      console.log(renderCommandPalette(this.paletteState, { maxWidth: paletteWidth, maxHeight: 12 }));
-    }
-
-    if (this.modelSelectorState.active) {
-      const modelWidth = Math.min(70, terminalWidth - 4);
-      console.log('');
-      console.log(renderModelSelector(this.modelSelectorState, { maxWidth: modelWidth, maxHeight: 16 }));
+      console.log(this.overlayManager.render(terminalWidth, process.stdout.rows || 24, this.theme));
     }
 
     // ── Input + Status ──
-    console.log(renderInputBox(this.inputState));
+    console.log(renderInputBox(this.inputState, 'kc>', this.theme));
     const status = renderStatusBar({
       provider: this.provider,
       model: this.model,
       turnCount: this.turnCount,
       maxTurns: this.maxTurns,
       sessionStartTime: this.sessionStartTime,
-    });
+    }, this.theme);
     if (status) {
       console.log(status);
     }
@@ -361,26 +403,24 @@ export class App {
   }
 
   private prompt(): void {
+    if (!this.running) return;
+
     // Use palette-specific prompt when palette is open
-    const promptLabel = this.paletteState.open
-      ? chalk.yellow.bold('palette> ')
-      : this.modelSelectorState.active
-        ? chalk.magenta.bold('model> ')
-        : chalk.cyan.bold('kc> ');
+    const promptTokens = this.theme.resolve();
+    const hasOverlay = !this.overlayManager.isEmpty();
+    const promptLabel = hasOverlay
+      ? promptTokens['input.steer']('overlay> ')
+      : promptTokens['input.prompt']('kc> ');
 
     this.rl.question(promptLabel, async (input) => {
       if (!this.running) return;
 
-      // Handle palette-specific input
-      if (this.paletteState.open) {
-        this.handlePaletteInput(input.trim());
-        if (this.running) this.prompt();
-        return;
-      }
-
-      // Handle model selector input
-      if (this.modelSelectorState.active) {
-        this.handleModelSelectorInput(input.trim());
+      // Handle overlay-specific input
+      if (hasOverlay) {
+        // Overlays use raw mode, but if we get text input, route to palette
+        if (this.paletteState.open) {
+          this.handlePaletteInput(input.trim());
+        }
         if (this.running) this.prompt();
         return;
       }
@@ -429,21 +469,25 @@ export class App {
       toolCalls: [],
     };
     this.messages.push(assistantMsg);
+    this._currentAssistantMsg = assistantMsg;
 
     try {
       for await (const event of this.queryEngine.submitMessage(prompt)) {
-        this.handleEvent(event, assistantMsg);
+        this.eventBus.emit(event);
       }
     } catch (error) {
-      assistantMsg.content = chalk.red(`Error: ${getErrorMessage(error)}`);
+      const errTokens = this.theme.resolve();
+      assistantMsg.content = errTokens['error.text'](`Error: ${getErrorMessage(error)}`);
     }
 
+    this._currentAssistantMsg = null;
     this.turnCount++;
     this.clearScreen();
     this.renderImmediate();
   }
 
-  private handleEvent(event: AgentEvent | StreamEvent, assistantMsg: ChatMessage): void {
+  private handleEvent(event: AgentEvent | StreamEvent, assistantMsg: ChatMessage | null): void {
+    if (!assistantMsg) return;
     // Normalize agent:* prefixed events to canonical types
     const type = event.type.replace(/^agent:/, '');
     const ev = event as any; // discriminated union broken by prefix normalization — refactor event types to fix
@@ -512,6 +556,26 @@ export class App {
         this.renderImmediate();
         break;
       }
+
+      case 'error': {
+        const errorMsg = ev.error?.message || 'Unknown error';
+        const recoverable = ev.recoverable ?? false;
+        const errTokens = this.theme.resolve();
+        if (recoverable) {
+          assistantMsg.content = (assistantMsg.content || '') +
+            errTokens['warning.text'](`\n⚠ ${errorMsg} — retrying...`);
+        } else {
+          assistantMsg.content = (assistantMsg.content || '') +
+            errTokens['error.text'](`\n✗ ${errorMsg}`);
+        }
+        this.clearScreen();
+        this.renderImmediate();
+        break;
+      }
+
+      case 'turn_complete':
+        // Turn complete — no additional UI action needed (render happens after loop)
+        break;
     }
   }
 
@@ -530,6 +594,16 @@ export class App {
     const elapsed = ((end || Date.now()) - start) / 1000;
     if (elapsed < 1) return `${Math.round(elapsed * 1000)}ms`;
     return `${elapsed.toFixed(1)}s`;
+  }
+
+  /**
+   * Apply responsive breakpoint based on terminal width.
+   */
+  private applyBreakpoint(): void {
+    const cols = process.stdout.columns || 80;
+    const bp = getBreakpoint(cols);
+    this.density = bp.density;
+    this.sidebarData.visible = bp.sidebarVisible;
   }
 
   /**
@@ -560,7 +634,7 @@ export class App {
     const diffPreview = renderMultiFileDiff(
       unprocessed,
       this.activeDiffIndex,
-      { maxWidth }
+      { maxWidth, theme: this.theme }
     );
 
     // Append diff preview as a system message after the assistant message
@@ -670,11 +744,178 @@ export class App {
   }
 
   /**
-   * Open the model selector.
+   * Switch stdin to raw mode for arrow key navigation in overlays.
+   */
+  private _enableRawInput(): void {
+    this.rl.close();
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(true);
+    }
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', this._onRawKeypress);
+  }
+
+  /**
+   * Restore readline-based input after overlay closes.
+   */
+  private _restoreReadline(): void {
+    process.stdin.removeListener('data', this._onRawKeypress);
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(false);
+    }
+    this.rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+  }
+
+  /**
+   * Handle raw keypresses - dispatch to OverlayManager, then KeybindingManager.
+   */
+  private _onRawKeypress = (chunk: string): void => {
+    const event = parseKeypress(chunk);
+
+    // First, try overlay dispatch
+    if (this.overlayManager.handleKeypress(event)) {
+      if (this.overlayManager.isEmpty()) {
+        this._restoreReadline();
+        this.prompt();
+      }
+      this.clearScreen();
+      this.renderImmediate();
+      return;
+    }
+
+    // Then, try keybinding dispatch
+    const command = this.keybindingManager.resolve(event);
+    if (command) {
+      this.executeCommand(command);
+    }
+  };
+
+  /**
+   * Execute a keybinding command.
+   */
+  private executeCommand(command: string): void {
+    switch (command) {
+      case 'palette':
+        this.openPalette();
+        break;
+      case 'clear':
+        this.messages = [];
+        this.turnCount = 0;
+        this.sidebarData.tools = [];
+        this.pendingDiffs = [];
+        this.activeDiffIndex = 0;
+        this.clearScreen();
+        this.renderImmediate();
+        break;
+      case 'toggleSidebar':
+        this.sidebarData.visible = !this.sidebarData.visible;
+        this.clearScreen();
+        this.renderImmediate();
+        break;
+      case 'exit':
+        this.running = false;
+        console.log(chalk.yellow('\nGoodbye!'));
+        this.rl.close();
+        process.exit(0);
+        break;
+      case 'closeOverlay':
+        if (!this.overlayManager.isEmpty()) {
+          this.overlayManager.pop();
+          if (this.overlayManager.isEmpty()) {
+            this._restoreReadline();
+            this.prompt();
+          }
+          this.clearScreen();
+          this.renderImmediate();
+        }
+        break;
+      // Other commands are no-ops in raw mode
+    }
+  }
+
+  /**
+   * Open the help panel via OverlayManager.
+   */
+  private openHelpPanel(): void {
+    const commands = [
+      { name: '/help', description: 'Show this help' },
+      { name: '/clear', description: 'Clear conversation' },
+      { name: '/sidebar', description: 'Toggle sidebar visibility' },
+      { name: '/status', description: 'Show current status' },
+      { name: '/palette', description: 'Open command palette (Ctrl+K)' },
+      { name: '/model', description: 'Open model selector' },
+      { name: '/permission', description: 'Show/switch permission modes' },
+      { name: '/diff', description: 'Show pending file diffs' },
+      { name: '/accept', description: 'Accept current diff' },
+      { name: '/reject', description: 'Reject current diff' },
+      { name: '/exit', description: 'Exit' },
+    ];
+
+    const overlay = new HelpPanelOverlay(commands, this.keybindingManager.getAll());
+    this.overlayManager.push(overlay);
+    this._enableRawInput();
+    this.clearScreen();
+    this.renderImmediate();
+  }
+
+  /**
+   * Open the command palette via OverlayManager.
+   */
+  private openPalette(): void {
+    this.paletteState.open = true;
+    this.paletteState.query = '';
+    this.paletteState.selectedIndex = 0;
+
+    const overlay = new CommandPaletteOverlay(
+      this.paletteState,
+      (cmd) => {
+        this.overlayManager.remove('command-palette');
+        this.paletteState.open = false;
+        this.executePaletteCommand(cmd.id);
+      },
+    );
+
+    this.overlayManager.push(overlay);
+    this._enableRawInput();
+    this.clearScreen();
+    this.renderImmediate();
+  }
+
+  /**
+   * Open the model selector via OverlayManager.
    */
   private openModelSelector(): void {
-    this.modelSelectorState = createModelSelectorState(this.provider, this.model);
-    this.modelSelectorState.active = true;
+    const state = createModelSelectorState(this.provider, this.model);
+    state.active = true;
+    this.modelSelectorState = state;
+
+    const overlay = new ModelSelectorOverlay(
+      state,
+      (providerId, modelId) => {
+        const oldProvider = this.provider;
+        const oldModel = this.model;
+        this.provider = providerId;
+        this.model = modelId;
+        this.overlayManager.remove('model-selector');
+        this._restoreReadline();
+        this.addMessage({
+          id: `sys-${Date.now()}`,
+          role: 'system',
+          content: chalk.cyan.bold('Model changed:') +
+            chalk.dim(` ${oldProvider}/${oldModel}`) +
+            chalk.white(' → ') +
+            chalk.green.bold(`${providerId}/${modelId}`),
+          timestamp: Date.now(),
+        });
+        this.prompt();
+      },
+    );
+
+    this.overlayManager.push(overlay);
+    this._enableRawInput();
     this.clearScreen();
     this.renderImmediate();
   }
@@ -809,27 +1050,11 @@ export class App {
 
     switch (cmd) {
       case '/help':
-        this.addMessage({
-          id: `system-${Date.now()}`,
-          role: 'system',
-          content: [
-            'Available Commands:',
-            '  /help          - Show this help',
-            '  /clear         - Clear conversation',
-            '  /sidebar       - Toggle sidebar visibility',
-            '  /sidebar <sec> - Switch sidebar section (tools/files/tasks/memory)',
-            '  /status        - Show current status',
-            '  /palette       - Open command palette (Ctrl+K)',
-            '  /model         - Open model selector',
-            '  /permission    - Show/switch permission modes',
-            '  /diff          - Show pending file diffs',
-            '  /diff <n>      - Jump to diff file n',
-            '  /accept        - Accept current diff',
-            '  /reject        - Reject current diff',
-            '  /exit          - Exit',
-          ].join('\n'),
-          timestamp: Date.now(),
-        });
+        this.openHelpPanel();
+        break;
+
+      case '/keybindings':
+        this.openHelpPanel();
         break;
 
       case '/clear':
@@ -895,7 +1120,7 @@ export class App {
             content: renderMultiFileDiff(
               this.pendingDiffs,
               this.activeDiffIndex,
-              { maxWidth: Math.min((process.stdout.columns || 80) - this.sidebarWidth - 6, 100) }
+              { maxWidth: Math.min((process.stdout.columns || 80) - this.sidebarWidth - 6, 100), theme: this.theme }
             ),
             timestamp: Date.now(),
           });
@@ -928,11 +1153,7 @@ export class App {
         break;
 
       case '/palette':
-        this.paletteState.open = true;
-        this.paletteState.query = '';
-        this.paletteState.selectedIndex = 0;
-        this.clearScreen();
-        this.renderImmediate();
+        this.openPalette();
         break;
 
       case '/model':

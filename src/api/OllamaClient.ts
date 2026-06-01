@@ -173,9 +173,14 @@ export class OllamaClient extends BaseApiClient {
     if (rawToolCalls && Array.isArray(rawToolCalls)) {
       for (const tc of rawToolCalls) {
         const fn = tc.function as Record<string, unknown> | undefined;
+        const name = (fn?.name as string) || '';
+        if (!name) {
+          logger.api.warn('Skipping Ollama tool call with missing function name');
+          continue;
+        }
         toolCalls.push({
           id: (tc.id as string) || `tool_call_${Date.now()}`,
-          toolName: (fn?.name as string) || '',
+          toolName: name,
           input: (fn?.arguments as Record<string, unknown>) || {},
           status: 'completed',
         });
@@ -269,9 +274,14 @@ export class OllamaClient extends BaseApiClient {
       for (const tc of rawToolCalls) {
         try {
           const fn = tc.function as Record<string, unknown> | undefined;
+          const name = (fn?.name as string) || '';
+          if (!name) {
+            logger.api.warn('Skipping Ollama streamed tool call with missing function name');
+            continue;
+          }
           const toolCall: ToolCall = {
             id: (tc.id as string) || `tool_call_${Date.now()}`,
-            toolName: (fn?.name as string) || '',
+            toolName: name,
             input: (fn?.arguments as Record<string, unknown>) || {},
             status: 'completed',
           };

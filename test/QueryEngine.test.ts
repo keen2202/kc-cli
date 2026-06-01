@@ -683,9 +683,8 @@ describe('Error Classifier', () => {
     state.incrementAttempt('streaming');
     expect(state.canRetry('streaming')).toBe(true);
 
-    // After max retries
-    state.incrementAttempt('streaming');
-    state.incrementAttempt('streaming');
+    // After max retries (MAX_RETRIES = 10)
+    for (let i = 0; i < 9; i++) state.incrementAttempt('streaming');
     expect(state.canRetry('streaming')).toBe(false);
 
     state.reset('streaming');

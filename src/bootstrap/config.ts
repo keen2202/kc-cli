@@ -11,7 +11,7 @@ export const ConfigSchema = z.object({
   apiKey: z.string().optional(),
   apiBaseUrl: z.string().optional(),
   model: z.string().default('deepseek-v4-pro'),
-  provider: z.enum(['anthropic', 'openai', 'ollama', 'deepseek', 'openai-compatible', 'qwen', 'glm']).default('deepseek'),
+  provider: z.enum(['anthropic', 'openai', 'ollama', 'deepseek', 'openai-compatible', 'qwen', 'glm', 'mimo', 'kimi', 'step', 'gemini']).default('deepseek'),
 
   // Permission Configuration
   permissionMode: z.enum(['default', 'bypassPermissions', 'dontAsk', 'plan', 'acceptEdits', 'auto']).default('default'),

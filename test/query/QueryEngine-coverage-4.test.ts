@@ -384,15 +384,24 @@ describe('QueryEngine Coverage Part 4', () => {
 
   describe('streaming retry exhaustion', () => {
     it('should give up after max retries on persistent errors', async () => {
+      vi.useFakeTimers();
       setCustomStreamChat(() => {
         return makeStream([{ type: 'error', error: new Error('429 rate limit') }]);
       });
 
       engine = createEngine();
-      const events = await collectEvents(engine, 'test');
+      const promise = collectEvents(engine, 'test');
 
+      // Advance past retry delays (MAX_RETRIES=10, base ~5000ms with jitter)
+      for (let i = 0; i < 11; i++) {
+        await vi.advanceTimersByTimeAsync(10000);
+      }
+
+      const events = await promise;
       const errEvents = events.filter(e => e.type === 'agent:error');
       expect(errEvents.length).toBeGreaterThan(0);
+
+      vi.useRealTimers();
     });
 
     it('should not retry non-retryable errors', async () => {
@@ -421,9 +430,9 @@ describe('QueryEngine Coverage Part 4', () => {
       engine = createEngine();
       const promise = collectEvents(engine, 'test');
 
-      // Advance past retry delays (2s each, up to 3 retries)
-      for (let i = 0; i < 4; i++) {
-        await vi.advanceTimersByTimeAsync(3000);
+      // Advance past retry delays (MAX_RETRIES=10, base ~5000ms with jitter)
+      for (let i = 0; i < 11; i++) {
+        await vi.advanceTimersByTimeAsync(10000);
       }
 
       const events = await promise;

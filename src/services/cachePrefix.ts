@@ -225,6 +225,10 @@ export function buildCacheStrategy(provider: string): CacheStrategy {
       return 'prompt-cache';
     case 'qwen':
     case 'glm':
+    case 'mimo':
+    case 'kimi':
+    case 'step':
+    case 'gemini':
     case 'ollama':
     case 'openai-compatible':
     default:

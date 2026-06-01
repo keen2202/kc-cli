@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import { isBareMode } from './formatter';
+import type { Theme } from './theme';
 
 /** Represents a single line in a diff. */
 export interface DiffLine {
@@ -104,8 +105,9 @@ function computeDiffManual(oldText: string, newText: string): DiffLine[] {
 export function renderMultiFileDiff(
   diffs: FileDiff[],
   activeIndex: number = 0,
-  options: { maxWidth?: number; maxLines?: number } = {}
+  options: { maxWidth?: number; maxLines?: number; theme?: Theme } = {}
 ): string {
+  const tokens = options.theme?.resolve();
   const maxWidth = options.maxWidth ?? 80;
   const maxLines = options.maxLines ?? 20;
   const lines: string[] = [];
@@ -128,11 +130,13 @@ export function renderMultiFileDiff(
   }
 
   // ── Header ──
+  const borderColor = tokens ? tokens['overlay.border'] : chalk.gray;
+  const headerColor = tokens ? tokens['overlay.selected'] : chalk.cyan.bold;
   lines.push(
-    chalk.gray('┌─ ') +
-    chalk.cyan.bold('Diff Preview') +
-    chalk.gray(` (${activeIndex + 1}/${diffs.length})`) +
-    chalk.gray(' ─' + '─'.repeat(Math.min(maxWidth - 28, 40)) + '┐')
+    borderColor('┌─ ') +
+    headerColor('Diff Preview') +
+    borderColor(` (${activeIndex + 1}/${diffs.length})`) +
+    borderColor(' ─' + '─'.repeat(Math.min(maxWidth - 28, 40)) + '┐')
   );
 
   // ── File tabs (multi-file) ──
@@ -164,6 +168,9 @@ export function renderMultiFileDiff(
   lines.push(chalk.gray('  ' + '─'.repeat(Math.min(maxWidth - 4, 60))));
 
   // ── Diff content ──
+  const addColor = tokens ? tokens['diff.added'] : chalk.green;
+  const removeColor = tokens ? tokens['diff.removed'] : chalk.red;
+  const contextColor = tokens ? tokens['diff.context'] : chalk.gray;
   const shown = Math.min(diffData.length, maxLines);
   for (let i = 0; i < shown; i++) {
     const line = diffData[i];
@@ -178,13 +185,13 @@ export function renderMultiFileDiff(
 
     switch (line.type) {
       case 'add':
-        lines.push(chalk.green(`  + ${lineNum} │ ${content}`));
+        lines.push(addColor(`  + ${lineNum} │ ${content}`));
         break;
       case 'remove':
-        lines.push(chalk.red(`  - ${lineNum} │ ${content}`));
+        lines.push(removeColor(`  - ${lineNum} │ ${content}`));
         break;
       default:
-        lines.push(chalk.gray(`    ${lineNum} │ ${content}`));
+        lines.push(contextColor(`    ${lineNum} │ ${content}`));
     }
   }
 
@@ -203,7 +210,8 @@ export function renderMultiFileDiff(
   return lines.join('\n');
 }
 
-export function renderDiffLines(lines: DiffLine[], maxLines: number = 50): string {
+export function renderDiffLines(lines: DiffLine[], maxLines: number = 50, theme?: Theme): string {
+  const tokens = theme?.resolve();
   if (isBareMode()) {
     return lines.slice(0, maxLines).map(l => {
       const prefix = l.type === 'add' ? '+' : l.type === 'remove' ? '-' : ' ';
@@ -220,15 +228,19 @@ export function renderDiffLines(lines: DiffLine[], maxLines: number = 50): strin
       ? String(line.oldLineNum || '').padStart(4)
       : String(line.newLineNum || '').padStart(4);
 
+    const addC = tokens ? tokens['diff.added'] : chalk.green;
+    const removeC = tokens ? tokens['diff.removed'] : chalk.red;
+    const contextC = tokens ? tokens['diff.context'] : chalk.gray;
+
     switch (line.type) {
       case 'add':
-        output.push(chalk.green(`+ ${lineNum} │ ${line.content}`));
+        output.push(addC(`+ ${lineNum} │ ${line.content}`));
         break;
       case 'remove':
-        output.push(chalk.red(`- ${lineNum} │ ${line.content}`));
+        output.push(removeC(`- ${lineNum} │ ${line.content}`));
         break;
       case 'context':
-        output.push(chalk.gray(`  ${lineNum} │ ${line.content}`));
+        output.push(contextC(`  ${lineNum} │ ${line.content}`));
         break;
     }
   }

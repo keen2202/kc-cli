@@ -100,9 +100,13 @@ describe('buildCacheStrategy', () => {
     expect(buildCacheStrategy('openai')).toBe('prompt-cache');
   });
 
-  it('returns none for qwen, glm, ollama', () => {
+  it('returns none for qwen, glm, ollama and new providers', () => {
     expect(buildCacheStrategy('qwen')).toBe('none');
     expect(buildCacheStrategy('glm')).toBe('none');
+    expect(buildCacheStrategy('mimo')).toBe('none');
+    expect(buildCacheStrategy('kimi')).toBe('none');
+    expect(buildCacheStrategy('step')).toBe('none');
+    expect(buildCacheStrategy('gemini')).toBe('none');
     expect(buildCacheStrategy('ollama')).toBe('none');
   });
 

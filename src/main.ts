@@ -63,6 +63,8 @@ async function main() {
     .option('--bare', 'Minimal mode: skip hooks and heavy initialization')
     .option('--bypass-permissions', 'Bypass all permission checks')
     .option('--profile', 'Show startup profile')
+    .option('--json', 'Output events as NDJSON (for IDE integration)')
+    .option('--json-pretty', 'Output events as formatted JSON (for debugging)')
     .option('--acp', 'Run as ACP server (JSON-RPC over stdio)')
     .action(async (prompt: string | undefined, opts: any) => {
       if (opts.acp) {
@@ -258,7 +260,10 @@ async function runAgent(prompt: string | undefined, opts: any) {
   });
 
   // Phase 5: Run REPL or single prompt
-  if (prompt) {
+  if (opts.json || opts.jsonPretty) {
+    // JSON output mode - pipe events as NDJSON
+    await runJSONMode(queryEngine, prompt, opts.jsonPretty);
+  } else if (prompt) {
     // Single prompt mode
     await executePrompt(queryEngine, prompt);
   } else if (!opts.bare && process.stdout.isTTY) {
@@ -277,6 +282,54 @@ async function runAgent(prompt: string | undefined, opts: any) {
 
   if (opts.profile) {
     console.log('\n' + getProfileReport());
+  }
+}
+
+async function runJSONMode(queryEngine: QueryEngine, prompt: string | undefined, pretty: boolean): Promise<void> {
+  const stringify = pretty
+    ? (e: any) => JSON.stringify(e, null, 2)
+    : (e: any) => JSON.stringify(e);
+
+  const sessionId = `json-${Date.now().toString(36)}`;
+  let sequence = 0;
+
+  const emit = (event: any) => {
+    const msg = {
+      type: 'event',
+      payload: event,
+      sessionId,
+      sequence: sequence++,
+    };
+    process.stdout.write(stringify(msg) + '\n');
+  };
+
+  if (prompt) {
+    // Single prompt in JSON mode
+    (async () => {
+      try {
+        for await (const event of queryEngine.submitMessage(prompt)) {
+          emit(event);
+        }
+      } catch (error) {
+        emit({ type: 'error', error: { message: getErrorMessage(error) }, timestamp: Date.now() });
+      }
+    })();
+  } else {
+    // Interactive JSON mode - read prompts from stdin line by line
+    const readline = await import('readline');
+    const rl = readline.createInterface({ input: process.stdin });
+
+    rl.on('line', async (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      try {
+        for await (const event of queryEngine.submitMessage(trimmed)) {
+          emit(event);
+        }
+      } catch (error) {
+        emit({ type: 'error', error: { message: getErrorMessage(error) }, timestamp: Date.now() });
+      }
+    });
   }
 }
 

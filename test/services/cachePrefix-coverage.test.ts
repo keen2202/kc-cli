@@ -111,6 +111,22 @@ describe('cachePrefix - coverage', () => {
       expect(buildCacheStrategy('ollama')).toBe('none');
     });
 
+    it('should return none for mimo', () => {
+      expect(buildCacheStrategy('mimo')).toBe('none');
+    });
+
+    it('should return none for kimi', () => {
+      expect(buildCacheStrategy('kimi')).toBe('none');
+    });
+
+    it('should return none for step', () => {
+      expect(buildCacheStrategy('step')).toBe('none');
+    });
+
+    it('should return none for gemini', () => {
+      expect(buildCacheStrategy('gemini')).toBe('none');
+    });
+
     it('should return none for openai-compatible', () => {
       expect(buildCacheStrategy('openai-compatible')).toBe('none');
     });

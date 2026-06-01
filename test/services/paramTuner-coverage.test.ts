@@ -325,15 +325,15 @@ describe('ParameterTuningService - Coverage Tests', () => {
       expect(value).toBeGreaterThanOrEqual(1);
     });
 
-    it('should not increase retries above 5', () => {
+    it('should not increase retries above 10', () => {
       // Keep increasing
-      for (let round = 0; round < 10; round++) {
+      for (let round = 0; round < 15; round++) {
         recordRetries('Bash', 1, 9);
         service.tune();
       }
 
       const value = service.getTunedValue('maxRetries', 'Bash');
-      expect(value).toBeLessThanOrEqual(5);
+      expect(value).toBeLessThanOrEqual(10);
     });
 
     it('should handle multiple services independently', () => {

@@ -13,11 +13,11 @@ export interface OpenAICompatibleConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
-  provider?: 'openai' | 'qwen' | 'glm' | 'deepseek';
+  provider?: 'openai' | 'qwen' | 'glm' | 'deepseek' | 'mimo' | 'kimi' | 'step' | 'gemini';
 }
 
 export class OpenAICompatibleClient extends BaseApiClient {
-  private provider: 'openai' | 'qwen' | 'glm' | 'deepseek';
+  private provider: 'openai' | 'qwen' | 'glm' | 'deepseek' | 'mimo' | 'kimi' | 'step' | 'gemini';
   private frozenToolSpecs: Array<Record<string, unknown>> | null = null;
   // Buffer to accumulate incremental tool call arguments across stream chunks
   private toolCallBuffer: Map<number, { id: string; name: string; args: string }> = new Map();
@@ -241,6 +241,9 @@ export class OpenAICompatibleClient extends BaseApiClient {
       case 'glm':
         // Zhipu AI OpenAI-compatible endpoint
         return '/v4/chat/completions';
+      case 'gemini':
+        // Google Gemini OpenAI-compatible endpoint
+        return '/v1beta/openai/chat/completions';
       default:
         return '/v1/chat/completions';
     }
@@ -290,9 +293,14 @@ export class OpenAICompatibleClient extends BaseApiClient {
       for (const tc of rawToolCalls) {
         try {
           const fn = tc.function as Record<string, unknown> | undefined;
+          const name = (fn?.name as string) || '';
+          if (!name) {
+            logger.api.warn('Skipping tool call with missing function name');
+            continue;
+          }
           toolCalls.push({
             id: tc.id as string,
-            toolName: (fn?.name as string) || '',
+            toolName: name,
             input: fn?.arguments ? JSON.parse(fn.arguments as string) : {},
             status: 'completed',
           });
@@ -452,6 +460,10 @@ export class OpenAICompatibleClient extends BaseApiClient {
    */
   private *flushToolCallBuffer(): Generator<LLMStreamEvent> {
     for (const [, entry] of this.toolCallBuffer) {
+      if (!entry.name) {
+        logger.api.warn('Skipping streamed tool call with missing function name');
+        continue;
+      }
       try {
         const input = entry.args ? JSON.parse(entry.args) : {};
         const toolCall: ToolCall = {

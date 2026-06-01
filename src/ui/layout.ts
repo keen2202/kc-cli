@@ -3,6 +3,30 @@
 
 export type LayoutMode = 'sidebar-main' | 'main-only' | 'main-bottom' | 'three-column';
 
+export type Density = 'compact' | 'normal' | 'wide';
+
+export interface LayoutBreakpoint {
+  name: 'tiny' | 'compact' | 'standard' | 'wide';
+  minCols: number;
+  density: Density;
+  sidebarVisible: boolean;
+  headerVisible: boolean;
+}
+
+export const BREAKPOINTS: LayoutBreakpoint[] = [
+  { name: 'tiny', minCols: 0, density: 'compact', sidebarVisible: false, headerVisible: false },
+  { name: 'compact', minCols: 60, density: 'compact', sidebarVisible: false, headerVisible: true },
+  { name: 'standard', minCols: 80, density: 'normal', sidebarVisible: true, headerVisible: true },
+  { name: 'wide', minCols: 120, density: 'wide', sidebarVisible: true, headerVisible: true },
+];
+
+export function getBreakpoint(cols: number): LayoutBreakpoint {
+  for (let i = BREAKPOINTS.length - 1; i >= 0; i--) {
+    if (cols >= BREAKPOINTS[i]!.minCols) return BREAKPOINTS[i]!;
+  }
+  return BREAKPOINTS[0]!;
+}
+
 export interface PanelConfig {
   id: string;
   width: number | 'auto';

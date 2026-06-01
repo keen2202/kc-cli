@@ -12,7 +12,7 @@ describe('classifyApiError', () => {
     expect(result.errorClass).toBe('transient');
     expect(result.retryable).toBe(true);
     expect(result.context).toBe('rate_limit');
-    expect(result.retryAfterMs).toBe(2000);
+    expect(result.retryAfterMs).toBe(5000);
   });
 
   it('should classify rate_limit keyword as transient', () => {
@@ -211,10 +211,10 @@ describe('RetryState', () => {
     expect(retryState.canRetry('key1')).toBe(true);
   });
 
-  it('should deny retry at MAX_RETRIES (3)', () => {
-    retryState.incrementAttempt('key1');
-    retryState.incrementAttempt('key1');
-    retryState.incrementAttempt('key1');
+  it('should deny retry at MAX_RETRIES (10)', () => {
+    for (let i = 0; i < 10; i++) {
+      retryState.incrementAttempt('key1');
+    }
     expect(retryState.canRetry('key1')).toBe(false);
   });
 

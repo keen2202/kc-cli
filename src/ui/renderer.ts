@@ -8,6 +8,7 @@ interface RenderOptions {
   provider?: string;
   model?: string;
   maxTurns?: number;
+  themeName?: string;
 }
 
 export function renderInkUI(options: RenderOptions): void {
@@ -16,6 +17,7 @@ export function renderInkUI(options: RenderOptions): void {
     provider: options.provider,
     model: options.model,
     maxTurns: options.maxTurns,
+    themeName: options.themeName,
   }).catch((error) => {
     console.error('UI error:', error);
     process.exit(1);

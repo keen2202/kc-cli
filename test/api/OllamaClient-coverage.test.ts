@@ -256,7 +256,7 @@ describe('OllamaClient - Comprehensive Coverage', () => {
         messages: [makeMsg('user', 'test')],
       });
 
-      expect(resp.toolCalls![0].toolName).toBe('');
+      expect(resp.toolCalls).toBeUndefined();
     });
 
     it('should handle missing function arguments in tool call', async () => {
@@ -661,8 +661,7 @@ describe('OllamaClient - Comprehensive Coverage', () => {
       }
 
       const toolUseEvents = events.filter(e => e.type === 'tool_use');
-      expect(toolUseEvents[0].toolCall.toolName).toBe('');
-      expect(toolUseEvents[0].toolCall.input).toEqual({});
+      expect(toolUseEvents).toHaveLength(0);
     });
 
     it('should handle chunked NDJSON split across read() calls', async () => {

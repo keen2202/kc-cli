@@ -9,7 +9,7 @@ describe('classifyApiError with ApiError (HTTP status codes)', () => {
     expect(result.errorClass).toBe('transient');
     expect(result.retryable).toBe(true);
     expect(result.context).toBe('rate_limit');
-    expect(result.retryAfterMs).toBe(2000);
+    expect(result.retryAfterMs).toBe(5000);
   });
 
   it('should extract Retry-After header in seconds', () => {
@@ -138,9 +138,7 @@ describe('RetryState reset on success', () => {
   });
 
   it('should allow retry again after reset', () => {
-    retryState.incrementAttempt('streaming');
-    retryState.incrementAttempt('streaming');
-    retryState.incrementAttempt('streaming');
+    for (let i = 0; i < 10; i++) retryState.incrementAttempt('streaming');
     expect(retryState.canRetry('streaming')).toBe(false);
 
     retryState.reset('streaming');

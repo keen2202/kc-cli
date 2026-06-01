@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import type { Theme } from '../theme';
 
 interface StatusBarData {
   provider?: string;
@@ -23,36 +24,44 @@ function formatDuration(ms: number): string {
   return `${minutes}m${secs}s`;
 }
 
-function renderProgressBar(percent: number, width: number = 10): string {
+function renderProgressBar(percent: number, width: number = 10, theme?: Theme): string {
   const filled = Math.round((percent / 100) * width);
   const empty = width - filled;
-  return chalk.green('█'.repeat(filled)) + chalk.gray('░'.repeat(empty));
+  const tokens = theme?.resolve();
+  const fillColor = tokens ? tokens['tool.success'] : chalk.green;
+  const emptyColor = chalk.gray;
+  return fillColor('█'.repeat(filled)) + emptyColor('░'.repeat(empty));
 }
 
-export function renderStatusBar(data: StatusBarData): string {
+export function renderStatusBar(data: StatusBarData, theme?: Theme): string {
+  const tokens = theme?.resolve();
   const parts: string[] = [];
 
   if (data.provider && data.model) {
-    parts.push(chalk.cyan(`${data.provider}/${data.model}`));
+    const modelColor = tokens ? tokens['status.model'] : chalk.cyan;
+    parts.push(modelColor(`${data.provider}/${data.model}`));
   }
 
   if (data.turnCount !== undefined && data.maxTurns !== undefined) {
     const pct = Math.round((data.turnCount / data.maxTurns) * 100);
-    parts.push(`${renderProgressBar(pct)} ${data.turnCount}/${data.maxTurns} turns`);
+    parts.push(`${renderProgressBar(pct, 10, theme)} ${data.turnCount}/${data.maxTurns} turns`);
   }
 
   if (data.tokensUsed !== undefined) {
-    parts.push(chalk.gray(`${formatTokenCount(data.tokensUsed)} tokens`));
+    const tokenColor = tokens ? tokens['status.tokens'] : chalk.gray;
+    parts.push(tokenColor(`${formatTokenCount(data.tokensUsed)} tokens`));
   }
 
   if (data.sessionStartTime) {
-    parts.push(chalk.gray(formatDuration(Date.now() - data.sessionStartTime)));
+    const durationColor = tokens ? tokens['status.duration'] : chalk.gray;
+    parts.push(durationColor(formatDuration(Date.now() - data.sessionStartTime)));
   }
 
   if (parts.length === 0) return '';
 
   const width = process.stdout.columns || 80;
-  const content = parts.join(chalk.gray(' | '));
+  const separator = chalk.gray(' | ');
+  const content = parts.join(separator);
   const plainLen = content.replace(/\x1B\[[0-9;]*m/g, '').length;
   const padding = Math.max(0, width - plainLen - 4);
 

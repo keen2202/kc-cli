@@ -123,16 +123,33 @@ export abstract class BaseApiClient {
       // Pre-formatted assistant message (from buildApiMessages) - preserve tool_calls
       const asstMsg = msg as ChatMessage & { tool_calls?: unknown };
       if (msg.role === 'assistant' && asstMsg.tool_calls) {
-        formatted.tool_calls = asstMsg.tool_calls;
+        // Validate pre-formatted tool_calls: filter out entries with missing function name
+        const rawToolCalls = asstMsg.tool_calls as Array<Record<string, unknown>>;
+        if (Array.isArray(rawToolCalls)) {
+          const validRaw = rawToolCalls.filter(tc => {
+            const fn = tc.function as Record<string, unknown> | undefined;
+            return fn?.name && typeof fn.name === 'string' && fn.name.trim().length > 0;
+          });
+          if (validRaw.length > 0) {
+            formatted.tool_calls = validRaw;
+          }
+        } else {
+          formatted.tool_calls = asstMsg.tool_calls;
+        }
       } else if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
-        formatted.tool_calls = msg.toolCalls.map(tc => ({
-          id: tc.id,
-          type: 'function',
-          function: {
-            name: tc.toolName,
-            arguments: JSON.stringify(tc.input),
-          },
-        }));
+        const validToolCalls = msg.toolCalls
+          .filter(tc => tc.toolName && tc.toolName.trim().length > 0)
+          .map(tc => ({
+            id: tc.id,
+            type: 'function',
+            function: {
+              name: tc.toolName,
+              arguments: JSON.stringify(tc.input),
+            },
+          }));
+        if (validToolCalls.length > 0) {
+          formatted.tool_calls = validToolCalls;
+        }
       }
 
       // Ensure assistant messages always have content (some APIs require it)

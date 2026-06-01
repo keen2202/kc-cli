@@ -1,6 +1,6 @@
 // QueryEngine error handling and circuit breaker management
 
-import { classifyApiError, getRetryDelay, RetryState } from '../services/error-classifier';
+import { classifyApiError, getRateLimitRetryDelay, getRetryDelay, RetryState } from '../services/error-classifier';
 import { CircuitBreakerRegistry } from '../services/circuitBreaker';
 import type { AgentEvent } from '../state/types';
 
@@ -13,7 +13,7 @@ export class ErrorHandler {
   private circuitBreakers = new CircuitBreakerRegistry();
   private maxRetries: number;
 
-  constructor(maxRetries: number = 3) {
+  constructor(maxRetries: number = 10) {
     this.maxRetries = maxRetries;
   }
 
@@ -52,7 +52,10 @@ export class ErrorHandler {
     const classified = classifyApiError(error);
     if (!classified.retryable) return null;
 
-    const delay = classified.retryAfterMs ?? getRetryDelay(attempt);
+    // Use rate-limit-specific delay for 429 errors, respecting Retry-After header
+    const delay = classified.context === 'rate_limit'
+      ? getRateLimitRetryDelay(attempt, classified.retryAfterMs)
+      : (classified.retryAfterMs ?? getRetryDelay(attempt));
     return { delay };
   }
 

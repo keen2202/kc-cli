@@ -11,6 +11,7 @@
  */
 
 import chalk from 'chalk';
+import type { Theme } from '../theme';
 
 // Pre-compiled regex for ANSI escape stripping (reused across render calls)
 const ANSI_STRIP_REGEX = /\x1B\[[0-9;]*m/g;
@@ -134,8 +135,9 @@ export function filterCommands(commands: PaletteCommand[], query: string): Palet
  */
 export function renderCommandPalette(
   state: PaletteState,
-  options: { maxWidth?: number; maxHeight?: number } = {}
+  options: { maxWidth?: number; maxHeight?: number; theme?: Theme } = {}
 ): string {
+  const tokens = options.theme?.resolve();
   const maxWidth = options.maxWidth ?? 60;
   const maxHeight = options.maxHeight ?? 12;
   const lines: string[] = [];
@@ -147,14 +149,16 @@ export function renderCommandPalette(
   const headerText = state.subMode && state.parentCommand
     ? `Command Palette › ${state.parentCommand.label}`
     : 'Command Palette';
+  const borderColor = tokens ? tokens['overlay.border'] : chalk.gray;
+  const headerColor = tokens ? tokens['overlay.selected'] : chalk.cyan.bold;
   lines.push(
-    chalk.cyan.bold('┌─ ') +
-    chalk.cyan.bold(headerText) +
-    chalk.gray(' ─' + '─'.repeat(Math.max(0, maxWidth - headerText.length - 8)) + '┐')
+    headerColor('┌─ ') +
+    headerColor(headerText) +
+    borderColor(' ─' + '─'.repeat(Math.max(0, maxWidth - headerText.length - 8)) + '┐')
   );
 
   // Search bar
-  const searchPrefix = chalk.gray('│ ') + chalk.yellow('> ');
+  const searchPrefix = borderColor('│ ') + chalk.yellow('> ');
   const searchSuffix = chalk.dim(state.query ? '' : 'Type to search...');
   const searchCursor = '_';
   const searchVisible = state.query + (state.open ? searchCursor : '');
@@ -164,7 +168,7 @@ export function renderCommandPalette(
   );
 
   // Separator
-  lines.push(chalk.gray('├' + '─'.repeat(maxWidth) + '┤'));
+  lines.push(borderColor('├' + '─'.repeat(maxWidth) + '┤'));
 
   // Command list
   const listStart = 0;
@@ -173,7 +177,7 @@ export function renderCommandPalette(
 
   if (filtered.length === 0) {
     lines.push(
-      chalk.gray('│ ') + chalk.dim('No matching commands') + ' '.repeat(maxWidth - 24) + chalk.gray('│')
+      borderColor('│ ') + chalk.dim('No matching commands') + ' '.repeat(maxWidth - 24) + borderColor('│')
     );
   } else {
     for (let i = listStart; i < listEnd; i++) {
@@ -181,7 +185,7 @@ export function renderCommandPalette(
       if (!cmd) continue;
       const isSelected = i === clampedIdx;
 
-      const marker = isSelected ? chalk.cyan.bold('❯ ') : '  ';
+      const marker = isSelected ? (tokens ? tokens['overlay.selected']('❯ ') : chalk.cyan.bold('❯ ')) : '  ';
       const label = isSelected ? chalk.white.bold(cmd.label) : chalk.dim(cmd.label);
       const shortcut = cmd.shortcut ? chalk.gray(` [${cmd.shortcut}]`) : '';
       const desc = isSelected ? chalk.gray(` — ${cmd.description}`) : '';
@@ -190,24 +194,24 @@ export function renderCommandPalette(
       const plainRow = row.replace(ANSI_STRIP_REGEX, '');
       const padding = Math.max(0, maxWidth - plainRow.length + 1);
 
-      lines.push(chalk.gray('│') + ' ' + row + ' '.repeat(padding) + chalk.gray('│'));
+      lines.push(borderColor('│') + ' ' + row + ' '.repeat(padding) + borderColor('│'));
     }
   }
 
   // Fill remaining
   for (let i = showCount; i < maxHeight; i++) {
-    lines.push(chalk.gray('│') + ' '.repeat(maxWidth + 1) + chalk.gray('│'));
+    lines.push(borderColor('│') + ' '.repeat(maxWidth + 1) + borderColor('│'));
   }
 
   // Footer
-  lines.push(chalk.gray('├' + '─'.repeat(maxWidth) + '┤'));
+  lines.push(borderColor('├' + '─'.repeat(maxWidth) + '┤'));
   lines.push(
-    chalk.gray('│ ') +
+    borderColor('│ ') +
     chalk.dim('↑↓ Navigate  Enter Select  Esc Close  Type to search') +
     ' '.repeat(Math.max(0, maxWidth - 54)) +
-    chalk.gray('│')
+    borderColor('│')
   );
-  lines.push(chalk.gray('└' + '─'.repeat(maxWidth) + '┘'));
+  lines.push(borderColor('└' + '─'.repeat(maxWidth) + '┘'));
 
   return lines.join('\n');
 }

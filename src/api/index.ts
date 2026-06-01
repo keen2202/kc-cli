@@ -27,7 +27,7 @@ import { OpenAICompatibleClient } from './OpenAICompatibleClient';
 import { AnthropicClient } from './AnthropicClient';
 import { OllamaClient } from './OllamaClient';
 
-export type LLMProvider = 'openai' | 'qwen' | 'glm' | 'deepseek' | 'openai-compatible' | 'anthropic' | 'ollama';
+export type LLMProvider = 'openai' | 'qwen' | 'glm' | 'deepseek' | 'mimo' | 'kimi' | 'step' | 'gemini' | 'openai-compatible' | 'anthropic' | 'ollama';
 
 export interface APIClientFactoryConfig {
   provider: LLMProvider;
@@ -61,6 +61,27 @@ export const PROVIDER_MODELS: Record<LLMProvider, ProviderModelInfo> = {
   'glm': {
     default: 'glm-4-plus',
     supported: ['glm-4', 'glm-4-plus', 'glm-4-flash', 'glm-4-air'],
+  },
+  'mimo': {
+    default: 'mimo-v2.5-pro',
+    supported: ['mimo-v2.5-pro', 'mimo-v2.5', 'mimo-v2-flash'],
+  },
+  'kimi': {
+    default: 'kimi-k2.6',
+    supported: ['kimi-k2.6', 'kimi-k2.5', 'kimi-k2', 'kimi-k2-thinking', 'moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'],
+  },
+  'step': {
+    default: 'step-3.7-flash',
+    supported: ['step-3.7-flash', 'step-3.5-flash', 'step-2-16k', 'step-1-8k', 'step-1-32k', 'step-1-128k'],
+  },
+  'gemini': {
+    default: 'gemini-2.5-pro',
+    supported: [
+      'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite',
+      'gemini-2.0-flash', 'gemini-2.0-flash-lite',
+      'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite',
+      'gemini-3.5-flash',
+    ],
   },
   'openai-compatible': {
     default: '',
@@ -145,6 +166,50 @@ export function createAPIClient(config: APIClientFactoryConfig): BaseApiClient {
         provider: 'deepseek',
       });
 
+    case 'mimo':
+      if (!apiKey) {
+        throw new Error('MiMo API key is required');
+      }
+      return new OpenAICompatibleClient({
+        apiKey,
+        baseUrl: baseUrl || 'https://api.xiaomimimo.com',
+        model: resolveModel('mimo', model),
+        provider: 'mimo',
+      });
+
+    case 'kimi':
+      if (!apiKey) {
+        throw new Error('Kimi (Moonshot) API key is required');
+      }
+      return new OpenAICompatibleClient({
+        apiKey,
+        baseUrl: baseUrl || 'https://api.moonshot.cn',
+        model: resolveModel('kimi', model),
+        provider: 'kimi',
+      });
+
+    case 'step':
+      if (!apiKey) {
+        throw new Error('Step (阶跃星辰) API key is required');
+      }
+      return new OpenAICompatibleClient({
+        apiKey,
+        baseUrl: baseUrl || 'https://api.stepfun.com',
+        model: resolveModel('step', model),
+        provider: 'step',
+      });
+
+    case 'gemini':
+      if (!apiKey) {
+        throw new Error('Gemini API key is required');
+      }
+      return new OpenAICompatibleClient({
+        apiKey,
+        baseUrl: baseUrl || 'https://generativelanguage.googleapis.com',
+        model: resolveModel('gemini', model),
+        provider: 'gemini',
+      });
+
     case 'openai-compatible':
       return new OpenAICompatibleClient({
         apiKey: apiKey || '',
@@ -187,6 +252,14 @@ export function getDefaultBaseUrl(provider: LLMProvider): string {
       return 'https://open.bigmodel.cn/api/paas';
     case 'deepseek':
       return 'https://api.deepseek.com';
+    case 'mimo':
+      return 'https://api.xiaomimimo.com';
+    case 'kimi':
+      return 'https://api.moonshot.cn';
+    case 'step':
+      return 'https://api.stepfun.com';
+    case 'gemini':
+      return 'https://generativelanguage.googleapis.com';
     case 'openai-compatible':
       return '';
     case 'anthropic':
@@ -213,6 +286,11 @@ export function validateApiKeyFormat(provider: LLMProvider, apiKey: string): boo
       return apiKey.length > 0;
     case 'deepseek':
       return apiKey.length > 0;
+    case 'mimo':
+    case 'kimi':
+    case 'step':
+    case 'gemini':
+      return apiKey.length > 0;
     case 'openai-compatible':
       return true;
     case 'anthropic':
@@ -237,6 +315,14 @@ export function getProviderDisplayName(provider: LLMProvider): string {
       return 'GLM (智谱AI)';
     case 'deepseek':
       return 'DeepSeek';
+    case 'mimo':
+      return 'MiMo (小米)';
+    case 'kimi':
+      return 'Kimi (月之暗面)';
+    case 'step':
+      return 'Step (阶跃星辰)';
+    case 'gemini':
+      return 'Gemini (Google)';
     case 'openai-compatible':
       return 'OpenAI Compatible';
     case 'anthropic':
