@@ -8,6 +8,8 @@ import type { LLMStreamEvent, LLMRequestConfig, LLMResponse, TokenUsage } from '
 import type { ChatMessage, ToolCall } from '../types/message';
 import type { ToolDefinition } from '../types/tools';
 import { canonicalStringify } from '../services/cachePrefix';
+import { ThinkingTagParser } from './ThinkingTagParser';
+import { getCapabilities } from './capabilities';
 
 export interface OpenAICompatibleConfig {
   apiKey: string;
@@ -21,14 +23,30 @@ export class OpenAICompatibleClient extends BaseApiClient {
   private frozenToolSpecs: Array<Record<string, unknown>> | null = null;
   // Buffer to accumulate incremental tool call arguments across stream chunks
   private toolCallBuffer: Map<number, { id: string; name: string; args: string }> = new Map();
+  // Parser for <thinking> tags in text streams (for chain-of-thought providers)
+  private thinkingParser = new ThinkingTagParser();
 
   constructor(config: OpenAICompatibleConfig) {
     super({
       apiKey: config.apiKey,
-      baseUrl: config.baseUrl,
+      baseUrl: config.baseUrl.replace(/\/+$/, ''),
       model: config.model,
     });
     this.provider = config.provider || 'openai';
+  }
+
+  /**
+   * Build full API URL, normalizing to avoid double path segments (e.g. /v1/v1/...)
+   */
+  private buildUrl(endpoint: string): string {
+    const base = this.baseUrl.replace(/\/+$/, '');
+    // If baseUrl already ends with the endpoint's version prefix (e.g. /v1), strip it
+    // to avoid doubling when endpoint also starts with /v1/...
+    const versionMatch = endpoint.match(/^(\/v\d+[a-z]*)\//);
+    if (versionMatch && base.endsWith(versionMatch[1])) {
+      return `${base}${endpoint.slice(versionMatch[1].length)}`;
+    }
+    return `${base}${endpoint}`;
   }
 
   /**
@@ -121,7 +139,7 @@ export class OpenAICompatibleClient extends BaseApiClient {
     const endpoint = this.getEndpoint();
 
     try {
-      const response = await fetch(`${this.baseUrl}${endpoint}`, {
+      const response = await fetch(this.buildUrl(endpoint), {
         method: 'POST',
         headers,
         body: JSON.stringify(requestBody),
@@ -146,6 +164,7 @@ export class OpenAICompatibleClient extends BaseApiClient {
   async *streamChat(config: LLMRequestConfig): AsyncGenerator<LLMStreamEvent> {
     // Clear tool call buffer from any previous stream
     this.toolCallBuffer.clear();
+    this.thinkingParser.reset();
 
     const requestBody = this.buildRequestBody({ ...config, stream: true });
     const headers = {
@@ -156,7 +175,7 @@ export class OpenAICompatibleClient extends BaseApiClient {
     const endpoint = this.getEndpoint();
 
     try {
-      const response = await fetch(`${this.baseUrl}${endpoint}`, {
+      const response = await fetch(this.buildUrl(endpoint), {
         method: 'POST',
         headers,
         body: JSON.stringify(requestBody),
@@ -404,12 +423,24 @@ export class OpenAICompatibleClient extends BaseApiClient {
 
     const delta = choice.delta as Record<string, unknown> | undefined;
 
-    // Text delta
+    // Text delta — pass through thinking tag parser for chain-of-thought providers
     if (delta?.content && choice.finish_reason !== 'tool_calls') {
-      yield {
-        type: 'text_delta',
-        text: delta.content as string,
-      };
+      const caps = getCapabilities(this.provider, this.model);
+      if (caps.supportsChainOfThought) {
+        for (const event of this.thinkingParser.process(delta.content as string)) {
+          yield {
+            type: event.type === 'thinking_delta' ? 'thinking_delta' : 'text_delta',
+            ...(event.type === 'thinking_delta'
+              ? { thinking: event.content }
+              : { text: event.content }),
+          };
+        }
+      } else {
+        yield {
+          type: 'text_delta',
+          text: delta.content as string,
+        };
+      }
     }
 
     // Tool calls - accumulate incremental argument chunks

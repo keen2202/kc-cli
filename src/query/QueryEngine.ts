@@ -378,6 +378,11 @@ export class QueryEngine {
               yield this.createTextDeltaEvent(event.text);
             }
             break;
+          case 'thinking_delta':
+            if (event.thinking) {
+              yield this.createThinkingDeltaEvent(event.thinking);
+            }
+            break;
           case 'tool_use':
             if (event.toolCall) {
               currentToolCalls.push(event.toolCall);
@@ -481,6 +486,10 @@ export class QueryEngine {
   // Event factory methods
   private createTextDeltaEvent(text: string): AgentEvent {
     return { type: 'agent:text_delta', text, timestamp: Date.now() };
+  }
+
+  private createThinkingDeltaEvent(thinking: string): AgentEvent {
+    return { type: 'agent:thinking_delta', thinking, timestamp: Date.now() };
   }
 
   private createTurnCompleteEvent(message: AssistantMessage): AgentEvent {

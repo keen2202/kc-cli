@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import { renderToolCallCard, type ToolCallData } from './ToolCallCard';
+import { renderThinkingChain, type ThinkingChain } from './ThinkingChainView';
 import type { Theme, ThemeTokens } from '../theme';
 
 export interface ChatMessage {
@@ -10,7 +11,11 @@ export interface ChatMessage {
   toolCalls?: ToolCallData[];
 }
 
-export function renderChatMessage(msg: ChatMessage, theme?: Theme): string {
+export function renderChatMessage(
+  msg: ChatMessage,
+  theme?: Theme,
+  thinkingChain?: ThinkingChain,
+): string {
   const tokens = theme?.resolve();
   const lines: string[] = [];
 
@@ -18,6 +23,10 @@ export function renderChatMessage(msg: ChatMessage, theme?: Theme): string {
     const prefix = tokens ? tokens['chat.user']('> ') : chalk.cyan.bold('> ');
     lines.push(prefix + msg.content);
   } else if (msg.role === 'assistant') {
+    // Render thinking chain above assistant content
+    if (thinkingChain && tokens) {
+      lines.push(renderThinkingChain(thinkingChain, tokens));
+    }
     if (msg.content) {
       lines.push(msg.content);
     }
@@ -36,6 +45,12 @@ export function renderChatMessage(msg: ChatMessage, theme?: Theme): string {
   return lines.join('\n');
 }
 
-export function renderChatView(messages: ChatMessage[], theme?: Theme): string {
-  return messages.map(m => renderChatMessage(m, theme)).join('\n');
+export function renderChatView(
+  messages: ChatMessage[],
+  theme?: Theme,
+  thinkingChains?: Map<string, ThinkingChain>,
+): string {
+  return messages.map(m =>
+    renderChatMessage(m, theme, thinkingChains?.get(m.id)),
+  ).join('\n');
 }

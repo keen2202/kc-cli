@@ -5,6 +5,7 @@ import { BaseApiClient, ApiError } from './BaseApiClient';
 import type { LLMStreamEvent, LLMRequestConfig, LLMResponse, TokenUsage } from './BaseApiClient';
 import type { ChatMessage, ToolCall, ToolResult } from '../types/message';
 import type { ToolDefinition } from '../types/tools';
+import { getCapabilities } from './capabilities';
 
 export interface AnthropicConfig {
   apiKey: string;
@@ -155,6 +156,13 @@ export class AnthropicClient extends BaseApiClient {
 
     if (config.temperature !== undefined) {
       body.temperature = config.temperature;
+    }
+
+    // Enable extended thinking when supported and opted-in
+    const caps = getCapabilities('anthropic', this.model);
+    if (caps.supportsExtendedThinking && process.env.KC_THINKING_ENABLED !== 'false') {
+      const budgetTokens = parseInt(process.env.KC_THINKING_BUDGET_TOKENS || '10000', 10);
+      body.thinking = { type: 'enabled', budget_tokens: budgetTokens };
     }
 
     return body;
@@ -339,6 +347,7 @@ export class AnthropicClient extends BaseApiClient {
       currentEventType: null as string | null,
       currentToolCall: null as Partial<ToolCall> | null,
       toolInputBuffer: '',
+      isThinking: false,
     };
 
     try {
@@ -382,6 +391,7 @@ export class AnthropicClient extends BaseApiClient {
       currentEventType: string | null;
       currentToolCall: Partial<ToolCall> | null;
       toolInputBuffer: string;
+      isThinking: boolean;
     }
   ): Generator<LLMStreamEvent> {
     let eventType: string | null = null;
@@ -435,6 +445,7 @@ export class AnthropicClient extends BaseApiClient {
     ctx: {
       currentToolCall: Partial<ToolCall> | null;
       toolInputBuffer: string;
+      isThinking: boolean;
     }
   ): Generator<LLMStreamEvent> {
     switch (eventType) {
@@ -461,6 +472,8 @@ export class AnthropicClient extends BaseApiClient {
             input: {},
           };
           ctx.toolInputBuffer = '';
+        } else if (contentBlock?.type === 'thinking') {
+          ctx.isThinking = true;
         }
         break;
       }
@@ -472,6 +485,11 @@ export class AnthropicClient extends BaseApiClient {
             type: 'text_delta',
             text: delta.text as string,
           };
+        } else if (delta?.type === 'thinking_delta') {
+          yield {
+            type: 'thinking_delta',
+            thinking: delta.thinking as string,
+          };
         } else if (delta?.type === 'input_json_delta') {
           ctx.toolInputBuffer += ((delta.partial_json as string) || '');
         }
@@ -479,7 +497,9 @@ export class AnthropicClient extends BaseApiClient {
       }
 
       case 'content_block_stop':
-        if (ctx.currentToolCall) {
+        if (ctx.isThinking) {
+          ctx.isThinking = false;
+        } else if (ctx.currentToolCall) {
           try {
             const toolCall: ToolCall = {
               id: ctx.currentToolCall.id || '',

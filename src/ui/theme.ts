@@ -61,6 +61,10 @@ export interface ThemeTokens {
   'overlay.selected': typeof chalk;
   'error.text': typeof chalk;
   'warning.text': typeof chalk;
+  'thinking.label': typeof chalk;
+  'thinking.content': typeof chalk;
+  'thinking.step': typeof chalk;
+  'thinking.folded': typeof chalk;
 }
 
 export interface Theme {
@@ -102,6 +106,10 @@ function buildResolver(t: Theme): () => ThemeTokens {
     'overlay.selected': chalk.hex(t.colors.highlight).bold,
     'error.text': chalk.hex(t.colors.error),
     'warning.text': chalk.hex(t.colors.warning),
+    'thinking.label': chalk.hex(t.colors.secondary).bold,
+    'thinking.content': chalk.hex(t.colors.muted).dim,
+    'thinking.step': chalk.hex(t.colors.secondary),
+    'thinking.folded': chalk.hex(t.colors.muted),
   });
 }
 

@@ -4,6 +4,7 @@ import { getErrorMessage } from '../../types/errors';
 import { renderStatusBar } from './StatusBar';
 import { renderToolCallCard, type ToolCallData } from './ToolCallCard';
 import { renderChatView, type ChatMessage } from './ChatView';
+import { classifyThinkingSteps, renderThinkingChain, type ThinkingChain } from './ThinkingChainView';
 import { renderInputBox, createInputState, type InputState } from './InputBox';
 import { renderSidebar, createSidebarData, type SidebarData, type SidebarTool } from './Sidebar';
 import { renderMultiFileDiff, type FileDiff } from '../diff-viewer';
@@ -89,6 +90,8 @@ export class App {
   private budgetMiddleware: ReturnType<typeof createBudgetMiddleware>;
   private bridgeMiddleware: ReturnType<typeof createBridgeMiddleware>;
   private _currentAssistantMsg: ChatMessage | null = null;
+  private _currentThinkingChain: ThinkingChain | null = null;
+  private _thinkingChains: Map<string, ThinkingChain> = new Map();
   private density: Density = 'normal';
 
   // ── Performance: virtual scrolling ──
@@ -340,6 +343,7 @@ export class App {
       height: (process.stdout.rows || 24) - 8,
       theme: this.theme,
       virtualScrollThreshold: VIRTUAL_SCROLL_THRESHOLD,
+      thinkingChains: this._thinkingChains,
     });
 
     // Interleave sidebar and main content
@@ -480,6 +484,12 @@ export class App {
       assistantMsg.content = errTokens['error.text'](`Error: ${getErrorMessage(error)}`);
     }
 
+    // Persist thinking chain for this message
+    if (this._currentThinkingChain) {
+      this._thinkingChains.set(assistantMsg.id, this._currentThinkingChain);
+      this._currentThinkingChain = null;
+    }
+
     this._currentAssistantMsg = null;
     this.turnCount++;
     this.clearScreen();
@@ -498,6 +508,22 @@ export class App {
         this.clearScreen();
         this.render();
         break;
+
+      case 'thinking_delta': {
+        if (!this._currentThinkingChain) {
+          this._currentThinkingChain = {
+            steps: [],
+            rawContent: '',
+            folded: true,
+            startTime: Date.now(),
+          };
+        }
+        this._currentThinkingChain.rawContent += ev.thinking;
+        this._currentThinkingChain.steps = classifyThinkingSteps(this._currentThinkingChain.rawContent);
+        this.clearScreen();
+        this.render();
+        break;
+      }
 
       case 'tool_started':
       case 'tool_use_start': {
@@ -815,6 +841,19 @@ export class App {
         this.clearScreen();
         this.renderImmediate();
         break;
+      case 'toggleThinking': {
+        // Toggle fold/expand on the most recent thinking chain
+        const lastChain = this._currentThinkingChain
+          || (this._thinkingChains.size > 0
+            ? Array.from(this._thinkingChains.values()).pop()
+            : null);
+        if (lastChain) {
+          lastChain.folded = !lastChain.folded;
+          this.clearScreen();
+          this.renderImmediate();
+        }
+        break;
+      }
       case 'exit':
         this.running = false;
         console.log(chalk.yellow('\nGoodbye!'));

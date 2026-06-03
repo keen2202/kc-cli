@@ -12,10 +12,17 @@ export interface ClassifiedError {
   context: string;
 }
 
-const MAX_RETRIES = 10;
-const BASE_DELAY_MS = 1000;
-const RATE_LIMIT_BASE_DELAY_MS = 5000;
-const MAX_BACKOFF_MS = 60_000;
+export interface EnhancedClassifiedError extends ClassifiedError {
+  toolCallId?: string;
+  expectedBehavior?: string;
+  actualBehavior?: string;
+  repairSuggestion?: string;
+}
+
+const MAX_RETRIES = 8;
+const BASE_DELAY_MS = 2000;
+const RATE_LIMIT_BASE_DELAY_MS = 8000;
+const MAX_BACKOFF_MS = 120_000;
 
 // Pre-compiled regex patterns for error classification (single test instead of multiple includes())
 const RATE_LIMIT_REGEX = /429|rate.?limit/;
@@ -141,21 +148,78 @@ export function classifyApiError(error: Error): ClassifiedError {
   return { error, errorClass: 'permanent', retryable: false, context: 'unknown' };
 }
 
-export function classifyToolError(error: Error, toolName: string): ClassifiedError {
+export function classifyToolError(error: Error, toolName: string, toolCallId?: string): EnhancedClassifiedError {
   const message = error.message.toLowerCase();
 
   // Degraded: tool timeout
   if (TOOL_TIMEOUT_REGEX.test(message)) {
-    return { error, errorClass: 'degraded', retryable: false, context: `tool_timeout:${toolName}` };
+    return {
+      error, errorClass: 'degraded', retryable: false,
+      context: `tool_timeout:${toolName}`,
+      toolCallId,
+      actualBehavior: `Tool '${toolName}' exceeded execution time limit`,
+      repairSuggestion: 'Increase timeout with KC_TOOL_TIMEOUT_MS, or break the task into smaller steps',
+    };
   }
 
   // Permanent: permission denied
   if (PERMISSION_DENIED_REGEX.test(message)) {
-    return { error, errorClass: 'permanent', retryable: false, context: `permission_denied:${toolName}` };
+    return {
+      error, errorClass: 'permanent', retryable: false,
+      context: `permission_denied:${toolName}`,
+      toolCallId,
+      actualBehavior: `Permission denied for tool '${toolName}'`,
+      repairSuggestion: 'Check file permissions or add an allow rule in .kc-cli/settings.json',
+    };
+  }
+
+  // File system errors
+  if (message.includes('eacces') || message.includes('permission denied')) {
+    return {
+      error, errorClass: 'permanent', retryable: false,
+      context: `permission_denied:${toolName}`,
+      toolCallId,
+      actualBehavior: 'File system permission denied',
+      repairSuggestion: 'Check file/directory permissions or run with appropriate privileges',
+    };
+  }
+
+  if (message.includes('enoent') || message.includes('no such file')) {
+    return {
+      error, errorClass: 'degraded', retryable: false,
+      context: `file_not_found:${toolName}`,
+      toolCallId,
+      actualBehavior: 'File or directory not found',
+      repairSuggestion: 'Verify the path exists and is spelled correctly',
+    };
+  }
+
+  if (message.includes('enomem') || message.includes('out of memory')) {
+    return {
+      error, errorClass: 'degraded', retryable: false,
+      context: `out_of_memory:${toolName}`,
+      toolCallId,
+      actualBehavior: 'Out of memory during tool execution',
+      repairSuggestion: 'Reduce context size or split the task into smaller pieces',
+    };
+  }
+
+  if (message.includes('syntaxerror') || message.includes('unexpected token')) {
+    return {
+      error, errorClass: 'degraded', retryable: false,
+      context: `syntax_error:${toolName}`,
+      toolCallId,
+      actualBehavior: 'Syntax or parsing error in tool output',
+      repairSuggestion: 'Check that the input format is valid JSON/text',
+    };
   }
 
   // Degraded: tool execution failed (continue with other tools)
-  return { error, errorClass: 'degraded', retryable: false, context: `tool_failed:${toolName}` };
+  return {
+    error, errorClass: 'degraded', retryable: false,
+    context: `tool_failed:${toolName}`,
+    toolCallId,
+  };
 }
 
 export function getRetryDelay(attemptNumber: number, baseMs: number = BASE_DELAY_MS): number {

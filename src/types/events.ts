@@ -83,4 +83,6 @@ export type AgentEvent =
   | { type: 'agent:steered'; message: ChatMessage; timestamp: number }
   | { type: 'agent:complete'; timestamp: number }
   | { type: 'agent:tool_hint'; toolName: string; hint: string; timestamp: number }
+  | { type: 'agent:thinking_delta'; thinking: string; timestamp: number }
+  | { type: 'agent:cache_status'; hit: boolean; timestamp: number }
   | MultiAgentEvent;

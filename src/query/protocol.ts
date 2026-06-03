@@ -61,6 +61,7 @@ export type ChatMessage = UserMessage | AssistantMessage | SystemMessage | ToolM
 // Streaming events
 export type StreamEvent =
   | { type: 'text_delta'; text: string }
+  | { type: 'thinking_delta'; thinking: string }
   | { type: 'tool_use_start'; toolCall: ToolCall }
   | { type: 'tool_use_end'; toolCall: ToolCall; result: ToolResult }
   | { type: 'error'; error: Error }

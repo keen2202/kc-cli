@@ -4,11 +4,15 @@ import type { ChatMessage, ToolCall } from '../types/message';
 import type { ToolDefinition } from '../types/tools';
 
 export interface LLMStreamEvent {
-  type: 'text_delta' | 'tool_use' | 'tool_result' | 'stop' | 'error';
+  type: 'text_delta' | 'tool_use' | 'tool_result' | 'stop' | 'error'
+    | 'thinking_delta' | 'usage_update' | 'cache_status' | 'model_info';
   text?: string;
   toolCall?: ToolCall;
   error?: Error;
   usage?: TokenUsage;
+  thinking?: string;
+  cacheHit?: boolean;
+  model?: string;
 }
 
 export interface TokenUsage {

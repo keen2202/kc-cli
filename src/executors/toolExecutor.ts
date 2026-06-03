@@ -15,6 +15,7 @@ import { Semaphore } from '../utils/semaphore';
 import { DEFAULT_TOOL_TIMEOUT_MS } from '../constants';
 import { getErrorMessage } from '../types/errors';
 import { logger } from '../services/logger';
+import { classifyToolError } from '../services/error-classifier';
 
 /**
  * Key used to mark tool input that has already had its command
@@ -293,9 +294,14 @@ export class ToolExecutor {
 
       return finalResult;
     } catch (error) {
+      const classified = classifyToolError(error instanceof Error ? error : new Error(String(error)), toolCall.toolName, toolCall.id);
+      let output = `Tool execution failed: ${getErrorMessage(error)}`;
+      if (classified.repairSuggestion) {
+        output += `\nSuggestion: ${classified.repairSuggestion}`;
+      }
       return {
         toolCallId: toolCall.id,
-        output: `Tool execution failed: ${getErrorMessage(error)}`,
+        output,
         isError: true,
       };
     }
