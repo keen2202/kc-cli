@@ -138,6 +138,20 @@ export class QueryEngine {
   }
 
   /**
+   * Update the API key at runtime (e.g., from /key command).
+   * Recreates the API client with the new key.
+   */
+  setApiKey(apiKey: string): void {
+    this.config.apiKey = apiKey;
+    this.apiClient = createAPIClient({
+      provider: this.config.provider,
+      apiKey,
+      baseUrl: this.config.apiBaseUrl,
+      model: this.config.model,
+    });
+  }
+
+  /**
    * Main query entry point - uses state machine to manage lifecycle
    */
   async *submitMessage(userMessage: string): AsyncGenerator<StreamEvent | AgentEvent> {

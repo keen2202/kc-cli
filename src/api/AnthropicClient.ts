@@ -31,6 +31,9 @@ export class AnthropicClient extends BaseApiClient {
    * Send a chat completion request
    */
   async chat(config: LLMRequestConfig): Promise<LLMResponse> {
+    if (!this.apiKey) {
+      throw new ApiError('Anthropic API key is required. Use /key to set.', 401);
+    }
     const requestBody = this.buildRequestBody({ ...config, stream: false });
     const headers = this.buildHeaders();
 
@@ -58,6 +61,9 @@ export class AnthropicClient extends BaseApiClient {
    * Stream chat completion response
    */
   async *streamChat(config: LLMRequestConfig): AsyncGenerator<LLMStreamEvent> {
+    if (!this.apiKey) {
+      throw new ApiError('Anthropic API key is required. Use /key to set.', 401);
+    }
     const requestBody = this.buildRequestBody({ ...config, stream: true });
     const headers = {
       ...this.buildHeaders(),

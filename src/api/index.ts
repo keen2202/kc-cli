@@ -123,88 +123,64 @@ export function createAPIClient(config: APIClientFactoryConfig): BaseApiClient {
 
   switch (provider) {
     case 'openai':
-      if (!apiKey) {
-        throw new Error('OpenAI API key is required');
-      }
       return new OpenAICompatibleClient({
-        apiKey,
+        apiKey: apiKey || '',
         baseUrl: baseUrl || 'https://api.openai.com',
         model: resolveModel('openai', model),
         provider: 'openai',
       });
 
     case 'qwen':
-      if (!apiKey) {
-        throw new Error('Qwen (DashScope) API key is required');
-      }
       return new OpenAICompatibleClient({
-        apiKey,
+        apiKey: apiKey || '',
         baseUrl: baseUrl || 'https://dashscope.aliyuncs.com',
         model: resolveModel('qwen', model),
         provider: 'qwen',
       });
 
     case 'glm':
-      if (!apiKey) {
-        throw new Error('GLM (Zhipu AI) API key is required');
-      }
       return new OpenAICompatibleClient({
-        apiKey,
+        apiKey: apiKey || '',
         baseUrl: baseUrl || 'https://open.bigmodel.cn/api/paas',
         model: resolveModel('glm', model),
         provider: 'glm',
       });
 
     case 'deepseek':
-      if (!apiKey) {
-        throw new Error('DeepSeek API key is required');
-      }
       return new OpenAICompatibleClient({
-        apiKey,
+        apiKey: apiKey || '',
         baseUrl: baseUrl || 'https://api.deepseek.com',
         model: resolveModel('deepseek', model),
         provider: 'deepseek',
       });
 
     case 'mimo':
-      if (!apiKey) {
-        throw new Error('MiMo API key is required');
-      }
       return new OpenAICompatibleClient({
-        apiKey,
+        apiKey: apiKey || '',
         baseUrl: baseUrl || 'https://api.xiaomimimo.com',
         model: resolveModel('mimo', model),
         provider: 'mimo',
       });
 
     case 'kimi':
-      if (!apiKey) {
-        throw new Error('Kimi (Moonshot) API key is required');
-      }
       return new OpenAICompatibleClient({
-        apiKey,
+        apiKey: apiKey || '',
         baseUrl: baseUrl || 'https://api.moonshot.cn',
         model: resolveModel('kimi', model),
         provider: 'kimi',
       });
 
     case 'step':
-      if (!apiKey) {
-        throw new Error('Step (阶跃星辰) API key is required');
-      }
       return new OpenAICompatibleClient({
-        apiKey,
+        apiKey: apiKey || '',
         baseUrl: baseUrl || 'https://api.stepfun.com',
         model: resolveModel('step', model),
         provider: 'step',
       });
 
     case 'gemini':
-      if (!apiKey) {
-        throw new Error('Gemini API key is required');
-      }
       return new OpenAICompatibleClient({
-        apiKey,
+        apiKey: apiKey || '',
         baseUrl: baseUrl || 'https://generativelanguage.googleapis.com',
         model: resolveModel('gemini', model),
         provider: 'gemini',
@@ -219,11 +195,8 @@ export function createAPIClient(config: APIClientFactoryConfig): BaseApiClient {
       });
 
     case 'anthropic':
-      if (!apiKey) {
-        throw new Error('Anthropic API key is required');
-      }
       return new AnthropicClient({
-        apiKey,
+        apiKey: apiKey || '',
         baseUrl: baseUrl || 'https://api.anthropic.com',
         model: resolveModel('anthropic', model),
       });

@@ -76,6 +76,7 @@ export class App {
   private turnCount: number = 0;
   private sessionStartTime: number;
   private running: boolean = true;
+  private rlClosed: boolean = false;
   private sidebarData: SidebarData;
   private sidebarWidth: number = 34;
   private pendingDiffs: FileDiff[] = [];
@@ -183,6 +184,7 @@ export class App {
     // Graceful shutdown
     const cleanup = () => {
       this.running = false;
+      this.rlClosed = true;
       this.throttledRender.cancel();
       this.debouncedPrompt.cancel();
       this.terminateDiffWorker();
@@ -300,15 +302,14 @@ export class App {
    * Layout:
    * ┌──────────────────────────────────────────────────────────┐
    * │ Header: kc CLI v2.0 · Model · Session                    │
-   * ├────────────┬─────────────────────────────────────────────┤
-   * │ Sidebar    │ Main Chat Area                              │
-   * │ (tools/    │ User: Create a web server                   │
-   * │  files/    │ Assistant: I'll create... [streaming]       │
-   * │  tasks)    │ ┌─ ToolCall: Bash ──────────────────────┐   │
-   * │            │ │ Running...                             │   │
-   * │            │ └────────────────────────────────────────┘   │
-   * ├────────────┴─────────────────────────────────────────────┤
-   * │ Input: > Type your message...                            │
+   * ├─────────────────────────────────────────────┬────────────┤
+   * │ Main Chat Area                              │ Sidebar    │
+   * │ User: Create a web server                   │ (tools/    │
+   * │ Assistant: I'll create... [streaming]       │  files/    │
+   * │ ┌─ ToolCall: Bash ──────────────────────┐   │  tasks)    │
+   * │ │ Running...                             │   │            │
+   * │ └────────────────────────────────────────┘   │            │
+   * ├─────────────────────────────────────────────┼────────────┤
    * │ Status: ✓ Ready · 3 tools used · $0.05 spent             │
    * └──────────────────────────────────────────────────────────┘
    */
@@ -346,7 +347,7 @@ export class App {
       thinkingChains: this._thinkingChains,
     });
 
-    // Interleave sidebar and main content
+    // Interleave main content and sidebar (chat left, sidebar right)
     const maxLines = Math.max(sidebarLines.length, chatLines.length);
     for (let i = 0; i < maxLines; i++) {
       const sidebarLine = sidebarLines[i] || ' '.repeat(this.sidebarWidth);
@@ -357,16 +358,16 @@ export class App {
       if (plainChat.length > mainWidth) {
         // Re-render with truncation
         const truncated = this.truncateAnsi(chatLine, mainWidth);
-        process.stdout.write(`${sidebarLine}  ${truncated}\n`);
+        process.stdout.write(`${truncated}  ${sidebarLine}\n`);
       } else {
         const padding = ' '.repeat(Math.max(0, mainWidth - plainChat.length));
-        process.stdout.write(`${sidebarLine}  ${chatLine}${padding}\n`);
+        process.stdout.write(`${chatLine}${padding}  ${sidebarLine}\n`);
       }
     }
 
     // ── Separator ──
     const sepBorder = tokens['overlay.border'];
-    console.log(sepBorder('├' + '─'.repeat(this.sidebarWidth - 2) + '┤' + '─'.repeat(terminalWidth - this.sidebarWidth - 1)));
+    console.log(sepBorder('├' + '─'.repeat(terminalWidth - this.sidebarWidth - 1) + '┼' + '─'.repeat(this.sidebarWidth - 2) + '┤'));
 
     // ── Overlay Layer ──
     if (!this.overlayManager.isEmpty()) {
@@ -374,8 +375,7 @@ export class App {
       console.log(this.overlayManager.render(terminalWidth, process.stdout.rows || 24, this.theme));
     }
 
-    // ── Input + Status ──
-    console.log(renderInputBox(this.inputState, 'kc>', this.theme));
+    // ── Status ──
     const status = renderStatusBar({
       provider: this.provider,
       model: this.model,
@@ -385,6 +385,16 @@ export class App {
     }, this.theme);
     if (status) {
       console.log(status);
+    }
+
+    // ── Clear stale lines from previous render ──
+    const headerLineCount = headerResult.lines.length;
+    const overlayLines = !this.overlayManager.isEmpty() ? 2 : 0;
+    const statusLines = status ? status.split('\n').length : 0;
+    const linesRendered = headerLineCount + maxLines + 1 + overlayLines + statusLines;
+    const termHeight = process.stdout.rows || 24;
+    for (let i = linesRendered; i < termHeight; i++) {
+      process.stdout.write('\x1B[2K\n');
     }
   }
 
@@ -407,7 +417,7 @@ export class App {
   }
 
   private prompt(): void {
-    if (!this.running) return;
+    if (!this.running || this.rlClosed) return;
 
     // Use palette-specific prompt when palette is open
     const promptTokens = this.theme.resolve();
@@ -416,6 +426,7 @@ export class App {
       ? promptTokens['input.steer']('overlay> ')
       : promptTokens['input.prompt']('kc> ');
 
+    try {
     this.rl.question(promptLabel, async (input) => {
       if (!this.running) return;
 
@@ -456,11 +467,13 @@ export class App {
 
       this.prompt();
     });
+    } catch {
+      // readline was closed between guard check and question() call
+    }
   }
 
   private addMessage(msg: ChatMessage): void {
     this.messages.push(msg);
-    this.clearScreen();
     this.renderImmediate();
   }
 
@@ -492,7 +505,6 @@ export class App {
 
     this._currentAssistantMsg = null;
     this.turnCount++;
-    this.clearScreen();
     this.renderImmediate();
   }
 
@@ -505,7 +517,6 @@ export class App {
     switch (type) {
       case 'text_delta':
         assistantMsg.content = (assistantMsg.content || '') + ev.text;
-        this.clearScreen();
         this.render();
         break;
 
@@ -520,7 +531,6 @@ export class App {
         }
         this._currentThinkingChain.rawContent += ev.thinking;
         this._currentThinkingChain.steps = classifyThinkingSteps(this._currentThinkingChain.rawContent);
-        this.clearScreen();
         this.render();
         break;
       }
@@ -535,7 +545,6 @@ export class App {
         assistantMsg.toolCalls = assistantMsg.toolCalls || [];
         assistantMsg.toolCalls.push(toolCall);
         this.updateSidebarTool({ name: ev.toolCall.toolName, status: 'running' });
-        this.clearScreen();
         this.renderImmediate();
         break;
       }
@@ -560,7 +569,6 @@ export class App {
           this.captureDiffFromToolResult(ev.toolCall.toolName, ev.result?.metadata);
         }
         this.showDiffIfPending(assistantMsg);
-        this.clearScreen();
         this.renderImmediate();
         break;
       }
@@ -578,7 +586,6 @@ export class App {
             duration: this.calcDuration(lastTool.startTime, lastTool.endTime || Date.now()),
           });
         }
-        this.clearScreen();
         this.renderImmediate();
         break;
       }
@@ -594,7 +601,6 @@ export class App {
           assistantMsg.content = (assistantMsg.content || '') +
             errTokens['error.text'](`\n✗ ${errorMsg}`);
         }
-        this.clearScreen();
         this.renderImmediate();
         break;
       }
@@ -773,6 +779,7 @@ export class App {
    * Switch stdin to raw mode for arrow key navigation in overlays.
    */
   private _enableRawInput(): void {
+    this.rlClosed = true;
     this.rl.close();
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(true);
@@ -793,6 +800,7 @@ export class App {
       input: process.stdin,
       output: process.stdout,
     });
+    this.rlClosed = false;
   }
 
   /**
@@ -856,6 +864,7 @@ export class App {
       }
       case 'exit':
         this.running = false;
+        this.rlClosed = true;
         console.log(chalk.yellow('\nGoodbye!'));
         this.rl.close();
         process.exit(0);
@@ -881,6 +890,7 @@ export class App {
   private openHelpPanel(): void {
     const commands = [
       { name: '/help', description: 'Show this help' },
+      { name: '/key', description: 'Set API key at runtime' },
       { name: '/clear', description: 'Clear conversation' },
       { name: '/sidebar', description: 'Toggle sidebar visibility' },
       { name: '/status', description: 'Show current status' },
@@ -1031,6 +1041,7 @@ export class App {
 
       case 'exit':
         this.running = false;
+        this.rlClosed = true;
         console.log(chalk.yellow('\nGoodbye!'));
         this.rl.close();
         process.exit(0);
@@ -1096,6 +1107,27 @@ export class App {
         this.openHelpPanel();
         break;
 
+      case '/key': {
+        const key = parts[1];
+        if (key) {
+          this.queryEngine.setApiKey(key);
+          this.addMessage({
+            id: `sys-${Date.now()}`,
+            role: 'system',
+            content: chalk.green('API key updated.'),
+            timestamp: Date.now(),
+          });
+        } else {
+          this.addMessage({
+            id: `sys-${Date.now()}`,
+            role: 'system',
+            content: 'Usage: /key <api-key>',
+            timestamp: Date.now(),
+          });
+        }
+        break;
+      }
+
       case '/clear':
         this.messages = [];
         this.turnCount = 0;
@@ -1139,6 +1171,7 @@ export class App {
 
       case '/exit':
         this.running = false;
+        this.rlClosed = true;
         console.log(chalk.yellow('\nGoodbye!'));
         this.rl.close();
         process.exit(0);

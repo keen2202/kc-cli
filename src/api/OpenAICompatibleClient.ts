@@ -132,6 +132,9 @@ export class OpenAICompatibleClient extends BaseApiClient {
    * Send a chat completion request
    */
   async chat(config: LLMRequestConfig): Promise<LLMResponse> {
+    if (!this.apiKey) {
+      throw new ApiError(`${this.provider} API key is required. Use /key to set.`, 401);
+    }
     const requestBody = this.buildRequestBody({ ...config, stream: false });
     const headers = this.buildHeaders();
 
@@ -162,6 +165,9 @@ export class OpenAICompatibleClient extends BaseApiClient {
    * Stream chat completion response
    */
   async *streamChat(config: LLMRequestConfig): AsyncGenerator<LLMStreamEvent> {
+    if (!this.apiKey) {
+      throw new ApiError(`${this.provider} API key is required. Use /key to set.`, 401);
+    }
     // Clear tool call buffer from any previous stream
     this.toolCallBuffer.clear();
     this.thinkingParser.reset();
