@@ -3,6 +3,7 @@
 import type { PermissionMode } from '../types/permissions';
 import type { Config } from './config';
 import { getServiceContainer } from '../services/ServiceContainer';
+import type { GlobalRegistry } from '../agp/registry';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -17,6 +18,8 @@ export interface GlobalState {
   maxTurns: number | null;
   maxBudgetUsd: number | null;
   config: Config | null;
+  /** AGP Global Registry (initialized lazily) */
+  agpRegistry?: GlobalRegistry;
 }
 
 let state: GlobalState | null = null;

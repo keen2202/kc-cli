@@ -8,6 +8,8 @@ import chalk from 'chalk';
 import * as path from 'path';
 import { getErrorMessage } from './types/errors';
 
+import { getGlobalRegistry } from './agp/registry';
+
 import { profileCheckpoint, getProfileReport } from './bootstrap/profiler';
 import { initializeState, getState, updateState } from './bootstrap/state';
 import { loadConfig } from './bootstrap/config';
@@ -215,6 +217,29 @@ async function runAgent(prompt: string | undefined, opts: any) {
     }
   }
   profileCheckpoint('plugins_initialized');
+
+  // Phase 3d: Initialize AGP (Autogenesis Protocol) system
+  if (!opts.bare) {
+    try {
+      const agpRegistry = getGlobalRegistry({
+        persistDir: path.join(cwd, '.kc-cli', 'agp'),
+        tracingEnabled: true,
+        evolution: { enabled: false, budget: 3, targetResources: [], safetyInvariants: [], autoRollback: true, persistState: true },
+      });
+      updateState({ agpRegistry } as any);
+      // Load persisted AGP state if available
+      const loaded = agpRegistry.loadState();
+      if (opts.verbose && loaded.loaded > 0) {
+        console.log(chalk.gray(`  AGP: ${loaded.loaded} resources restored from disk`));
+      }
+    } catch (_err) {
+      // AGP is optional enhancement, don't block startup
+      if (opts.verbose) {
+        console.warn(chalk.yellow(`  AGP: initialization skipped (${_err instanceof Error ? _err.message : _err})`));
+      }
+    }
+  }
+  profileCheckpoint('agp_initialized');
 
   // Phase 4: Create query engine
   const tools = toolRegistry.getAllTools();

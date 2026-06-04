@@ -44,6 +44,11 @@ export interface QueryEngineConfig {
     ask?: string[];
     allow?: string[];
   };
+  /** AGP Evolution hook — called after query completion if evolution is enabled */
+  evolution?: {
+    enabled: boolean;
+    onEvolve?: (sessionId: string) => Promise<void>;
+  };
 }
 
 /**
@@ -214,6 +219,34 @@ export class QueryEngine {
                 break;
               }
               this.stateMachine.transitionTo('completed');
+              // AGP Evolution hook: trigger self-evolution after completion
+              if (this.config.evolution?.enabled && this.config.evolution.onEvolve) {
+                try {
+                  this.stateStore.set({
+                    evolutionState: {
+                      active: true,
+                      iteration: 0,
+                      committedChanges: 0,
+                      rolledBackChanges: 0,
+                    },
+                  } as any);
+                  this.stateMachine.forceTransitionTo('evolving');
+                  await this.config.evolution.onEvolve(this.stateStore.get().sessionId);
+                  this.stateStore.set({
+                    evolutionState: {
+                      active: false,
+                      iteration: 0,
+                      lastEvolutionAt: Date.now(),
+                      committedChanges: 0,
+                      rolledBackChanges: 0,
+                    },
+                  } as any);
+                } catch {
+                  // Evolution failure is non-fatal
+                }
+                // Restore state machine back to completed after evolution
+                this.stateMachine.transitionTo('completed');
+              }
               yield this.createCompleteEvent();
             }
             break;
