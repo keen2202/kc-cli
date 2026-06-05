@@ -90,6 +90,15 @@ export interface ToolDefinition<Input = Record<string, unknown>, Output = unknow
   alwaysLoad?: boolean;
   searchHint?: string;
   timeout?: number; // Custom timeout in ms for this tool
+
+  // ── AGP Extension Fields (optional, backward-compatible) ──────────────────
+
+  /** AGP evolvability marker: 1 = evolvable by SEPL operators, 0 = frozen */
+  agpEvolvability?: 0 | 1;
+  /** AGP version string (semver) */
+  agpVersion?: string;
+  /** AGP implementation descriptor (import path or source) */
+  agpImplementationDescriptor?: string;
 }
 
 export type ToolName =

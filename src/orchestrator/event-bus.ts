@@ -7,6 +7,27 @@ import type { MultiAgentEvent } from '../types/orchestrator.js';
 type EventHandler = (event: AgentEvent | MultiAgentEvent) => void;
 type AnyHandler = (agentId: string, event: AgentEvent | MultiAgentEvent) => void;
 
+// ─── AGP Evolution Events ─────────────────────────────────────────────────
+
+/**
+ * AGP evolution event types for multi-agent coordination.
+ */
+export type EvolutionEventType =
+  | 'evolution:started'
+  | 'evolution:committed'
+  | 'evolution:rolled_back'
+  | 'evolution:resource_updated'
+  | 'evolution:cycle_complete';
+
+export interface EvolutionEvent {
+  type: EvolutionEventType;
+  timestamp: number;
+  sessionId: string;
+  iteration: number;
+  resources?: string[];
+  details?: Record<string, unknown>;
+}
+
 /**
  * EventBus - In-memory pub/sub system for agent communication
  *
@@ -135,6 +156,27 @@ export class EventBus {
    */
   getAgentIds(): string[] {
     return Array.from(this.handlers.keys());
+  }
+
+  // ─── AGP Evolution Event Helpers ────────────────────────────────────────
+
+  /**
+   * Emit an evolution event to all agents.
+   */
+  emitEvolution(event: EvolutionEvent): void {
+    // Use a pseudo-agent to avoid double-notifying onAny handlers
+    this.emit('__evolution__', event as any);
+  }
+
+  /**
+   * Subscribe to evolution events only.
+   */
+  onEvolution(handler: (event: EvolutionEvent) => void): () => void {
+    return this.onAny((agentId, event) => {
+      if (agentId === '__evolution__') {
+        handler(event as unknown as EvolutionEvent);
+      }
+    });
   }
 }
 

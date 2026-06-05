@@ -11,7 +11,7 @@ import type { AgentEvent } from '../state/types.js';
 import type { MultiAgentEvent } from '../types/orchestrator.js';
 import type { ToolUseContext, ToolDefinition, ToolName } from '../types/tools.js';
 import type { PermissionMode } from '../types/permissions.js';
-import { EventBus } from './event-bus.js';
+import { EventBus, type EvolutionEvent } from './event-bus.js';
 import { InProcessBackend } from './backends/in-process.js';
 import { ResultAggregator } from './result-aggregator.js';
 import { deriveChildPermissions } from './permission-cascader.js';
@@ -264,6 +264,26 @@ export class AgentOrchestrator {
   async shutdownAll(force = false): Promise<void> {
     await this.backend.shutdownAll();
     this.eventBus.clear();
+  }
+
+  // ─── AGP Evolution Coordination ─────────────────────────────────────────
+
+  /**
+   * Notify all sub-agents about an evolution event.
+   * Used to coordinate resource updates across the multi-agent system.
+   */
+  broadcastEvolution(event: Omit<EvolutionEvent, 'timestamp'>): void {
+    this.eventBus.emitEvolution({
+      ...event,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * Get the event bus for advanced evolution event subscription.
+   */
+  getEventBus(): EventBus {
+    return this.eventBus;
   }
 }
 
