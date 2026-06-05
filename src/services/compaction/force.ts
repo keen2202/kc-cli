@@ -2,9 +2,9 @@
 // Priority 30 - last resort. Self-contained implementation.
 // Always returns canHandle=true as a fallback.
 
-import type { ChatMessage } from '../../types/message';
+import type { ChatMessage } from '../../query/protocol';
 import type { CompactionEngine, CompactionContext, CompactionEngineResult } from './types';
-import { ok, err } from '../../types/result';
+import { ok, err } from '../../utils/result';
 import { estimateMessageTokens, estimateMessageTokensArray } from '../../utils/tokenEstimation';
 
 /** Absolute token limit for force truncation */

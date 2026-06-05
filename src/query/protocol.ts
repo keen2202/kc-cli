@@ -1,6 +1,6 @@
 // Message types for the conversation system
 
-import type { ToolResult as ToolResultGeneric } from '../types/tools';
+import type { ToolResult as ToolResultGeneric } from '../tools/protocol';
 
 // Re-export ToolResult<string> for backward compatibility
 // This is the ToolResult type used in message passing (string output)

@@ -1,7 +1,7 @@
 // Shared event types - single source of truth for agent and orchestrator events
-// This breaks the circular dependency between state/types and types/orchestrator
+// Single source of truth for agent and orchestrator event types
 
-import type { ChatMessage, ToolCall, ToolResult } from './message';
+import type { ChatMessage, ToolCall, ToolResult } from '../query/protocol';
 
 /**
  * Token usage tracking

@@ -5,7 +5,7 @@ import {
   MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES,
   COMPACTABLE_TOOLS,
 } from './compaction';
-import type { ChatMessage } from '../types/message';
+import type { ChatMessage } from '../query/protocol';
 import type { CompactConfig } from './compaction';
 
 function makeMessages(count: number, contentLength: number = 100): ChatMessage[] {

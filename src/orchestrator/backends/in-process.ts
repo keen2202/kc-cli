@@ -13,8 +13,8 @@ import type {
   SubAgentResult,
   QueryEngineLike,
 } from '../types.js';
-import type { ToolUseContext, ToolDefinition, ToolName } from '../../types/tools.js';
-import type { PermissionMode } from '../../types/permissions.js';
+import type { ToolUseContext, ToolDefinition, ToolName } from '../../tools/protocol.js';
+import type { PermissionMode } from '../../permissions/protocol.js';
 import type { AgentEvent } from '../../state/types.js';
 import { EventBus } from '../event-bus.js';
 import {

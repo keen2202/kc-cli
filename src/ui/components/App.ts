@@ -1,6 +1,6 @@
 import readline from 'readline';
 import chalk from 'chalk';
-import { getErrorMessage } from '../../types/errors';
+import { getErrorMessage } from '../../utils/errors';
 import { renderStatusBar } from './StatusBar';
 import { renderToolCallCard, type ToolCallData } from './ToolCallCard';
 import { renderChatView, type ChatMessage } from './ChatView';
@@ -43,7 +43,7 @@ import { createBridgeMiddleware } from '../middleware/bridge';
 import { getBreakpoint, type Density } from '../layout';
 import type { QueryEngine } from '../../query/QueryEngine';
 import type { AgentEvent } from '../../state/types';
-import type { StreamEvent } from '../../types/message';
+import type { StreamEvent } from '../../query/protocol';
 
 /** Threshold: use virtual scrolling when message count exceeds this */
 const VIRTUAL_SCROLL_THRESHOLD = 100;

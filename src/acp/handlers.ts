@@ -6,9 +6,9 @@ import { toolRegistry, registerBuiltInTools } from '../tools';
 import { initializeState, getState } from '../bootstrap/state';
 import { loadConfig } from '../bootstrap/config';
 import type { AgentEvent } from '../state/types';
-import type { StreamEvent } from '../types/message';
+import type { StreamEvent } from '../query/protocol';
 import type { LLMProvider } from '../api';
-import { getErrorMessage } from '../types/errors';
+import { getErrorMessage } from '../utils/errors';
 import { v4 as uuidv4 } from 'uuid';
 
 export interface ACPHandlerState {

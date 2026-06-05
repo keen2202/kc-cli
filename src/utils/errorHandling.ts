@@ -1,6 +1,6 @@
 // Unified error handling utilities
 
-import { isExecError, getErrorMessage, getErrorStack } from '../types/errors';
+import { isExecError, getErrorMessage, getErrorStack } from '../utils/errors';
 import { logger } from '../services/logger';
 
 /**

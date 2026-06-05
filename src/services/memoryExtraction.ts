@@ -1,7 +1,7 @@
 // Memory extraction service - background extraction with cursor-based throttling
 
 import { createHash } from 'crypto';
-import type { ChatMessage } from '../types/message';
+import type { ChatMessage } from '../query/protocol';
 import type { AgentState } from '../state/types';
 import type { PostTurnHookContext } from '../hooks/postTurnHooks';
 import type { MemoryEntry, MemoryType } from '../memory/types';

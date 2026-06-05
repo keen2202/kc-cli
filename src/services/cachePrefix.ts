@@ -3,7 +3,7 @@
 //   Immutable Prefix (frozen) → Append-Only Log (messages) → Ephemeral Zone (per-turn)
 
 import { createHash } from 'node:crypto';
-import type { ToolDefinition } from '../types/tools';
+import type { ToolDefinition } from '../tools/protocol';
 
 /**
  * Provider-specific cache strategy.

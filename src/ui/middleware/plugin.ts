@@ -1,5 +1,5 @@
 import type { EventMiddleware, UIEvent } from '../event-bus';
-import type { ToolCall } from '../../types/message';
+import type { ToolCall } from '../../query/protocol';
 
 export interface PluginEventHooks {
   onToolStart?(toolCall: ToolCall): void;

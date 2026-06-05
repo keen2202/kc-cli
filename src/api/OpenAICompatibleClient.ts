@@ -5,8 +5,8 @@ import { logger } from '../services/logger';
 
 import { BaseApiClient, ApiError } from './BaseApiClient';
 import type { LLMStreamEvent, LLMRequestConfig, LLMResponse, TokenUsage } from './BaseApiClient';
-import type { ChatMessage, ToolCall } from '../types/message';
-import type { ToolDefinition } from '../types/tools';
+import type { ChatMessage, ToolCall } from '../query/protocol';
+import type { ToolDefinition } from '../tools/protocol';
 import { canonicalStringify } from '../services/cachePrefix';
 import { ThinkingTagParser } from './ThinkingTagParser';
 import { getCapabilities } from './capabilities';

@@ -2,13 +2,13 @@
 
 import { z } from 'zod';
 import { buildTool, toolResult, toolError } from '../../Tool';
-import type { ToolUseContext, ToolResult as ToolResultType } from '../../types/tools';
-import type { PermissionResult } from '../../types/permissions';
+import type { ToolUseContext, ToolResult as ToolResultType } from '../protocol';
+import type { PermissionResult } from '../../permissions/protocol';
 import { hasPermissionsToUseTool } from '../../permissions/engine';
 import { DANGEROUS_BASH_PATTERNS, isReadOnlyBashCommand } from '../../permissions/readonlyCommands';
 import { normalizeCommand } from '../../permissions/commandNormalizer';
 import { isAlreadySandboxWrapped } from '../../executors/toolExecutor';
-import { isExecError, getErrorMessage } from '../../types/errors';
+import { isExecError, getErrorMessage } from '../../utils/errors';
 import { DEFAULT_MAX_BUFFER } from '../../constants';
 import { exec } from 'child_process';
 import { promisify } from 'util';

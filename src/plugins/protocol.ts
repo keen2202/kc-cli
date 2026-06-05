@@ -1,5 +1,5 @@
-import type { ToolDefinition, ToolUseContext } from '../types/tools';
-import type { ChatMessage } from '../types/message';
+import type { ToolDefinition, ToolUseContext } from '../tools/protocol';
+import type { ChatMessage } from '../query/protocol';
 
 export interface PluginHooks {
   preToolUse?: (toolName: string, input: Record<string, unknown>, context: ToolUseContext) => Promise<Record<string, unknown> | null>;

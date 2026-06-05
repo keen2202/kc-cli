@@ -1,7 +1,7 @@
 // QueryEngine compaction phase logic
 
 import { logger } from '../services/logger';
-import type { ChatMessage, StreamEvent } from '../types/message';
+import type { ChatMessage, StreamEvent } from '../query/protocol';
 import type { AgentEvent } from '../state/types';
 import { shouldCompact, microcompact, fullCompact, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES, needsForceTruncation, forceTruncate } from '../services/compaction';
 import { estimateMessageTokensArray } from '../utils/tokenEstimation';

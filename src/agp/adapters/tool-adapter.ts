@@ -7,7 +7,7 @@
  * This is the bridge between the existing tool system and the AGP RSPL layer.
  */
 
-import type { ToolDefinition } from '../../types/tools';
+import type { ToolDefinition } from '../../tools/protocol';
 import type { ResourceRegistrationRecord, ResourceEntity, ToolMetadata, ExportedRepresentation } from '../protocol';
 import { createResourceEntity, createRegistrationRecord, createFunctionCallingRep } from '../types';
 

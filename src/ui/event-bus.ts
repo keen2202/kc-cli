@@ -6,7 +6,7 @@
  */
 
 import type { AgentEvent } from '../state/types';
-import type { StreamEvent } from '../types/message';
+import type { StreamEvent } from '../query/protocol';
 
 export type UIEvent = AgentEvent | StreamEvent;
 

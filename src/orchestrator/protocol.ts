@@ -1,9 +1,9 @@
 // Multi-agent coordination types
 
-import type { ToolName } from '../types/tools.js';
-import type { PermissionMode } from '../types/permissions.js';
+import type { ToolName } from '../tools/protocol.js';
+import type { PermissionMode } from '../permissions/protocol.js';
 import type { AgentEvent } from '../state/types.js';
-import type { StreamEvent } from '../types/message.js';
+import type { StreamEvent } from '../query/protocol.js';
 
 /**
  * QueryEngine interface - avoids circular import while providing type safety
@@ -71,10 +71,10 @@ export interface SubAgentRuntime {
   error?: Error;
 }
 
-export type { SubAgentResult, MultiAgentEvent } from '../types/orchestrator.js';
+export type { SubAgentResult, MultiAgentEvent } from '../state/events.js';
 
 // Re-import for local use
-import type { SubAgentResult } from '../types/orchestrator.js';
+import type { SubAgentResult } from '../state/events.js';
 
 /**
  * Aggregated result from multiple sub-agents

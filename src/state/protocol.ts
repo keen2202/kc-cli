@@ -1,9 +1,9 @@
 // State machine types for the agent system
 
-import type { ChatMessage, ToolCall, ToolResult } from '../types/message';
-import type { PermissionMode } from '../types/permissions';
+import type { ChatMessage, ToolCall, ToolResult } from '../query/protocol';
+import type { PermissionMode } from '../permissions/protocol';
 import type { LLMProvider } from '../api';
-import type { TokenUsage } from '../types/events';
+import type { TokenUsage } from '../state/events';
 
 /**
  * Agent state names - represents the current phase of the query loop

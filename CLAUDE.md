@@ -26,7 +26,7 @@ npm run kc             # Start interactive REPL
 - **UI**: `src/ui/` — Terminal UI with theme system, mouse support, multi-panel layout, steer mode (Ctrl+I)
 - **LSP**: `src/lsp/` — Language server integration (TS, Go, Python, Rust, Java, C++, Ruby)
 - **MCP**: `src/mcp/` — Model Context Protocol client with stdio/HTTP transports
-- **State**: `src/state/` — Observable state store (`store.ts`), state machine validation (`machine.ts`), session tree for branching conversations (`session-tree.ts`); protocol types in `state/protocol.ts`
+- **State**: `src/state/` — Observable state store (`store.ts`), state machine validation (`machine.ts`), session tree for branching conversations (`session-tree.ts`), event types (`events.ts`); protocol types in `state/protocol.ts`
 - **Plugins**: `src/plugins/` — Contribution-based plugin system (tools, hooks, permissionRules, prompts, mcpServers)
 - **Compaction**: `src/services/compaction/` — Tiered engine (CachedMicro→Snip→Full→Force) with priority-based selection
 - **Cache**: `src/services/cache/` — TieredCache (memory + disk), LRU eviction, compression, consistency
@@ -35,6 +35,11 @@ npm run kc             # Start interactive REPL
 - **Commands**: `src/commands/` — CLI command handlers (/branch, /checkout, /history)
 - **Metrics**: `src/metrics/` — Cache hit/miss tracking
 - **Terminal**: `src/terminal/` — Terminal utilities
+- **Executors**: `src/executors/` — Tool execution orchestration (`toolExecutor.ts`)
+- **Hooks**: `src/hooks/` — Post-turn hook processing (`postTurnHooks.ts`)
+- **Utils**: `src/utils/` — Shared utilities (error handling, path security, semaphore, token estimation, format)
+- **ACP**: `src/acp/` — Agent Communication Protocol server and handlers
+- **AGP**: `src/agp/` — Autogenesis Protocol for self-evolving multi-agent system (adapters, SEPL evolution loop, strategies)
 
 ## Conventions
 
@@ -44,7 +49,7 @@ npm run kc             # Start interactive REPL
 - Tests in `src/` co-located as `*.test.ts` files
 - Coverage thresholds: lines 60%, branches 50%, functions 60%, statements 60%
 - Config priority: defaults < user (`~/.kc-cli/settings.json`) < project (`.kc-cli/settings.json`) < env (`KC_*`) < CLI args
-- Protocol-first: each module defines public types in `protocol.ts`, legacy `types/` files are re-export barrels
+- Protocol-first: each module defines public types in `protocol.ts`
 
 ## Key Types
 
@@ -68,6 +73,8 @@ npm run kc             # Start interactive REPL
 
 ## Documentation
 
-- **RepoWiki**: `docs/repowiki/` — 15 deep-dive documents covering all subsystems (Home, Architecture, Query-Engine, Tools-System, API-Clients, Permission-System, Sandbox, Orchestrator, Memory-System, Plugin-System, UI-System, State-Management, Configuration, Testing, Development-Guide)
-- **Guides**: `docs/guides/` — Tool development, API clients, MCP, LSP, UI, plugins, migration
-- **Specs**: `docs/specs/` — Architecture optimization, UI event system, v2/v3 specs
+- **Reference**: `docs/repowiki/` — 15 deep-dive documents covering all subsystems (Home, Architecture, Query-Engine, Tools-System, API-Clients, Permission-System, Sandbox, Orchestrator, Memory-System, Plugin-System, UI-System, State-Management, Configuration, Testing, Development-Guide)
+- **Guides**: `docs/guides/` — Tool development, API clients, MCP, LSP, plugins, migration, SWE-bench
+- **Specs**: `docs/specs/` — Architecture optimization, UI event system, NEXT optimization
+- **Tasks**: `docs/tasks/` — Active task breakdowns (tech review V2, self-evolving, v3.1/v4)
+- **Archive**: `docs/archive/` — Historical completed specs, tasks, and reviews (v2/v3 upgrades, test coverage, compliance)

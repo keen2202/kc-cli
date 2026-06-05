@@ -11,7 +11,7 @@ import {
   isPermissionError,
   getErrorCode,
 } from './errorHandling';
-import { ExecError } from '../types/errors';
+import { ExecError } from '../utils/errors';
 import { logger } from '../services/logger';
 
 describe('withToolErrorHandling', () => {

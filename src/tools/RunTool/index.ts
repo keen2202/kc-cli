@@ -2,10 +2,10 @@
 
 import { z } from 'zod';
 import { buildTool, toolResult, toolError } from '../../Tool';
-import type { ToolResult as ToolResultType } from '../../types/tools';
-import type { PermissionResult } from '../../types/permissions';
+import type { ToolResult as ToolResultType } from '../protocol';
+import type { PermissionResult } from '../../permissions/protocol';
 import { isAlreadySandboxWrapped } from '../../executors/toolExecutor';
-import { isExecError, getErrorMessage } from '../../types/errors';
+import { isExecError, getErrorMessage } from '../../utils/errors';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { DANGEROUS_BASH_PATTERNS } from '../../permissions/readonlyCommands';

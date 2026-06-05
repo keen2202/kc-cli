@@ -1,7 +1,7 @@
 // Base API Client - Abstract interface for LLM providers
 
-import type { ChatMessage, ToolCall } from '../types/message';
-import type { ToolDefinition } from '../types/tools';
+import type { ChatMessage, ToolCall } from '../query/protocol';
+import type { ToolDefinition } from '../tools/protocol';
 import type { LLMStreamEvent, LLMRequestConfig, LLMResponse } from './protocol';
 import { ApiError } from './protocol';
 import { z } from 'zod';

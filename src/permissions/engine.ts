@@ -5,7 +5,7 @@ import type {
   PermissionContext,
   PermissionRule,
   PermissionBehavior,
-} from '../types/permissions';
+} from '../permissions/protocol';
 import type { PluginPermissionRule } from '../plugins/types';
 import { getState } from '../bootstrap/state';
 import { containsProtectedPath } from './protectedPaths';

@@ -6,7 +6,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import * as path from 'path';
-import { getErrorMessage } from './types/errors';
+import { getErrorMessage } from './utils/errors';
 
 import { getGlobalRegistry } from './agp/registry';
 
@@ -16,9 +16,9 @@ import { loadConfig } from './bootstrap/config';
 import { toolRegistry, registerBuiltInTools } from './tools';
 import { QueryEngine } from './query/QueryEngine';
 import type { AgentEvent } from './state/types';
-import type { StreamEvent } from './types/message';
+import type { StreamEvent } from './query/protocol';
 import type { LLMProvider } from './api';
-import type { PermissionMode } from './types/permissions';
+import type { PermissionMode } from './permissions/protocol';
 import { formatToolResult, formatBanner, formatSeparator, setBareMode } from './ui';
 import { Spinner } from './ui/spinner';
 import { updateStatus, clearStatus } from './ui/statusline';
@@ -672,7 +672,7 @@ async function listTools() {
   }
 }
 
-import type { ToolDefinition } from './types/tools';
+import type { ToolDefinition } from './tools/protocol';
 
 function buildSystemPrompt(tools: ToolDefinition[]): string {
   const toolNames = tools.map(t => t.name).join(', ');

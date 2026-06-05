@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { buildTool, toolResult, toolError } from '../Tool';
-import type { ToolDefinition, ToolResult as ToolResultType, ToolUseContext } from '../types/tools';
+import type { ToolDefinition, ToolResult as ToolResultType, ToolUseContext } from '../tools/protocol';
 import type { MCPTool, MCPToolResult } from './types';
 import type { MCPClientManager } from './client-manager';
 

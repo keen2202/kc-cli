@@ -1,6 +1,6 @@
 // Tool registry and assembly
 
-import type { ToolDefinition, ToolName, ToolRegistry } from './types/tools';
+import type { ToolDefinition, ToolName, ToolRegistry } from './tools/protocol';
 import { logger } from './services/logger';
 import {
   TOOL_MANIFEST,

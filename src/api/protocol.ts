@@ -1,7 +1,7 @@
 // API client protocol types
 
-import type { ChatMessage, ToolCall } from '../types/message';
-import type { ToolDefinition } from '../types/tools';
+import type { ChatMessage, ToolCall } from '../query/protocol';
+import type { ToolDefinition } from '../tools/protocol';
 
 export interface LLMStreamEvent {
   type: 'text_delta' | 'tool_use' | 'tool_result' | 'stop' | 'error'

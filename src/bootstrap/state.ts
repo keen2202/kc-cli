@@ -1,6 +1,6 @@
 // Global state management
 
-import type { PermissionMode } from '../types/permissions';
+import type { PermissionMode } from '../permissions/protocol';
 import type { Config } from './config';
 import { getServiceContainer } from '../services/ServiceContainer';
 import type { GlobalRegistry } from '../agp/registry';

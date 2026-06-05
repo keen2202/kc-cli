@@ -2,8 +2,8 @@
 
 import { z } from 'zod';
 import { buildTool, toolResult, toolError } from '../../Tool';
-import type { ToolResult as ToolResultType } from '../../types/tools';
-import type { PermissionResult } from '../../types/permissions';
+import type { ToolResult as ToolResultType } from '../protocol';
+import type { PermissionResult } from '../../permissions/protocol';
 import type { SubAgentSpawnConfig } from '../../orchestrator/types';
 import { getOrchestrator } from '../../orchestrator/agent-orchestrator.js';
 import { createAgentConfig } from '../../orchestrator/agent-definitions.js';

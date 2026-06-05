@@ -1,7 +1,7 @@
 // Memory integration for QueryEngine
 // Connects memory service to the query lifecycle
 
-import type { ChatMessage } from '../types/message';
+import type { ChatMessage } from '../query/protocol';
 import type { MemoryConfig, MemoryEntry } from '../memory/types';
 import { DEFAULT_MEMORY_CONFIG } from '../memory/types';
 import { findRelevantMemories } from '../memory/relevanceSearch';

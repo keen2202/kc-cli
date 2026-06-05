@@ -1,6 +1,6 @@
 // Memory system type definitions
 
-import type { ChatMessage } from '../types/message';
+import type { ChatMessage } from '../query/protocol';
 
 /**
  * Memory types - constrained to 4 discrete types

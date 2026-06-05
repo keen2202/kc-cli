@@ -1,9 +1,9 @@
 // Tool executor - handles single and parallel tool execution with permission checks
 
 import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
-import type { ToolCall, ToolResult } from '../types/message';
-import type { ToolDefinition, ToolUseContext } from '../types/tools';
-import type { PermissionResult } from '../types/permissions';
+import type { ToolCall, ToolResult } from '../query/protocol';
+import type { ToolDefinition, ToolUseContext } from '../tools/protocol';
+import type { PermissionResult } from '../permissions/protocol';
 import type { ToolExecutionState } from '../state/types';
 import type { PluginHooks } from '../plugins/types';
 import { hasPermissionsToUseTool } from '../permissions/engine';
@@ -13,7 +13,7 @@ import { createLocalExecutionEnv } from '../services/execution-env-local';
 import type { ExecutionEnv } from '../services/execution-env';
 import { Semaphore } from '../utils/semaphore';
 import { DEFAULT_TOOL_TIMEOUT_MS } from '../constants';
-import { getErrorMessage } from '../types/errors';
+import { getErrorMessage } from '../utils/errors';
 import { logger } from '../services/logger';
 import { classifyToolError } from '../services/error-classifier';
 
@@ -42,8 +42,8 @@ const SESSION_SECRET = randomBytes(32);
  */
 function createPermissionAdapter(tool: ToolDefinition): (
   input: Record<string, unknown>,
-  context: import('../types/permissions').PermissionContext
-) => import('../types/permissions').PermissionResult {
+  context: import('../permissions/protocol').PermissionContext
+) => import('../permissions/protocol').PermissionResult {
   return (input, context) =>
     tool.checkPermissions
       ? tool.checkPermissions(

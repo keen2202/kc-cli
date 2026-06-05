@@ -2,7 +2,7 @@ import { logger } from '../services/logger';
 // In-memory event bus for multi-agent communication
 
 import type { AgentEvent } from '../state/types.js';
-import type { MultiAgentEvent } from '../types/orchestrator.js';
+import type { MultiAgentEvent } from '../state/events.js';
 
 type EventHandler = (event: AgentEvent | MultiAgentEvent) => void;
 type AnyHandler = (agentId: string, event: AgentEvent | MultiAgentEvent) => void;

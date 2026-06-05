@@ -4,6 +4,7 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 
 ## v3.2 Highlights
 
+- 🧬 **Autogenesis Protocol (AGP)**: Self-evolving multi-agent system with SEPL pipeline (reflect→select→improve→evaluate→commit), version management, and audit logging
 - 🔒 **Sandbox Security**: All shell commands run in isolated sandboxes (Docker/Bubblewrap/seccomp) with network isolation, resource limits, and escape detection
 - 🎨 **Redesigned UI**: Sidebar with file tree (LSP markers), diff preview, command palette, model selector, theme system, mouse support, multi-panel layout
 - 🔌 **LSP Integration**: Code completions, diagnostics, go-to-definition, find references, rename, quick fixes for 9 languages
@@ -316,7 +317,36 @@ src/
 │   ├── store.ts                    # ObservableStateStore (immutable updates + listeners)
 │   ├── machine.ts                  # AgentStateMachine with transition validation
 │   ├── session-tree.ts             # Non-linear conversation tree (branch, checkout, merge)
+│   ├── events.ts                   # AgentEvent, MultiAgentEvent, TokenUsage types
 │   └── types.ts                    # Re-export barrel
+│
+├── agp/                            # Autogenesis Protocol (self-evolving multi-agent)
+│   ├── protocol.ts                 # AGP public types
+│   ├── registry.ts                 # Agent/solution registry
+│   ├── context-manager.ts          # Context management for evolution
+│   ├── version-manager.ts          # Version tracking and rollback
+│   ├── dynamic-manager.ts          # Dynamic agent management
+│   ├── contract-generator.ts       # Contract generation
+│   ├── trace-manager.ts            # Execution tracing
+│   ├── audit-log.ts                # Audit logging
+│   ├── serialization.ts            # State serialization
+│   ├── server-interface.ts         # Server interface
+│   ├── sepl/                       # Self-Evolving Pipeline
+│   │   ├── reflect.ts              # Reflection phase
+│   │   ├── select.ts               # Selection phase
+│   │   ├── improve.ts              # Improvement phase
+│   │   ├── evaluate.ts             # Evaluation phase
+│   │   ├── commit.ts               # Commit phase
+│   │   └── evolution-loop.ts       # Main evolution loop
+│   ├── strategies/
+│   │   ├── prompt-evolution.ts     # Prompt evolution strategy
+│   │   └── solution-evolution.ts   # Solution evolution strategy
+│   └── adapters/
+│       ├── agent-adapter.ts        # Agent adapter
+│       ├── env-adapter.ts          # Environment adapter
+│       ├── mem-adapter.ts          # Memory adapter
+│       ├── prompt-adapter.ts       # Prompt adapter
+│       └── tool-adapter.ts         # Tool adapter
 │
 ├── tools/                          # 21 built-in tool implementations
 │   ├── AgentTool/                  # Sub-agent spawning
@@ -343,15 +373,6 @@ src/
 │
 ├── terminal/                       # Terminal utilities
 │
-├── types/                          # Shared type definitions
-│   ├── tools.ts                    # ToolDefinition, ToolUseContext, ToolRegistry, ToolName
-│   ├── message.ts                  # ChatMessage, ToolCall, StreamEvent types
-│   ├── permissions.ts              # PermissionResult, PermissionMode, PermissionContext
-│   ├── errors.ts                   # KCError, ErrorCode (18 codes)
-│   ├── events.ts                   # AgentEvent, StreamEvent types
-│   ├── result.ts                   # Result<T,E> sum type (ok/err)
-│   └── orchestrator.ts             # SubAgentResult, MultiAgentEvent (shared types)
-│
 ├── ui/                             # Terminal UI components
 │   ├── components/
 │   │   ├── App.ts                  # Main application component
@@ -374,9 +395,14 @@ src/
 │   └── index.ts                    # UI module entry
 │
 └── utils/                          # Shared utilities
+    ├── errors.ts                   # KCError, ErrorCode (18 codes), ExecError, error helpers
+    ├── result.ts                   # Result<T,E> sum type (ok/err, mapResult, flatMap)
+    ├── errorHandling.ts            # Unified error handling wrappers for tools
     ├── tokenEstimation.ts          # tiktoken-based token estimation
     ├── format.ts                   # Date/time formatting (getAgeText)
     ├── path.ts                     # Path validation helpers
+    ├── semaphore.ts                # Async semaphore for concurrency control
+    ├── timeout.ts                  # Timeout utilities
     └── zodToJsonSchema.ts          # Zod schema to JSON Schema converter
 ```
 
@@ -528,17 +554,17 @@ npm run test:coverage # Run tests with coverage report
 
 ### Guides & Specs
 
-- [Architecture](docs/core/architecture.md) — System architecture and design patterns
-- [Configuration](docs/core/configuration.md) — Configuration system and settings
-- [Sandbox Security](docs/core/sandbox-security.md) — Sandboxing and security model
 - [Tool Development](docs/guides/tool-development.md) — Guide to building custom tools
 - [API Clients](docs/guides/api-clients.md) — LLM provider integration
 - [MCP Integration](docs/guides/mcp-integration.md) — Model Context Protocol setup
 - [LSP Integration](docs/guides/lsp-integration.md) — Language server integration
-- [UI Guide](docs/guides/ui-guide.md) — Terminal UI usage guide
 - [Plugin Development](docs/guides/plugin-development.md) — Plugin authoring guide
+- [SWE-bench Guide](docs/guides/swe-bench-guide.md) — SWE-bench evaluation guide
+- [Migration Guide](docs/guides/migration-guide.md) — v1 to v2 migration
 - [Architecture Optimization Spec](docs/specs/architecture-optimization-spec.md) — v3.2 design decisions and implementation details
 - [Optimization Tasks](docs/specs/optimization-tasks.md) — Task breakdown with dependency tracking
+- [NEXT Optimization](docs/specs/NEXT_OPTIMIZATION_SPEC.md) — Forward-looking optimization plan
+- [UI Event System](docs/specs/ui-event-system-spec.md) — UI redesign specification
 
 ## License
 

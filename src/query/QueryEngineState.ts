@@ -1,6 +1,6 @@
 // QueryEngine conversation state management
 
-import type { ChatMessage } from '../types/message';
+import type { ChatMessage } from '../query/protocol';
 import { estimateMessageTokensArray } from '../utils/tokenEstimation';
 import { SessionTree, type SessionNode } from '../state/session-tree';
 

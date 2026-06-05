@@ -1,7 +1,7 @@
 // State Validator Service
 // Validates conversation state integrity and repairs corruption issues.
 
-import type { ChatMessage, ToolCall, ToolResult } from '../types/message';
+import type { ChatMessage, ToolCall, ToolResult } from '../query/protocol';
 
 export type IssueType =
   | 'orphaned_tool_result'

@@ -1,7 +1,7 @@
 // Tool types and interfaces
 
 import { z } from 'zod';
-import type { PermissionResult, PermissionContext } from '../types/permissions';
+import type { PermissionResult, PermissionContext } from '../permissions/protocol';
 import type { ExecutionEnv } from '../services/execution-env';
 
 // Forward reference to avoid circular import

@@ -1,7 +1,7 @@
 // Token estimation utilities - tiktoken-based with character heuristic fallback
 // Provides precise token counting using js-tiktoken with LRU caching.
 
-import type { ChatMessage } from '../types/message';
+import type { ChatMessage } from '../query/protocol';
 import { getCacheManager } from '../services/cache';
 
 /**

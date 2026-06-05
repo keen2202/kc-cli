@@ -1,6 +1,6 @@
 // Auto-compaction service - manages conversation context window
 
-import type { ChatMessage } from '../types/message';
+import type { ChatMessage } from '../query/protocol';
 import {
   estimateMessageTokensArray,
   estimateMessageTokens,

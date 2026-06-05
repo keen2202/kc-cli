@@ -2,9 +2,9 @@
 // Priority 10 - targeted removal of large tool outputs without touching conversation flow.
 // Replaces large tool results with truncated versions.
 
-import type { ChatMessage } from '../../types/message';
+import type { ChatMessage } from '../../query/protocol';
 import type { CompactionEngine, CompactionContext, CompactionEngineResult } from './types';
-import { ok, err } from '../../types/result';
+import { ok, err } from '../../utils/result';
 import { estimateMessageTokensArray } from '../../utils/tokenEstimation';
 
 /** Threshold in characters for a tool result to be considered "large" */

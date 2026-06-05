@@ -1,6 +1,6 @@
 // Auto classifier for permission decisions
 
-import type { PermissionResult, PermissionContext } from '../types/permissions';
+import type { PermissionResult, PermissionContext } from '../permissions/protocol';
 import { LOW_RISK_BASH_PATTERNS, MEDIUM_RISK_BASH_PATTERNS } from './readonlyCommands';
 import { containsProtectedPath } from './protectedPaths';
 import { normalizeCommand } from './commandNormalizer';

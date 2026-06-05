@@ -4,8 +4,8 @@ import { logger } from '../services/logger';
 // Sub-modules (ConversationState, CompactionHandler, MemoryHandler, ErrorHandler)
 // handle specific phases to keep QueryEngine as a facade.
 
-import type { ChatMessage, StreamEvent, AssistantMessage, ToolCall, ToolResult } from '../types/message';
-import type { ToolDefinition, ToolUseContext } from '../types/tools';
+import type { ChatMessage, StreamEvent, AssistantMessage, ToolCall, ToolResult } from '../query/protocol';
+import type { ToolDefinition, ToolUseContext } from '../tools/protocol';
 import { AgentStateMachine } from '../state/machine';
 import { ObservableStateStore, createInitialState } from '../state/store';
 import { ToolExecutor } from '../executors/toolExecutor';

@@ -399,7 +399,7 @@ private async finalize(toolCall, input, result, context): Promise<ToolResult> {
 
 **Source:** PilotDeck's `protocol/` subdirectories in every module.
 
-**Solution:** Create `protocol.ts` in each module directory containing all public interfaces. Keep `src/types/` as re-export barrel.
+**Solution:** Create `protocol.ts` in each module directory containing all public interfaces. ~~Keep `src/types/` as re-export barrel.~~ `src/types/` has been fully removed; original types migrated to `src/utils/errors.ts`, `src/utils/result.ts`, `src/state/events.ts`.
 
 **New files:**
 - `src/api/protocol.ts` -- LLMStreamEvent, TokenUsage, LLMRequestConfig, LLMResponse

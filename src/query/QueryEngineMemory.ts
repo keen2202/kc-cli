@@ -3,7 +3,7 @@ import { logger } from '../services/logger';
 
 import { MemoryIntegration, createMemoryIntegration } from '../memory/integration';
 import type { MemoryIntegrationConfig } from '../memory/integration';
-import type { ToolDefinition } from '../types/tools';
+import type { ToolDefinition } from '../tools/protocol';
 
 /**
  * Manages memory integration for QueryEngine.

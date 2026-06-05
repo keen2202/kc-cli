@@ -3,7 +3,7 @@
 import type { SessionSnapshot, SessionFilter } from '../memory/types';
 import { FileMemoryService } from '../memory/FileMemoryService';
 import type { AgentState } from '../state/types';
-import type { ChatMessage } from '../types/message';
+import type { ChatMessage } from '../query/protocol';
 
 export class SessionManager {
   private memoryService: FileMemoryService;

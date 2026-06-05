@@ -3,8 +3,8 @@ import { logger } from '../services/logger';
 // Handles user prompts for permission decisions
 
 import chalk from 'chalk';
-import type { PermissionResult } from '../types/permissions';
-import type { ToolCall } from '../types/message';
+import type { PermissionResult } from '../permissions/protocol';
+import type { ToolCall } from '../query/protocol';
 import * as readline from 'readline';
 
 export interface PermissionHandlerOptions {

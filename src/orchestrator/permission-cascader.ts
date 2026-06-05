@@ -1,7 +1,7 @@
 // Permission cascading system for sub-agents
 
-import type { PermissionMode, PermissionContext } from '../types/permissions.js';
-import type { ToolName } from '../types/tools.js';
+import type { PermissionMode, PermissionContext } from '../permissions/protocol.js';
+import type { ToolName } from '../tools/protocol.js';
 
 /**
  * Permission hierarchy (parent → max child permission)

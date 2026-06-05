@@ -2,7 +2,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { classifier, PermissionClassifier, type ClassifierDecision } from './classifier';
-import type { PermissionContext, PermissionMode } from '../types/permissions';
+import type { PermissionContext, PermissionMode } from '../permissions/protocol';
 
 function makeContext(mode: PermissionMode): PermissionContext {
   return {

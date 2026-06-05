@@ -1,6 +1,6 @@
 // Permission rule matching and management
 
-import type { PermissionRule, PermissionRuleValue, PermissionBehavior } from '../types/permissions';
+import type { PermissionRule, PermissionRuleValue, PermissionBehavior } from '../permissions/protocol';
 import { getCacheManager } from '../services/cache';
 
 /**
@@ -77,7 +77,7 @@ function matchWildcardPattern(pattern: string, text: string): boolean {
  * Create permission rules from configuration
  */
 export function createRulesFromConfig(
-  source: import('../types/permissions').PermissionRuleSource,
+  source: import('../permissions/protocol').PermissionRuleSource,
   behavior: PermissionBehavior,
   rules: string[]
 ): PermissionRule[] {

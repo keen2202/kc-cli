@@ -4,7 +4,7 @@
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getErrorMessage } from '../types/errors';
+import { getErrorMessage } from '../utils/errors';
 
 export interface ImageInfo {
   repository: string;

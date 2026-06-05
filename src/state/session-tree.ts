@@ -1,7 +1,7 @@
 // Session tree for non-linear conversation branching
 
 import { randomUUID } from 'crypto';
-import type { ChatMessage } from '../types/message';
+import type { ChatMessage } from '../query/protocol';
 
 export interface SessionNode {
   id: string;

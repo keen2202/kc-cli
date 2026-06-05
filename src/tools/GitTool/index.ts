@@ -2,11 +2,11 @@
 
 import { z } from 'zod';
 import { buildTool, toolResult, toolError } from '../../Tool';
-import type { ToolResult as ToolResultType } from '../../types/tools';
-import type { PermissionResult } from '../../types/permissions';
+import type { ToolResult as ToolResultType } from '../protocol';
+import type { PermissionResult } from '../../permissions/protocol';
 import { DANGEROUS_GIT_PATTERNS, isReadOnlyGitCommand } from '../../permissions/readonlyCommands';
 import { spawn } from 'child_process';
-import { isExecError, getErrorMessage } from '../../types/errors';
+import { isExecError, getErrorMessage } from '../../utils/errors';
 import { DEFAULT_MAX_BUFFER } from '../../constants';
 
 // Shell metacharacters and control chars that could enable command injection

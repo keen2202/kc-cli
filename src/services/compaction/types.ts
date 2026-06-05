@@ -1,8 +1,8 @@
 // Tiered Compaction Engine types
 // Defines the interface for pluggable compaction strategies.
 
-import type { ChatMessage } from '../../types/message';
-import type { Result } from '../../types/result';
+import type { ChatMessage } from '../../query/protocol';
+import type { Result } from '../../utils/result';
 
 /**
  * Context passed to each compaction engine.

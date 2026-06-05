@@ -2,10 +2,10 @@
 // Priority 20 - LLM-based conversation summarization.
 // Self-contained implementation that doesn't depend on the original compaction.ts.
 
-import type { ChatMessage } from '../../types/message';
+import type { ChatMessage } from '../../query/protocol';
 import type { CompactionEngine, CompactionContext, CompactionEngineResult } from './types';
 import type { BaseApiClient } from '../../api/BaseApiClient';
-import { ok, err } from '../../types/result';
+import { ok, err } from '../../utils/result';
 import { estimateMessageTokensArray, calculateTokensSaved } from '../../utils/tokenEstimation';
 import { classifyApiError, getRetryDelay } from '../error-classifier';
 import { logger } from '../logger';

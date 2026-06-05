@@ -3,7 +3,7 @@
 import type { ProviderCapabilities } from '../capabilities';
 import type { PromptTemplate, TaskType } from './types';
 import { PROVIDER_PROMPTS } from './provider-prompts';
-import type { ToolDefinition } from '../../types/tools';
+import type { ToolDefinition } from '../../tools/protocol';
 
 export interface ConversationContext {
   taskType?: TaskType;

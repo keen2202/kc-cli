@@ -7,7 +7,7 @@ import {
   serializeToolCanonical,
   buildCacheStrategy,
 } from './cachePrefix';
-import type { ToolDefinition } from '../types/tools';
+import type { ToolDefinition } from '../tools/protocol';
 import type { CacheStrategy } from '../api/capabilities';
 
 // Helper: create a minimal ToolDefinition for tests

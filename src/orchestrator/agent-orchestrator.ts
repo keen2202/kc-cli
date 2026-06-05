@@ -8,9 +8,9 @@ import type {
   SubAgentStatus,
 } from './types.js';
 import type { AgentEvent } from '../state/types.js';
-import type { MultiAgentEvent } from '../types/orchestrator.js';
-import type { ToolUseContext, ToolDefinition, ToolName } from '../types/tools.js';
-import type { PermissionMode } from '../types/permissions.js';
+import type { MultiAgentEvent } from '../state/events.js';
+import type { ToolUseContext, ToolDefinition, ToolName } from '../tools/protocol.js';
+import type { PermissionMode } from '../permissions/protocol.js';
 import { EventBus, type EvolutionEvent } from './event-bus.js';
 import { InProcessBackend } from './backends/in-process.js';
 import { ResultAggregator } from './result-aggregator.js';

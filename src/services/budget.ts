@@ -1,5 +1,5 @@
-import { KCError } from '../types/errors';
-import type { ToolResult } from '../types/tools';
+import { KCError } from '../utils/errors';
+import type { ToolResult } from '../tools/protocol';
 import { estimateToolResultTokens } from '../utils/tokenEstimation';
 
 /**

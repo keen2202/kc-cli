@@ -1,4 +1,4 @@
-import type { ToolDefinition } from '../types/tools';
+import type { ToolDefinition } from '../tools/protocol';
 
 /**
  * Tool module convention interface.

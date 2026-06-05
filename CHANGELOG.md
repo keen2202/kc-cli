@@ -5,6 +5,38 @@ All notable changes to KC-CLI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-06-05
+
+### 🧬 Autogenesis Protocol (AGP)
+
+- **Self-evolving multi-agent system**: Full AGP implementation with SEPL pipeline (reflect → select → improve → evaluate → commit)
+- **Adapters**: Agent, environment, memory, prompt, and tool adapters for evolution integration
+- **Strategies**: Prompt evolution and solution evolution strategies
+- **Version management**: Version tracking with rollback capability
+- **Audit logging**: Complete execution trace and audit trail
+- **Context management**: Dynamic context handling for evolution cycles
+
+### 🔧 Engineering — Types Migration
+
+- **Removed `src/types/`**: Eliminated intermediate re-export barrel layer (7 files)
+  - `errors.ts` → `src/utils/errors.ts` (14 consumers updated)
+  - `result.ts` → `src/utils/result.ts` (5 consumers updated)
+  - `events.ts` → `src/state/events.ts` (2+ consumers updated)
+  - Deleted re-export barrels: `message.ts`, `tools.ts`, `permissions.ts`, `orchestrator.ts` (78 consumers migrated to direct `protocol.ts` imports)
+- **Protocol-first enforced**: All modules now import types directly from their canonical `protocol.ts` source
+
+### 📝 Documentation Reorganization
+
+- **Deleted `docs/core/`**: 3 outdated files superseded by repowiki
+- **Created `docs/archive/`**: 13 historical documents moved (completed specs, tasks, reviews)
+- **Cleaned guides**: Removed outdated `ui-guide.md` (v2), kept 7 active guides
+- **Updated repowiki**: Added AGP module to Architecture and Home pages
+- **Updated specs**: Fixed `src/types/` references in architecture-optimization-spec and NEXT_OPTIMIZATION_SPEC
+
+### 📦 Dependencies
+
+- No new dependencies
+
 ## [3.1.0] - 2026-05-22
 
 ### 🧠 Self-Evolving Agent System (TASK-050 through TASK-068)

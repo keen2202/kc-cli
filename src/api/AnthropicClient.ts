@@ -3,8 +3,8 @@ import { logger } from '../services/logger';
 
 import { BaseApiClient, ApiError } from './BaseApiClient';
 import type { LLMStreamEvent, LLMRequestConfig, LLMResponse, TokenUsage } from './BaseApiClient';
-import type { ChatMessage, ToolCall, ToolResult } from '../types/message';
-import type { ToolDefinition } from '../types/tools';
+import type { ChatMessage, ToolCall, ToolResult } from '../query/protocol';
+import type { ToolDefinition } from '../tools/protocol';
 import { getCapabilities } from './capabilities';
 
 export interface AnthropicConfig {

@@ -1,7 +1,7 @@
 // Behavioral Adapter - adapts system prompt, tool hints, and conversation pacing based on user level
 
 import type { UserLevel } from './userProfile';
-import type { ToolDefinition } from '../types/tools';
+import type { ToolDefinition } from '../tools/protocol';
 
 export interface ToolHint {
   toolName: string;

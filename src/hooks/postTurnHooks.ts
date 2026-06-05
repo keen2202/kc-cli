@@ -1,6 +1,6 @@
 // Post-turn hook system - fire-and-forget hooks executed after each turn
 
-import type { ChatMessage } from '../types/message';
+import type { ChatMessage } from '../query/protocol';
 import type { AgentState } from '../state/types';
 
 export interface PostTurnHookContext {

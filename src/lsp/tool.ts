@@ -2,8 +2,8 @@
 
 import { z } from 'zod';
 import { buildTool, toolResult, toolError } from '../Tool';
-import type { ToolResult as ToolResultType } from '../types/tools';
-import type { PermissionResult } from '../types/permissions';
+import type { ToolResult as ToolResultType } from '../tools/protocol';
+import type { PermissionResult } from '../permissions/protocol';
 import { DiagnosticCollector } from './diagnostics';
 import { LSPClientManager, detectLanguage } from './client';
 import type { LSPDiagnostic, LSPHover, LSPLocation } from './types';

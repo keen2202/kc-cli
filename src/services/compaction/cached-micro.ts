@@ -2,9 +2,9 @@
 // Priority 0 - tried first. Caches microcompact results per message hash
 // to avoid redundant processing when messages haven't changed.
 
-import type { ChatMessage } from '../../types/message';
+import type { ChatMessage } from '../../query/protocol';
 import type { CompactionEngine, CompactionContext, CompactionEngineResult } from './types';
-import { ok, err } from '../../types/result';
+import { ok, err } from '../../utils/result';
 import { estimateMessageTokensArray } from '../../utils/tokenEstimation';
 
 /** Message to replace cleared tool results with */

@@ -1,6 +1,6 @@
 import type { Plugin, PluginHooks, PluginPermissionRule, PluginStatus } from './types';
-import type { ToolDefinition, ToolUseContext } from '../types/tools';
-import type { ChatMessage } from '../types/message';
+import type { ToolDefinition, ToolUseContext } from '../tools/protocol';
+import type { ChatMessage } from '../query/protocol';
 import { logger } from '../services/logger';
 import { discoverPlugins, loadPlugin } from './plugin-loader';
 import { registerPostTurnHook } from '../hooks/postTurnHooks';

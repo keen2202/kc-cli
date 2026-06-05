@@ -6,8 +6,8 @@ import type {
   ToolUseContext,
   ToolResult,
   ToolCallProgress,
-} from './types/tools';
-import type { PermissionResult } from './types/permissions';
+} from './tools/protocol';
+import type { PermissionResult } from './permissions/protocol';
 import { withToolErrorHandling } from './utils/errorHandling';
 
 /**
