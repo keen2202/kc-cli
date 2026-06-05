@@ -44,8 +44,11 @@ temp/
 *.tmp
 claude.md
 
-# Documentation (generated/internal docs)
-docs/
+# Documentation (keep core, guides, and repowiki; ignore generated/internal)
+docs/*
+!docs/core/
+!docs/guides/
+!docs/repowiki/
 
 # Evaluation benchmarks
 evaluation/

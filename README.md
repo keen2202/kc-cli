@@ -175,9 +175,12 @@ src/
 │
 ├── bootstrap/                      # Initialization
 │   ├── state.ts                    # GlobalState (session, cwd, permission mode)
-│   ├── config.ts                   # 4-layer config loading (defaults < user < project < env)
+│   ├── config.ts                   # 5-layer config loading (defaults < user < project < env < CLI)
 │   ├── autoConfig.ts               # Auto-configuration with project type detection
 │   └── profiler.ts                 # Startup performance tracking
+│
+├── commands/                       # CLI command handlers
+│   └── branch.ts                   # /branch, /checkout, /history commands
 │
 ├── executors/                      # Tool execution
 │   └── toolExecutor.ts             # Single/parallel execution with timeout + permission checks
@@ -216,7 +219,11 @@ src/
 │   ├── paths.ts                   # Safe file paths with directory traversal prevention
 │   ├── scanner.ts                 # Directory scanning for memory files
 │   ├── promptBuilder.ts           # Memory context formatting for system prompt
+│   ├── protocol.ts                # Memory module public types
 │   └── telemetry.ts               # Memory usage tracking
+│
+├── metrics/                        # Metrics collection
+│   └── cacheMetrics.ts            # Cache hit/miss tracking
 │
 ├── orchestrator/                   # Multi-agent coordination
 │   ├── types.ts                    # SubAgentIdentity, SpawnConfig, Runtime, Error types
@@ -241,14 +248,41 @@ src/
 ├── plugins/                        # Plugin system
 │   ├── plugin-loader.ts            # Plugin discovery and loading
 │   ├── plugin-manager.ts           # Plugin lifecycle management
-│   ├── types.ts                    # Plugin type definitions
+│   ├── protocol.ts                 # Plugin interface and contribution types
+│   ├── types.ts                    # Plugin type definitions (re-export)
 │   └── index.ts                    # Plugin module entry
 │
+├── server/                         # Server components (ACP mode)
+│
 ├── query/                          # Core agent loop
-│   └── QueryEngine.ts              # idle→compact→stream→decide→execute loop + memory integration
+│   ├── QueryEngine.ts              # Facade: idle→compact→stream→decide→execute state machine
+│   ├── QueryEngineState.ts         # Conversation state, message storage, SessionTree branching
+│   ├── QueryEngineCompaction.ts    # Auto-compaction handler (tiered engine selection)
+│   ├── QueryEngineMemory.ts        # Memory integration (pre-query loading, post-turn extraction)
+│   ├── QueryEngineError.ts         # Error handling, circuit breaker, retry logic
+│   └── protocol.ts                 # QueryEngine public types (QueryEngineLike interface)
 │
 ├── services/                       # System services
-│   ├── compaction.ts               # Micro-compact + full-compact (LLM summarization)
+│   ├── budget.ts                   # Proactive token/cost budget enforcement
+│   ├── compaction/                 # Tiered compaction engines
+│   │   ├── cached-micro.ts         # Priority 0: hash-cached tool result stripping
+│   │   ├── snip.ts                 # Priority 10: remove middle messages
+│   │   ├── full.ts                 # Priority 20: LLM-based summarization
+│   │   ├── force.ts                # Priority 30: hard truncation
+│   │   ├── index.ts                # CompactionHandler with priority selection
+│   │   └── types.ts                # CompactionEngine interface
+│   ├── cache/                      # Tiered caching system
+│   │   ├── CacheManager.ts         # Cache creation and management
+│   │   ├── TieredCache.ts          # Multi-tier cache (memory + disk) with LRU eviction
+│   │   ├── compression.ts          # Cache value compression
+│   │   ├── consistency.ts          # Cache consistency verification
+│   │   └── index.ts                # Cache module entry
+│   ├── ServiceContainer.ts         # Dependency injection container
+│   ├── execution-env.ts            # ExecutionEnv interface (FileSystem + Shell)
+│   ├── execution-env-local.ts      # Local filesystem + shell implementation
+│   ├── execution-env-mock.ts       # Mock implementation for testing
+│   ├── cachePrefix.ts              # Stable/ephemeral prompt prefix for cache hits
+│   ├── cacheMetrics.ts             # Cache hit/miss tracking
 │   ├── sessionManager.ts           # Session lifecycle (save, load, archive, prune, stats)
 │   ├── idleDetection.ts            # Idle detection for consolidation triggering
 │   ├── consolidationScheduler.ts   # Scheduled memory consolidation
@@ -275,18 +309,14 @@ src/
 │   ├── sandbox-images.ts           # Docker image management
 │   ├── sandbox-windows.ts          # Windows sandbox backend (job objects)
 │   ├── sandbox-policy.ts           # Per-tool sandbox policies
-│   ├── sandbox-profiles.ts         # Seccomp profiles and shell escaping
-│   └── cache/
-│       ├── CacheManager.ts         # Cache management
-│       ├── TieredCache.ts          # Multi-tier cache (memory + disk)
-│       ├── compression.ts          # Cache compression
-│       ├── consistency.ts          # Cache consistency checks
-│       └── index.ts                # Cache module entry
+│   └── sandbox-profiles.ts         # Seccomp profiles and shell escaping
 │
-├── state/                          # Query loop state machine
-│   ├── types.ts                    # AgentStateName, AgentEvent discriminated union, transitions
+├── state/                          # Observable state management
+│   ├── protocol.ts                 # AgentState, AgentStateName, AgentEvent, transitions
 │   ├── store.ts                    # ObservableStateStore (immutable updates + listeners)
-│   └── machine.ts                  # AgentStateMachine with transition validation
+│   ├── machine.ts                  # AgentStateMachine with transition validation
+│   ├── session-tree.ts             # Non-linear conversation tree (branch, checkout, merge)
+│   └── types.ts                    # Re-export barrel
 │
 ├── tools/                          # 21 built-in tool implementations
 │   ├── AgentTool/                  # Sub-agent spawning
@@ -311,10 +341,15 @@ src/
 │   ├── WebSearchTool/              # Web search via configurable providers
 │   └── TaskStore.ts                # Shared task state storage
 │
+├── terminal/                       # Terminal utilities
+│
 ├── types/                          # Shared type definitions
 │   ├── tools.ts                    # ToolDefinition, ToolUseContext, ToolRegistry, ToolName
 │   ├── message.ts                  # ChatMessage, ToolCall, StreamEvent types
 │   ├── permissions.ts              # PermissionResult, PermissionMode, PermissionContext
+│   ├── errors.ts                   # KCError, ErrorCode (18 codes)
+│   ├── events.ts                   # AgentEvent, StreamEvent types
+│   ├── result.ts                   # Result<T,E> sum type (ok/err)
 │   └── orchestrator.ts             # SubAgentResult, MultiAgentEvent (shared types)
 │
 ├── ui/                             # Terminal UI components
@@ -455,7 +490,7 @@ Four-tier compaction engine with priority-based selection:
 Engines are tried in priority order; chaining occurs when an engine reduces tokens but not enough.
 
 Additional mechanisms:
-- **Token estimation**: Character-based heuristic (`length/4 * 4/3`) for cross-platform compatibility
+- **Token estimation**: tiktoken-based (`js-tiktoken`, cl100k_base / o200k_base / anthropic encodings)
 - **Message trimming**: Hard limit of 1000 messages prevents unbounded memory growth
 - **Cached estimates**: Token counts are cached and invalidated on change to avoid redundant calculations
 - **Budget enforcement**: Optional proactive limits per session/turn/tool-result/sub-agent
@@ -473,15 +508,35 @@ npm run test:coverage # Run tests with coverage report
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) — System architecture and design patterns
-- [Tool Development](docs/tool-development.md) — Guide to building custom tools
-- [Configuration](docs/configuration.md) — Configuration system and settings
-- [API Clients](docs/api-clients.md) — LLM provider integration
-- [MCP Integration](docs/mcp-integration.md) — Model Context Protocol setup
-- [Sandbox Security](docs/sandbox-security.md) — Sandboxing and security model
-- [LSP Integration](docs/lsp-integration.md) — Language server integration
-- [UI Guide](docs/ui-guide.md) — Terminal UI usage guide
-- [Plugin Development](docs/plugin-development.md) — Plugin authoring guide
+### RepoWiki (Deep Dive)
+
+- [Home](docs/repowiki/Home.md) — Overview, architecture diagram, quick start
+- [Architecture](docs/repowiki/Architecture.md) — Layer diagram, init sequence, data flow
+- [Query Engine](docs/repowiki/Query-Engine.md) — State machine, streaming, steering
+- [Tools System](docs/repowiki/Tools-System.md) — 21 tools, registry, two-phase execution
+- [API Clients](docs/repowiki/API-Clients.md) — 11 providers, prompt system
+- [Permission System](docs/repowiki/Permission-System.md) — 6-step deny-first, rule system
+- [Sandbox](docs/repowiki/Sandbox.md) — Isolation backends, HMAC signing, compaction
+- [Orchestrator](docs/repowiki/Orchestrator.md) — Multi-agent lifecycle, EventBus
+- [Memory System](docs/repowiki/Memory-System.md) — File-based memory, consolidation
+- [Plugin System](docs/repowiki/Plugin-System.md) — 5 contribution types, hooks
+- [UI System](docs/repowiki/UI-System.md) — Layout, themes, overlays, mouse support
+- [State Management](docs/repowiki/State-Management.md) — Observable store, SessionTree
+- [Configuration](docs/repowiki/Configuration.md) — 5-layer config, env vars
+- [Testing](docs/repowiki/Testing.md) — Vitest patterns, mocks, coverage
+- [Development Guide](docs/repowiki/Development-Guide.md) — Setup, conventions, debugging
+
+### Guides & Specs
+
+- [Architecture](docs/core/architecture.md) — System architecture and design patterns
+- [Configuration](docs/core/configuration.md) — Configuration system and settings
+- [Sandbox Security](docs/core/sandbox-security.md) — Sandboxing and security model
+- [Tool Development](docs/guides/tool-development.md) — Guide to building custom tools
+- [API Clients](docs/guides/api-clients.md) — LLM provider integration
+- [MCP Integration](docs/guides/mcp-integration.md) — Model Context Protocol setup
+- [LSP Integration](docs/guides/lsp-integration.md) — Language server integration
+- [UI Guide](docs/guides/ui-guide.md) — Terminal UI usage guide
+- [Plugin Development](docs/guides/plugin-development.md) — Plugin authoring guide
 - [Architecture Optimization Spec](docs/specs/architecture-optimization-spec.md) — v3.2 design decisions and implementation details
 - [Optimization Tasks](docs/specs/optimization-tasks.md) — Task breakdown with dependency tracking
 

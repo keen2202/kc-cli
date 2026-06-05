@@ -16,21 +16,25 @@ npm run kc             # Start interactive REPL
 ## Architecture
 
 - **Entry**: `src/main.ts` → REPL + CLI command handling
-- **Core loop**: `src/query/QueryEngine.ts` — idle→compact→stream→decide→execute state machine with steering support
+- **Core loop**: `src/query/QueryEngine.ts` — Facade over 4 sub-modules (State, Compaction, Memory, Error); idle→compact→stream→decide→execute state machine with steering support; protocol types in `query/protocol.ts`
 - **Tools**: `src/tools/` — 21 built-in tools using `buildTool()` factory with Zod schemas, two-phase execution (prepare/execute/finalize)
-- **API clients**: `src/api/` — Anthropic, OpenAI-compatible, Ollama; extend `BaseApiClient`; protocol types in `api/protocol.ts`
+- **API clients**: `src/api/` — 11 providers (Anthropic, OpenAI, DeepSeek, Qwen, GLM, Mimo, Kimi, Step, Gemini, OpenAI-compatible, Ollama); extend `BaseApiClient`; protocol types in `api/protocol.ts`
 - **Permissions**: `src/permissions/` — 6-step deny-first with bypass-immune protected paths + plugin-contributed rules (Step 1.5)
 - **Sandbox**: `src/services/sandbox*.ts` — Docker/Bubblewrap/seccomp backends with fallback chain
 - **Orchestrator**: `src/orchestrator/` — Multi-agent with `AsyncLocalStorage` isolation; protocol types in `orchestrator/protocol.ts`
-- **Memory**: `src/memory/` — File-based persistent memory (user/feedback/project/reference types)
+- **Memory**: `src/memory/` — File-based persistent memory with YAML frontmatter, 4 types (user/feedback/project/reference), relevance search, auto-extraction and consolidation
 - **UI**: `src/ui/` — Terminal UI with theme system, mouse support, multi-panel layout, steer mode (Ctrl+I)
 - **LSP**: `src/lsp/` — Language server integration (TS, Go, Python, Rust, Java, C++, Ruby)
 - **MCP**: `src/mcp/` — Model Context Protocol client with stdio/HTTP transports
-- **State**: `src/state/` — Observable state store, state machine validation, session tree for branching conversations
+- **State**: `src/state/` — Observable state store (`store.ts`), state machine validation (`machine.ts`), session tree for branching conversations (`session-tree.ts`); protocol types in `state/protocol.ts`
 - **Plugins**: `src/plugins/` — Contribution-based plugin system (tools, hooks, permissionRules, prompts, mcpServers)
-- **Budget**: `src/services/budget.ts` — Proactive token budget enforcement per session/turn/tool-result
 - **Compaction**: `src/services/compaction/` — Tiered engine (CachedMicro→Snip→Full→Force) with priority-based selection
+- **Cache**: `src/services/cache/` — TieredCache (memory + disk), LRU eviction, compression, consistency
+- **Budget**: `src/services/budget.ts` — Proactive token/cost budget enforcement per session/turn/tool-result/sub-agent
 - **ExecutionEnv**: `src/services/execution-env.ts` — Swappable FileSystem/Shell abstraction for tools
+- **Commands**: `src/commands/` — CLI command handlers (/branch, /checkout, /history)
+- **Metrics**: `src/metrics/` — Cache hit/miss tracking
+- **Terminal**: `src/terminal/` — Terminal utilities
 
 ## Conventions
 
@@ -61,3 +65,9 @@ npm run kc             # Start interactive REPL
 - Mock ExecutionEnv: `MockFileSystem` + `MockShell` for tool testing without real I/O
 - Sandbox tests: `sandbox-e2e.test.ts` for isolation verification
 - Multi-agent tests: `multi-agent.test.ts` for orchestrator coverage
+
+## Documentation
+
+- **RepoWiki**: `docs/repowiki/` — 15 deep-dive documents covering all subsystems (Home, Architecture, Query-Engine, Tools-System, API-Clients, Permission-System, Sandbox, Orchestrator, Memory-System, Plugin-System, UI-System, State-Management, Configuration, Testing, Development-Guide)
+- **Guides**: `docs/guides/` — Tool development, API clients, MCP, LSP, UI, plugins, migration
+- **Specs**: `docs/specs/` — Architecture optimization, UI event system, v2/v3 specs
