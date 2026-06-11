@@ -257,8 +257,8 @@ export class ResourceSerializer {
         evolvability: (entity.evolvability as 0 | 1) ?? 0,
         metadata: (entity.metadata ?? {}) as any,
         ioMapping: {
-          inputSchema: ioMapping.inputSchema,
-          outputSchema: ioMapping.outputSchema,
+          inputSchema: ioMapping.inputSchema as string | Record<string, unknown> | undefined,
+          outputSchema: ioMapping.outputSchema as string | Record<string, unknown> | undefined,
         },
       },
       version: data.version as string,

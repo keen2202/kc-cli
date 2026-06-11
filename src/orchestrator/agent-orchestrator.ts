@@ -279,12 +279,6 @@ export class AgentOrchestrator {
     });
   }
 
-  /**
-   * Get the event bus for advanced evolution event subscription.
-   */
-  getEventBus(): EventBus {
-    return this.eventBus;
-  }
 }
 
 /**

@@ -15,6 +15,7 @@ import type {
   SEPLOperator,
   SEPLOutput,
   EvolvableState,
+  Hypothesis,
   HypothesisSpace,
   ModificationSpace,
   Modification,
@@ -146,7 +147,7 @@ export class SelectOperator implements SEPLOperator<HypothesisSpace, Modificatio
 
       // Check if the variable's resource is implicated
       const resourceMatch = hypothesis.suspectedResources.some(
-        r => varKey.startsWith(r)
+        (r: string) => varKey.startsWith(r)
       );
 
       // Check if the variable's type is implicated
