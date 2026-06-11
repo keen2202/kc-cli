@@ -97,6 +97,36 @@ export const ConfigSchema = z.object({
     enabled: z.boolean().default(true),
   }).default({}),
 
+  // IM Platform Integration
+  im: z.object({
+    enabled: z.boolean().default(false),
+    adapters: z.object({
+      feishu: z.object({
+        enabled: z.boolean().default(false),
+        appId: z.string().optional(),
+        appSecret: z.string().optional(),
+        options: z.record(z.unknown()).optional(),
+      }).default({ enabled: false }),
+      wecom: z.object({
+        enabled: z.boolean().default(false),
+        appId: z.string().optional(),
+        appSecret: z.string().optional(),
+        options: z.record(z.unknown()).optional(),
+      }).default({ enabled: false }),
+      dingtalk: z.object({
+        enabled: z.boolean().default(false),
+        appId: z.string().optional(),
+        appSecret: z.string().optional(),
+        options: z.record(z.unknown()).optional(),
+      }).default({ enabled: false }),
+    }).default({}),
+    session: z.object({
+      timeoutMinutes: z.number().default(30),
+      maxSessions: z.number().default(100),
+      maxQueueSize: z.number().default(10),
+    }).default({}),
+  }).default({ enabled: false }),
+
   // General
   verbose: z.boolean().default(false),
   color: z.boolean().default(true),
@@ -247,6 +277,24 @@ export function loadEnvConfig(): Partial<Config> {
   }
   if (process.env.KC_MEMORY_AUTO_EXTRACT) {
     mem.autoExtract = process.env.KC_MEMORY_AUTO_EXTRACT === 'true' || process.env.KC_MEMORY_AUTO_EXTRACT === '1';
+  }
+
+  // IM environment variables
+  if (!config.im) config.im = {} as Partial<Config['im']> as Config['im'];
+  const im = config.im;
+  if (process.env.KC_IM_ENABLED) {
+    im.enabled = process.env.KC_IM_ENABLED === 'true' || process.env.KC_IM_ENABLED === '1';
+  }
+  if (!im.adapters) im.adapters = {} as any;
+  if (!im.adapters.feishu) im.adapters.feishu = {} as any;
+  if (process.env.KC_IM_FEISHU_ENABLED) {
+    im.adapters.feishu.enabled = process.env.KC_IM_FEISHU_ENABLED === 'true' || process.env.KC_IM_FEISHU_ENABLED === '1';
+  }
+  if (process.env.KC_IM_FEISHU_APP_ID) {
+    im.adapters.feishu.appId = process.env.KC_IM_FEISHU_APP_ID;
+  }
+  if (process.env.KC_IM_FEISHU_APP_SECRET) {
+    im.adapters.feishu.appSecret = process.env.KC_IM_FEISHU_APP_SECRET;
   }
 
   return config;

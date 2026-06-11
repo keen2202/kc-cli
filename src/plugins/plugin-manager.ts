@@ -1,6 +1,7 @@
 import type { Plugin, PluginHooks, PluginPermissionRule, PluginStatus } from './types';
 import type { ToolDefinition, ToolUseContext } from '../tools/protocol';
 import type { ChatMessage } from '../query/protocol';
+import type { IMAdapter } from '../im/protocol';
 import { logger } from '../services/logger';
 import { discoverPlugins, loadPlugin } from './plugin-loader';
 import { registerPostTurnHook } from '../hooks/postTurnHooks';
@@ -180,6 +181,19 @@ export class PluginManager {
       }
     }
     return rules.sort((a, b) => a.priority - b.priority);
+  }
+
+  /**
+   * Collect IM adapters from all initialized plugins.
+   */
+  getPluginIMAdapters(): IMAdapter[] {
+    const adapters: IMAdapter[] = [];
+    for (const [, loaded] of this.plugins) {
+      if (loaded.status === 'initialized' && loaded.plugin.imAdapters) {
+        adapters.push(...loaded.plugin.imAdapters);
+      }
+    }
+    return adapters;
   }
 
   /**

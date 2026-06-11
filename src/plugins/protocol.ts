@@ -1,5 +1,6 @@
 import type { ToolDefinition, ToolUseContext } from '../tools/protocol';
 import type { ChatMessage } from '../query/protocol';
+import type { IMAdapter } from '../im/protocol';
 
 export interface PluginHooks {
   preToolUse?: (toolName: string, input: Record<string, unknown>, context: ToolUseContext) => Promise<Record<string, unknown> | null>;
@@ -39,6 +40,7 @@ export interface Plugin {
   permissionRules?: PluginPermissionRule[];
   prompts?: PluginPrompt[];
   mcpServers?: PluginMCPConfig[];
+  imAdapters?: IMAdapter[];
   onInit?(): Promise<void>;
   onShutdown?(): Promise<void>;
 }

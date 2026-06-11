@@ -68,6 +68,7 @@ async function main() {
     .option('--json', 'Output events as NDJSON (for IDE integration)')
     .option('--json-pretty', 'Output events as formatted JSON (for debugging)')
     .option('--acp', 'Run as ACP server (JSON-RPC over stdio)')
+    .option('--im', 'Run in IM bridge mode (connect to configured IM platforms)')
     .action(async (prompt: string | undefined, opts: any) => {
       if (opts.acp) {
         const { ACPServer } = await import('./acp');
@@ -240,6 +241,66 @@ async function runAgent(prompt: string | undefined, opts: any) {
     }
   }
   profileCheckpoint('agp_initialized');
+
+  // Phase 3e: Initialize IM bridge (if configured)
+  let imBridge: import('./im/im-bridge').IMBridge | null = null;
+  if (opts.im || config.im?.enabled) {
+    try {
+      const { IMBridge } = await import('./im/im-bridge');
+      const { FeishuAdapter } = await import('./im/adapters/feishu');
+
+      const imConfig = config.im!;
+      const engineFactory = async () => {
+        const sessionTools = toolRegistry.getAllTools();
+        return new QueryEngine(
+          {
+            model,
+            provider: provider as LLMProvider,
+            apiKey,
+            apiBaseUrl,
+            maxTurns: getState().maxTurns || 50,
+            maxBudgetUsd: getState().maxBudgetUsd,
+            systemPrompt: buildSystemPrompt(sessionTools),
+            permissionRules: {
+              deny: config.permissions.deny,
+              ask: config.permissions.ask,
+              allow: config.permissions.allow,
+            },
+          },
+          sessionTools
+        );
+      };
+
+      imBridge = new IMBridge(imConfig, engineFactory);
+
+      if (imConfig.adapters.feishu?.enabled) {
+        imBridge.registerAdapter(new FeishuAdapter(imConfig.adapters.feishu));
+      }
+
+      // Register plugin-contributed adapters
+      if (pluginManager) {
+        const pluginAdapters = pluginManager.getPluginIMAdapters();
+        for (const adapter of pluginAdapters) {
+          imBridge.registerAdapter(adapter);
+        }
+      }
+
+      await imBridge.startAll();
+      console.log(chalk.green('IM bridge started'));
+
+      // Register shutdown handler
+      const shutdownIM = async () => {
+        if (imBridge) {
+          await imBridge.shutdownAll();
+        }
+      };
+      process.on('SIGINT', shutdownIM);
+      process.on('SIGTERM', shutdownIM);
+    } catch (err) {
+      console.error(chalk.red(`IM bridge failed to start: ${err instanceof Error ? err.message : err}`));
+    }
+    profileCheckpoint('im_initialized');
+  }
 
   // Phase 4: Create query engine
   const tools = toolRegistry.getAllTools();
