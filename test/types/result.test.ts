@@ -7,8 +7,8 @@ import {
   mapResult,
   flatMap,
   unwrapOr,
-} from '../../src/types/result';
-import type { Result } from '../../src/types/result';
+} from '../../src/utils/result';
+import type { Result } from '../../src/utils/result';
 
 describe('Result<T, E>', () => {
   describe('ok() and err()', () => {

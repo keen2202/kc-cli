@@ -5,7 +5,7 @@ import {
   DEFAULT_BUDGET_CONFIG,
 } from '../../src/services/budget';
 import type { BudgetConfig, BudgetCheckResult } from '../../src/services/budget';
-import { KCError } from '../../src/types/errors';
+import { KCError } from '../../src/utils/errors';
 
 describe('BudgetEnforcer', () => {
   let enforcer: BudgetEnforcer;

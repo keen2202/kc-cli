@@ -9,7 +9,7 @@ describe('classifyApiError with ApiError (HTTP status codes)', () => {
     expect(result.errorClass).toBe('transient');
     expect(result.retryable).toBe(true);
     expect(result.context).toBe('rate_limit');
-    expect(result.retryAfterMs).toBe(5000);
+    expect(result.retryAfterMs).toBe(8000);
   });
 
   it('should extract Retry-After header in seconds', () => {

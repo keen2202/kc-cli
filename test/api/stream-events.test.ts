@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { LLMStreamEvent } from '../../src/api/BaseApiClient';
-import type { AgentEvent } from '../../src/types/events';
-import { KCError } from '../../src/types/errors';
+import type { AgentEvent } from '../../src/state/events';
+import { KCError } from '../../src/utils/errors';
 
 describe('LLMStreamEvent expanded types', () => {
   it('should accept all new type values', () => {

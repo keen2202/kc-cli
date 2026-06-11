@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { KCError, isExecError, getErrorMessage, getErrorStack } from '../../src/types/errors';
-import type { ErrorCode } from '../../src/types/errors';
+import { KCError, isExecError, getErrorMessage, getErrorStack } from '../../src/utils/errors';
+import type { ErrorCode } from '../../src/utils/errors';
 import { ApiError } from '../../src/api/BaseApiClient';
 
 describe('KCError', () => {

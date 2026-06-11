@@ -141,7 +141,7 @@ describe('Steering — Queue API', () => {
 describe('Steering — agent:steered event type', () => {
   it('agent:steered event has correct shape', async () => {
     // Verify the event type exists in the union and has the right fields
-    const events = await import('../../src/types/events.js');
+    const events = await import('../../src/state/events.js');
 
     // Create a sample steered event to verify the type structure
     const steeredEvent: events.AgentEvent = {

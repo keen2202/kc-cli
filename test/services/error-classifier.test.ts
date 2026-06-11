@@ -12,7 +12,7 @@ describe('classifyApiError', () => {
     expect(result.errorClass).toBe('transient');
     expect(result.retryable).toBe(true);
     expect(result.context).toBe('rate_limit');
-    expect(result.retryAfterMs).toBe(5000);
+    expect(result.retryAfterMs).toBe(8000);
   });
 
   it('should classify rate_limit keyword as transient', () => {
@@ -180,7 +180,7 @@ describe('getRetryDelay', () => {
   it('should use default base delay', () => {
     vi.spyOn(Math, 'random').mockReturnValue(0);
     const delay = getRetryDelay(0);
-    expect(delay).toBe(1000);
+    expect(delay).toBe(2000);
     vi.restoreAllMocks();
   });
 });
