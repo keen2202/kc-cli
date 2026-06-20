@@ -72,11 +72,14 @@ export class App {
   private maxTurns: number;
   private messages: ChatMessage[] = [];
   private inputState: InputState;
-  private rl: readline.Interface;
+  private rl!: readline.Interface;
   private turnCount: number = 0;
   private sessionStartTime: number;
   private running: boolean = true;
   private rlClosed: boolean = false;
+  private _rawModeActive: boolean = false;
+  private _processingRawInput: boolean = false;
+  private _cleanupFn: (() => void) | null = null;
   private sidebarData: SidebarData;
   private sidebarWidth: number = 34;
   private pendingDiffs: FileDiff[] = [];
@@ -171,7 +174,7 @@ export class App {
 
     // Terminal resize handling (debounced)
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-    process.stdout.on('resize', () => {
+    const onResize = () => {
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
         resizeTimer = null;
@@ -179,23 +182,66 @@ export class App {
         this.clearScreen();
         this.renderImmediate();
       }, 100);
-    });
+    };
+    process.stdout.on('resize', onResize);
 
     // Graceful shutdown
     const cleanup = () => {
-      this.running = false;
-      this.rlClosed = true;
-      this.throttledRender.cancel();
-      this.debouncedPrompt.cancel();
-      this.terminateDiffWorker();
+      this.dispose();
       console.log(chalk.yellow('\nGoodbye!'));
-      this.rl.close();
       process.exit(0);
     };
     process.on('SIGINT', cleanup);
     process.on('SIGTERM', cleanup);
 
+    // Store cleanup references for external teardown
+    this._cleanupFn = () => {
+      process.stdout.removeListener('resize', onResize);
+      process.removeListener('SIGINT', cleanup);
+      process.removeListener('SIGTERM', cleanup);
+      if (resizeTimer) clearTimeout(resizeTimer);
+    };
+
     this.prompt();
+  }
+
+  /**
+   * Centralized teardown: cancel timers, close readline, detach process listeners,
+   * terminate diff worker. Safe to call multiple times (idempotent).
+   */
+  private dispose(): void {
+    this.running = false;
+    this.rlClosed = true;
+
+    // Cancel throttled/debounced timers
+    this.throttledRender.cancel();
+    this.debouncedPrompt.cancel();
+
+    // Clean up raw input if active
+    if (this._rawModeActive) {
+      process.stdin.removeListener('data', this._onRawKeypress);
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(false);
+      }
+      this._rawModeActive = false;
+    }
+
+    // Close readline (safe even if already closed)
+    if (this.rl) {
+      try { this.rl.close(); } catch { /* already closed */ }
+    }
+
+    // Terminate diff worker
+    this.terminateDiffWorker();
+
+    // Remove process-level listeners registered in start()
+    if (this._cleanupFn) {
+      this._cleanupFn();
+      this._cleanupFn = null;
+    }
+
+    // Clear event bus to prevent stale listener callbacks
+    this.eventBus.clear();
   }
 
   /**
@@ -777,9 +823,14 @@ export class App {
 
   /**
    * Switch stdin to raw mode for arrow key navigation in overlays.
+   * Idempotent: safe to call multiple times without side effects.
    */
   private _enableRawInput(): void {
+    // Guard: already in raw mode — skip to prevent duplicate close()/listener add
+    if (this._rawModeActive) return;
+
     this.rlClosed = true;
+    this._rawModeActive = true;
     this.rl.close();
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(true);
@@ -790,12 +841,27 @@ export class App {
 
   /**
    * Restore readline-based input after overlay closes.
+   * Reuses the existing readline instance when possible to avoid
+   * accumulating stale stdin/stdout listeners from repeated creation.
    */
   private _restoreReadline(): void {
+    // Guard: not in raw mode — nothing to restore
+    if (!this._rawModeActive) return;
+
     process.stdin.removeListener('data', this._onRawKeypress);
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(false);
     }
+    this._rawModeActive = false;
+
+    // Only create a new readline if the current one is not usable.
+    // After rl.close(), the instance cannot be reopened, so we must recreate.
+    // However, we null-out the old reference first to avoid any residual listeners.
+    if (this.rl && typeof this.rl.close === 'function') {
+      // Ensure the old rl is fully closed and listeners detached
+      try { this.rl.close(); } catch { /* already closed */ }
+    }
+
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
@@ -805,25 +871,35 @@ export class App {
 
   /**
    * Handle raw keypresses - dispatch to OverlayManager, then KeybindingManager.
+   * Includes a reentrancy guard to prevent duplicate processing from rapid keypresses.
    */
   private _onRawKeypress = (chunk: string): void => {
-    const event = parseKeypress(chunk);
+    // Reentrancy guard: prevent duplicate processing if a previous keypress
+    // is still mid-dispatch (e.g., overlay close + readline recreation)
+    if (this._processingRawInput) return;
+    this._processingRawInput = true;
 
-    // First, try overlay dispatch
-    if (this.overlayManager.handleKeypress(event)) {
-      if (this.overlayManager.isEmpty()) {
-        this._restoreReadline();
-        this.prompt();
+    try {
+      const event = parseKeypress(chunk);
+
+      // First, try overlay dispatch
+      if (this.overlayManager.handleKeypress(event)) {
+        if (this.overlayManager.isEmpty()) {
+          this._restoreReadline();
+          this.prompt();
+        }
+        this.clearScreen();
+        this.renderImmediate();
+        return;
       }
-      this.clearScreen();
-      this.renderImmediate();
-      return;
-    }
 
-    // Then, try keybinding dispatch
-    const command = this.keybindingManager.resolve(event);
-    if (command) {
-      this.executeCommand(command);
+      // Then, try keybinding dispatch
+      const command = this.keybindingManager.resolve(event);
+      if (command) {
+        this.executeCommand(command);
+      }
+    } finally {
+      this._processingRawInput = false;
     }
   };
 
@@ -863,10 +939,8 @@ export class App {
         break;
       }
       case 'exit':
-        this.running = false;
-        this.rlClosed = true;
+        this.dispose();
         console.log(chalk.yellow('\nGoodbye!'));
-        this.rl.close();
         process.exit(0);
         break;
       case 'closeOverlay':
@@ -1040,10 +1114,8 @@ export class App {
         break;
 
       case 'exit':
-        this.running = false;
-        this.rlClosed = true;
+        this.dispose();
         console.log(chalk.yellow('\nGoodbye!'));
-        this.rl.close();
         process.exit(0);
         break;
     }
@@ -1170,10 +1242,8 @@ export class App {
         break;
 
       case '/exit':
-        this.running = false;
-        this.rlClosed = true;
+        this.dispose();
         console.log(chalk.yellow('\nGoodbye!'));
-        this.rl.close();
         process.exit(0);
         break;
 
