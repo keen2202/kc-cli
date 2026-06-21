@@ -74,6 +74,9 @@ export interface AgentState {
   // Branching
   activeBranchId: string;
 
+  // File modification tracking
+  modifiedFiles?: string[];
+
   // Timestamps
   createdAt: number;
   lastActivityAt: number;

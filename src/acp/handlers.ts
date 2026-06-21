@@ -51,7 +51,7 @@ export async function handleAgentRun(request: ACPRequest, state: ACPHandlerState
     provider: config.provider as LLMProvider,
     apiKey: config.apiKey,
     apiBaseUrl: config.apiBaseUrl,
-    maxTurns: 50,
+    maxTurns: config.maxTurns || 80,
     maxBudgetUsd: null,
     systemPrompt,
   }, tools);

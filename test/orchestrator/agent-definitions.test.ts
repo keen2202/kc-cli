@@ -86,7 +86,7 @@ describe('createAgentConfig', () => {
     expect(config).not.toBeNull();
     expect(config!.prompt).toBe('Find all TODOs');
     expect(config!.systemPrompt).toContain('research assistant');
-    expect(config!.maxTurns).toBe(20);
+    expect(config!.maxTurns).toBe(30);
     expect(config!.timeoutSeconds).toBe(300);
     expect(config!.systemPromptMode).toBe('default');
   });

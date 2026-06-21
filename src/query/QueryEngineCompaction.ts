@@ -16,6 +16,8 @@ export interface CompactionConfig {
   contextWindow: number;
   model: string;
   systemPrompt?: string;
+  /** Tracked modified files to preserve in summary */
+  modifiedFiles?: string[];
 }
 
 /**
@@ -132,7 +134,8 @@ export class CompactionHandler {
               workingMessages,
               apiClient,
               compactConfig,
-              config.systemPrompt
+              config.systemPrompt,
+              config.modifiedFiles
             ),
             new Promise<never>((_, reject) =>
               setTimeout(() => reject(new Error(`Compaction timed out after ${compactionTimeoutMs / 1000}s`)), compactionTimeoutMs)

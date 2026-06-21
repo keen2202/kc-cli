@@ -199,7 +199,7 @@ export function createInitialState(overrides: Partial<AgentState> = {}): AgentSt
     permissionMode: 'default',
     currentState: 'idle',
     turnCount: 0,
-    maxTurns: 50,
+    maxTurns: 80,
     maxBudgetUsd: null,
     totalTokensUsed: 0,
     budgetUsed: {
@@ -211,6 +211,7 @@ export function createInitialState(overrides: Partial<AgentState> = {}): AgentSt
     lastCompactedAt: null,
     activeToolExecutions: new Map(),
     activeBranchId: 'root',
+    modifiedFiles: [],
     createdAt: now,
     lastActivityAt: now,
     ...overrides,

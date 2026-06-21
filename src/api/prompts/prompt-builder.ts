@@ -9,6 +9,13 @@ export interface ConversationContext {
   taskType?: TaskType;
   workspaceContext?: string;
   additionalInstructions?: string;
+  /** Language-specific build/test command info */
+  languageInfo?: {
+    language: string;
+    buildCommands: string[];
+    testCommands: string[];
+    lintCommands: string[];
+  };
 }
 
 export class PromptBuilder {
@@ -46,6 +53,11 @@ export class PromptBuilder {
       parts.push('Call tools one at a time. Wait for each result before making the next call.');
     }
 
+    // Planning phase instructions (always injected for structured workflow)
+    if (this.template.planning) {
+      parts.push(this.template.planning);
+    }
+
     // Tool instructions
     if (tools.length > 0) {
       parts.push(this.template.toolUse);
@@ -68,6 +80,18 @@ export class PromptBuilder {
     // Additional instructions
     if (context.additionalInstructions) {
       parts.push(context.additionalInstructions);
+    }
+
+    // Language-specific build/test hints
+    if (context.languageInfo) {
+      const { language, buildCommands, testCommands, lintCommands } = context.languageInfo;
+      const hints: string[] = [`Project language: ${language}`];
+      if (buildCommands.length > 0) hints.push(`Build: ${buildCommands.join(', ')}`);
+      if (testCommands.length > 0) hints.push(`Test: ${testCommands.join(', ')}`);
+      if (lintCommands.length > 0) hints.push(`Lint: ${lintCommands.join(', ')}`);
+      hints.push('\nAlways verify your changes compile before considering the task complete.');
+      hints.push('Run the appropriate test suite after making changes.');
+      parts.push(hints.join('\n'));
     }
 
     return parts.join('\n\n');

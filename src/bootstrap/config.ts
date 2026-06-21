@@ -127,6 +127,11 @@ export const ConfigSchema = z.object({
     }).default({}),
   }).default({ enabled: false }),
 
+  // Agent Turn Configuration
+  maxTurns: z.number().default(80),
+  autoExtendTurns: z.boolean().default(false),
+  maxTurnsCeiling: z.number().default(100),
+
   // General
   verbose: z.boolean().default(false),
   color: z.boolean().default(true),
@@ -235,6 +240,17 @@ export function loadEnvConfig(): Partial<Config> {
   }
   if (process.env.KC_VERBOSE) {
     config.verbose = process.env.KC_VERBOSE === 'true' || process.env.KC_VERBOSE === '1';
+  }
+
+  // Agent turn configuration environment variables
+  if (process.env.KC_MAX_TURNS) {
+    config.maxTurns = parseInt(process.env.KC_MAX_TURNS, 10);
+  }
+  if (process.env.KC_AUTO_EXTEND_TURNS) {
+    config.autoExtendTurns = process.env.KC_AUTO_EXTEND_TURNS === 'true' || process.env.KC_AUTO_EXTEND_TURNS === '1';
+  }
+  if (process.env.KC_MAX_TURNS_CEILING) {
+    config.maxTurnsCeiling = parseInt(process.env.KC_MAX_TURNS_CEILING, 10);
   }
 
   // Sandbox environment variables

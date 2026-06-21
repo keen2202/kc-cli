@@ -35,6 +35,26 @@ const anthropicPrompt: PromptTemplate = {
 - Use consistent formatting`,
 
   reasoning: `Think through problems step by step. Consider edge cases and potential issues before implementing solutions.`,
+
+  planning: `Work in three phases:
+
+Phase 1 - Planning (first 3-5 turns):
+- Read the task instruction carefully
+- List relevant files and directories to understand project structure
+- Read key files that will need modification
+- Formulate a concrete plan with ordered steps before making changes
+
+Phase 2 - Execution:
+- Follow your plan step by step
+- Make one logical change at a time
+- Verify each change compiles/passes before proceeding
+- Track which files you have modified
+
+Phase 3 - Verification (last 3-5 turns):
+- Run tests to verify your changes
+- Review all modified files for correctness
+- Fix any issues found
+- Provide a summary of all changes made`,
 };
 
 const openaiPrompt: PromptTemplate = {
@@ -51,6 +71,26 @@ const openaiPrompt: PromptTemplate = {
   documentation: `Write clear, concise documentation with examples. Focus on practical usage and common patterns.`,
 
   reasoning: `Break down complex problems into manageable steps. Consider multiple approaches before choosing one.`,
+
+  planning: `Work in three phases:
+
+Phase 1 - Planning (first 3-5 turns):
+- Read the task instruction carefully
+- List relevant files and directories to understand project structure
+- Read key files that will need modification
+- Formulate a concrete plan with ordered steps before making changes
+
+Phase 2 - Execution:
+- Follow your plan step by step
+- Make one logical change at a time
+- Verify each change compiles/passes before proceeding
+- Track which files you have modified
+
+Phase 3 - Verification (last 3-5 turns):
+- Run tests to verify your changes
+- Review all modified files for correctness
+- Fix any issues found
+- Provide a summary of all changes made`,
 };
 
 const deepseekPrompt: PromptTemplate = {
@@ -72,6 +112,26 @@ const deepseekPrompt: PromptTemplate = {
   documentation: `编写简洁精确的文档，包含代码示例。解释"为什么"而不仅仅是"是什么"。`,
 
   reasoning: `逐步思考问题。在实现方案前考虑边界情况和潜在问题。`,
+
+  planning: `按三阶段工作：
+
+第一阶段 - 规划（前 3-5 轮）：
+- 仔细阅读任务指令
+- 列出相关文件和目录，了解项目结构
+- 阅读需要修改的关键文件
+- 制定具体的执行计划
+
+第二阶段 - 执行：
+- 按计划逐步执行
+- 每次只做一个逻辑变更
+- 每次修改后验证编译/测试是否通过
+- 记录已修改的文件
+
+第三阶段 - 验证（后 3-5 轮）：
+- 运行测试验证修改
+- 审查所有修改的文件
+- 修复发现的问题
+- 总结所有变更`,
 };
 
 const qwenPrompt: PromptTemplate = {
@@ -93,6 +153,8 @@ const qwenPrompt: PromptTemplate = {
   documentation: `文档要简洁明了，包含使用示例。`,
 
   reasoning: `分析问题时考虑多种方案，选择最合适的实现。`,
+
+  planning: `按三阶段工作：规划→执行→验证。先用 3-5 轮了解代码结构和制定计划，然后按计划逐步实现，最后 3-5 轮运行测试和审查修改。`,
 };
 
 const glmPrompt: PromptTemplate = {
@@ -109,6 +171,8 @@ const glmPrompt: PromptTemplate = {
   documentation: `编写清晰的文档和注释。`,
 
   reasoning: `逐步分析问题，考虑边界情况。`,
+
+  planning: `按三阶段工作：规划→执行→验证。先了解代码结构，制定计划，然后按计划实现，最后验证。`,
 };
 
 const ollamaPrompt: PromptTemplate = {
@@ -125,6 +189,8 @@ const ollamaPrompt: PromptTemplate = {
   documentation: `Keep docs short and practical.`,
 
   reasoning: `Think step by step. Keep solutions simple.`,
+
+  planning: `Work in three phases: Plan (read files, make a plan), Execute (implement step by step), Verify (test and review).`,
 };
 
 const defaultPrompt: PromptTemplate = {
@@ -141,6 +207,8 @@ const defaultPrompt: PromptTemplate = {
   documentation: `Write clear documentation with examples.`,
 
   reasoning: `Think through problems step by step.`,
+
+  planning: `Work in three phases: Plan (read files, make a plan), Execute (implement step by step), Verify (test and review).`,
 };
 
 export const PROVIDER_PROMPTS: Record<string, PromptTemplate> = {

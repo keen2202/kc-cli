@@ -1,0 +1,159 @@
+// Shared Git utility - extracted from GitTool for reuse across modules
+
+import { spawn } from 'child_process';
+import { DEFAULT_MAX_BUFFER } from '../constants';
+
+// Shell metacharacters and control chars that could enable command injection
+const SHELL_METACHAR_REGEX = /[;&|`$(){}!#~<>\n\r]/;
+
+/**
+ * Parse a git command string into safe argument array.
+ * Rejects shell metacharacters to prevent command injection.
+ */
+export function parseGitArgs(command: string): string[] {
+  const trimmed = command.trim();
+  if (!trimmed) throw new Error('Empty git command');
+
+  if (SHELL_METACHAR_REGEX.test(trimmed)) {
+    throw new Error(
+      `Git command contains forbidden shell metacharacters: ${trimmed.slice(0, 100)}`
+    );
+  }
+
+  const args: string[] = [];
+  let current = '';
+  let inSingle = false;
+  let inDouble = false;
+
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+
+    if (inSingle) {
+      if (ch === "'") {
+        inSingle = false;
+      } else {
+        current += ch;
+      }
+    } else if (inDouble) {
+      if (ch === '"') {
+        inDouble = false;
+      } else if (ch === '\\' && i + 1 < trimmed.length) {
+        const next = trimmed[i + 1];
+        if (next === '"' || next === '\\') {
+          current += next;
+          i++;
+        } else {
+          current += ch;
+        }
+      } else {
+        current += ch;
+      }
+    } else if (ch === "'") {
+      inSingle = true;
+    } else if (ch === '"') {
+      inDouble = true;
+    } else if (ch === ' ' || ch === '\t') {
+      if (current.length > 0) {
+        args.push(current);
+        current = '';
+      }
+    } else {
+      current += ch;
+    }
+  }
+
+  if (current.length > 0) args.push(current);
+  return args;
+}
+
+/**
+ * Spawn a git process with the given command string.
+ * Returns stdout and stderr on success, rejects on failure.
+ */
+export function spawnGit(
+  command: string,
+  cwd: string,
+  timeout: number
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const args = parseGitArgs(command);
+    const child = spawn('git', ['-c', 'color.ui=never', ...args], {
+      cwd,
+      timeout,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+      if (stdout.length > DEFAULT_MAX_BUFFER) {
+        child.kill();
+        reject(new Error('Git output exceeded max buffer size'));
+      }
+    });
+
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+      if (stderr.length > DEFAULT_MAX_BUFFER) {
+        child.kill();
+        reject(new Error('Git stderr output exceeded max buffer size'));
+      }
+    });
+
+    child.on('error', (err) => {
+      reject(err);
+    });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        const err = new Error(`git exited with code ${code}`) as Error & {
+          code: number | null;
+          stdout: string;
+          stderr: string;
+        };
+        err.code = code;
+        err.stdout = stdout;
+        err.stderr = stderr;
+        reject(err);
+      }
+    });
+  });
+}
+
+/**
+ * Auto-stage a file via git add (fire-and-forget).
+ * Errors are silently ignored — this is best-effort.
+ */
+export function autoStageFile(filePath: string, cwd: string): void {
+  const child = spawn('git', ['add', filePath], {
+    cwd,
+    stdio: 'ignore',
+    windowsHide: true,
+    timeout: 10000,
+  });
+  child.on('error', () => {}); // silent failure
+}
+
+/**
+ * Auto-commit all staged changes (best-effort).
+ * Only commits if there are staged changes.
+ */
+export async function autoCommitAll(cwd: string): Promise<boolean> {
+  try {
+    await spawnGit('add -A', cwd, 5000);
+    const { stdout: diffOutput } = await spawnGit('diff --cached --name-only', cwd, 5000);
+    if (diffOutput.trim()) {
+      await spawnGit('commit -m "kc-cli auto-commit: turn limit reached"', cwd, 10000);
+      return true;
+    }
+    return false;
+  } catch {
+    // Auto-commit failure is non-fatal
+    return false;
+  }
+}

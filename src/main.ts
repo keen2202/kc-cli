@@ -28,6 +28,7 @@ import type { UserLevel } from './services/userProfile';
 import { setLogLevel } from './services/logger';
 import type { LogLevel } from './services/logger';
 import { handleBranch, handleCheckout, handleHistory } from './commands/branch';
+import { detectProjectLanguage } from './utils/project-detect';
 
 // Apply LOG_LEVEL env var at startup
 if (process.env.LOG_LEVEL) {
@@ -60,6 +61,7 @@ async function main() {
     .option('--provider <provider>', 'LLM provider (anthropic/openai/ollama)')
     .option('--max-turns <number>', 'Maximum number of agent turns')
     .option('--max-budget <amount>', 'Maximum budget in USD')
+    .option('--auto-extend-turns', 'Automatically extend turn budget when progress is detected')
     .option('-v, --verbose', 'Enable verbose output')
     .option('--print', 'Print response and exit (non-interactive)')
     .option('--bare', 'Minimal mode: skip hooks and heavy initialization')
@@ -258,7 +260,7 @@ async function runAgent(prompt: string | undefined, opts: any) {
             provider: provider as LLMProvider,
             apiKey,
             apiBaseUrl,
-            maxTurns: getState().maxTurns || 50,
+            maxTurns: getState().maxTurns || config.maxTurns || 80,
             maxBudgetUsd: getState().maxBudgetUsd,
             systemPrompt: buildSystemPrompt(sessionTools),
             permissionRules: {
@@ -324,9 +326,11 @@ async function runAgent(prompt: string | undefined, opts: any) {
       provider: provider as LLMProvider,
       apiKey,
       apiBaseUrl,
-      maxTurns: getState().maxTurns || 50,
+      maxTurns: getState().maxTurns || config.maxTurns || 80,
       maxBudgetUsd: getState().maxBudgetUsd,
       systemPrompt,
+      autoExtendTurns: opts.autoExtendTurns || config.autoExtendTurns || false,
+      maxTurnsCeiling: config.maxTurnsCeiling || 100,
       permissionRules: {
         deny: config.permissions.deny,
         ask: config.permissions.ask,
@@ -341,7 +345,7 @@ async function runAgent(prompt: string | undefined, opts: any) {
   updateStatus({
     provider,
     model,
-    maxTurns: getState().maxTurns || 50,
+    maxTurns: getState().maxTurns || 80,
     sessionStartTime: Date.now(),
   });
 
@@ -359,7 +363,7 @@ async function runAgent(prompt: string | undefined, opts: any) {
       queryEngine,
       provider,
       model,
-      maxTurns: getState().maxTurns || 50,
+      maxTurns: getState().maxTurns || 80,
     });
   } else {
     // Fallback readline REPL (bare mode or non-TTY)
@@ -738,9 +742,44 @@ import type { ToolDefinition } from './tools/protocol';
 function buildSystemPrompt(tools: ToolDefinition[]): string {
   const toolNames = tools.map(t => t.name).join(', ');
 
+  // Detect project language for build hints
+  const cwd = getState().cwd;
+  const langInfo = detectProjectLanguage(cwd);
+  let buildHints = '';
+  if (langInfo) {
+    const hints: string[] = [`\nProject language: ${langInfo.language}`];
+    if (langInfo.buildCommands.length > 0) hints.push(`Build commands: ${langInfo.buildCommands.join(', ')}`);
+    if (langInfo.testCommands.length > 0) hints.push(`Test commands: ${langInfo.testCommands.join(', ')}`);
+    if (langInfo.lintCommands.length > 0) hints.push(`Lint commands: ${langInfo.lintCommands.join(', ')}`);
+    hints.push('Always verify your changes compile before considering the task complete.');
+    hints.push('Run the appropriate test suite after making changes.');
+    buildHints = hints.join('\n');
+  }
+
   return `You are KC-CLI, an intelligent CLI agent that helps with software development tasks.
 
 You have access to the following tools: ${toolNames}
+
+Work in three phases:
+
+Phase 1 - Planning (first 3-5 turns):
+- Read the task instruction carefully
+- List relevant files and directories to understand project structure
+- Read key files that will need modification
+- Formulate a concrete plan with ordered steps before making changes
+
+Phase 2 - Execution:
+- Follow your plan step by step
+- Make one logical change at a time
+- Verify each change compiles/passes before proceeding
+- Track which files you have modified
+
+Phase 3 - Verification (last 3-5 turns):
+- Run tests to verify your changes
+- Review all modified files for correctness
+- Fix any issues found
+- Provide a summary of all changes made
+${buildHints}
 
 Guidelines:
 1. Always think step-by-step before taking action

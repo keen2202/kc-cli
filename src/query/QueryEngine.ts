@@ -18,6 +18,8 @@ import { UserProfileService } from '../services/userProfile';
 import { getSystemPromptAdaptation } from '../services/behavioralAdapter';
 import { CacheMetrics } from '../services/cacheMetrics';
 import { CachePrefixService, buildCacheStrategy } from '../services/cachePrefix';
+import { estimateTaskComplexity } from '../api/prompts/task-prompts';
+import { autoStageFile, autoCommitAll } from '../utils/git';
 
 // Sub-modules
 import { ConversationState } from './QueryEngineState';
@@ -49,6 +51,10 @@ export interface QueryEngineConfig {
     enabled: boolean;
     onEvolve?: (sessionId: string) => Promise<void>;
   };
+  /** Auto-extend turn budget when active progress is detected */
+  autoExtendTurns?: boolean;
+  /** Hard ceiling for auto-extended turns (default 100) */
+  maxTurnsCeiling?: number;
 }
 
 /**
@@ -92,6 +98,10 @@ export class QueryEngine {
   private steerQueue: ChatMessage[] = [];
   private followUpQueue: ChatMessage[] = [];
   private steeringEnabled = true;
+
+  // File modification tracking (for incremental memory and patch guarantee)
+  private modifiedFiles: Set<string> = new Set();
+  private lastModifiedTurn: number = 0;
 
   constructor(config: QueryEngineConfig, tools: ToolDefinition[]) {
     this.config = config;
@@ -178,7 +188,19 @@ export class QueryEngine {
     // State machine loop
     try {
       let turnCount = 0;
-      const maxTurns = this.config.maxTurns;
+      let maxTurns = this.config.maxTurns;
+      const maxTurnsCeiling = this.config.maxTurnsCeiling || 100;
+      const autoExtend = this.config.autoExtendTurns || false;
+
+      // Complexity-aware turn adjustment (only if no explicit CLI override)
+      if (!getState().maxTurns) {
+        const estimate = estimateTaskComplexity(userMessage);
+        if (estimate.suggestedTurns > maxTurns) {
+          const adjusted = Math.min(estimate.suggestedTurns, maxTurnsCeiling);
+          logger.query.info(`[QueryEngine] Task complexity: ${estimate.complexity}, adjusting maxTurns ${maxTurns} → ${adjusted}`);
+          maxTurns = adjusted;
+        }
+      }
 
       while (!this.stateMachine.isTerminal()) {
         const currentState = this.stateMachine.currentState;
@@ -196,9 +218,51 @@ export class QueryEngine {
           case 'streaming':
             yield* this.streamingPhase();
             turnCount++;
+
+            // Phase 1 reminder (first turn)
+            if (turnCount === 1 && maxTurns > 10) {
+              this.steer(`[Phase 1 - Planning] You are in the planning phase. Focus on reading files and understanding the codebase. Do not make changes yet. Formulate a concrete plan before proceeding to implementation.`);
+            }
+
+            // Phase 3 reminder (5 turns before budget exhaustion)
+            if (turnCount === maxTurns - 5 && maxTurns > 10) {
+              this.steer(`[Phase 3 - Verification] You are entering the verification phase. Stop making new changes. Run tests to verify your modifications, review all changed files, and fix any remaining issues.`);
+            }
+
+            // Periodic progress summary (every 10 turns)
+            if (turnCount % 10 === 0 && turnCount > 0 && this.modifiedFiles.size > 0) {
+              const fileList = Array.from(this.modifiedFiles).map(f => `- ${f}`).join('\n');
+              const remaining = maxTurns - turnCount;
+              this.conversation.addMessage({
+                id: `checkpoint_${turnCount}_${Date.now()}`,
+                role: 'user',
+                content: `[Progress Checkpoint - Turn ${turnCount}/${maxTurns}]\nModified files so far:\n${fileList}\n\nRemember these modifications as you continue working. You have ${remaining} turns remaining.`,
+                timestamp: Date.now(),
+              });
+            }
+
             if (turnCount >= maxTurns) {
-              logger.query.warn(`[QueryEngine] Max turns (${maxTurns}) reached, forcing completion`);
-              yield this.createTextDeltaEvent(`\n[Reached maximum turn limit (${maxTurns}) — stopping]\n`);
+              // Dynamic turn extension: if auto-extend enabled and agent is actively making progress
+              if (autoExtend && maxTurns < maxTurnsCeiling && this.modifiedFiles.size > 0 && (turnCount - this.lastModifiedTurn) < 5) {
+                maxTurns += 20;
+                maxTurns = Math.min(maxTurns, maxTurnsCeiling);
+                logger.query.info(`[QueryEngine] Extended turn budget to ${maxTurns} — active progress detected`);
+                yield this.createTextDeltaEvent(`\n[Extended turn budget to ${maxTurns} — active progress detected]\n`);
+              } else {
+                logger.query.warn(`[QueryEngine] Max turns (${maxTurns}) reached, forcing completion`);
+                yield this.createTextDeltaEvent(`\n[Reached maximum turn limit (${maxTurns}) — stopping]\n`);
+
+                // Auto-commit on turn budget exhaustion (Phase 5.3)
+                try {
+                  const committed = await autoCommitAll(getState().cwd);
+                  if (committed) {
+                    logger.query.info('[QueryEngine] Auto-committed changes on turn limit');
+                    yield this.createTextDeltaEvent(`[Auto-committed ${this.modifiedFiles.size} modified file(s)]\n`);
+                  }
+                } catch {
+                  // Non-fatal
+                }
+              }
             }
             this.stateMachine.transitionTo('deciding');
             break;
@@ -289,6 +353,7 @@ export class QueryEngine {
       contextWindow: this.config.contextWindow || 200_000,
       model: this.config.model,
       systemPrompt: this.config.systemPrompt,
+      modifiedFiles: Array.from(this.modifiedFiles),
     };
 
     if (!this.compaction.shouldAttemptCompaction(this.conversation.getMessages(), config)) {
@@ -493,6 +558,21 @@ export class QueryEngine {
       const toolCall = toolCalls.find(tc => tc.id === toolCallId);
       if (!toolCall) continue;
 
+      // Track file modifications for incremental memory and patch guarantee
+      if (!(result instanceof Error) && !result.isError) {
+        const toolName = toolCall.toolName;
+        if (toolName === 'FileWrite' || toolName === 'FileEdit') {
+          const metadata = (result as ToolResult).metadata as Record<string, unknown> | undefined;
+          const filePath = (metadata?.path || metadata?.file_path) as string | undefined;
+          if (filePath) {
+            this.modifiedFiles.add(filePath);
+            this.lastModifiedTurn = this.stateStore.get().turnCount;
+            // Auto-stage file (fire-and-forget git add)
+            autoStageFile(filePath, getState().cwd);
+          }
+        }
+      }
+
       if (result instanceof Error) {
         yield this.createToolFailedEvent(toolCall, result);
       } else if (result.isError) {
@@ -586,6 +666,8 @@ export class QueryEngine {
     this._aborted = false;
     this.steerQueue = [];
     this.followUpQueue = [];
+    this.modifiedFiles.clear();
+    this.lastModifiedTurn = 0;
     this.abortController = new AbortController();
     if (this.stateMachine.currentState !== 'idle') {
       this.stateMachine.forceTransitionTo('idle');
@@ -730,5 +812,10 @@ export class QueryEngine {
   /** Get the underlying SessionTree instance (for branch label management). */
   getSessionTree() {
     return this.conversation.getSessionTree();
+  }
+
+  /** Get tracked modified files */
+  getModifiedFiles(): string[] {
+    return Array.from(this.modifiedFiles);
   }
 }

@@ -144,7 +144,8 @@ export async function fullCompact(
   messages: ChatMessage[],
   apiClient: import('../api/BaseApiClient').BaseApiClient,
   config: CompactConfig,
-  systemPrompt: string = ''
+  systemPrompt: string = '',
+  modifiedFiles?: string[]
 ): Promise<CompactionResult> {
   if (messages.length <= PRESERVE_RECENT + 2) {
     return {
@@ -173,7 +174,7 @@ export async function fullCompact(
     const recentMessages = messages.slice(-PRESERVE_RECENT);
 
     // Build summary prompt
-    const summaryPrompt = buildCompactPrompt(oldMessages, systemPrompt);
+    const summaryPrompt = buildCompactPrompt(oldMessages, systemPrompt, modifiedFiles);
 
     // Call LLM to generate summary (no tools)
     let summaryResponse: string;
@@ -227,7 +228,7 @@ export async function fullCompact(
 /**
  * Build the prompt for LLM-based conversation summarization
  */
-function buildCompactPrompt(messagesToSummarize: ChatMessage[], systemPrompt: string): string {
+function buildCompactPrompt(messagesToSummarize: ChatMessage[], systemPrompt: string, modifiedFiles?: string[]): string {
   const conversationText = messagesToSummarize
     .map(msg => {
       const role = msg.role.toUpperCase();
@@ -236,7 +237,7 @@ function buildCompactPrompt(messagesToSummarize: ChatMessage[], systemPrompt: st
     })
     .join('\n\n');
 
-  return `Please summarize the following conversation concisely, preserving key information, decisions, and context that would be needed for future turns. Focus on what was accomplished and what is still pending.
+  let prompt = `Please summarize the following conversation concisely, preserving key information, decisions, and context that would be needed for future turns. Focus on what was accomplished and what is still pending.
 
 <system_context>
 ${systemPrompt || 'You are an AI assistant helping with software development tasks.'}
@@ -254,6 +255,14 @@ Provide a concise summary that captures:
 5. Any important technical details or context
 
 Keep the summary under 500 words.`;
+
+  // Append modified files list for explicit preservation
+  if (modifiedFiles && modifiedFiles.length > 0) {
+    const fileList = modifiedFiles.map(f => `- ${f}`).join('\n');
+    prompt += `\n\nIMPORTANT: The following files were modified during this session. Ensure they are explicitly listed in your summary:\n${fileList}`;
+  }
+
+  return prompt;
 }
 
 /**

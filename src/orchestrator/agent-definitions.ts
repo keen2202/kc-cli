@@ -70,7 +70,7 @@ export const BUILTIN_AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
       'DO NOT modify any files or make changes to the codebase. ' +
       'Provide detailed findings and insights.',
     allowedTools: RESEARCHER_TOOLS,
-    defaultMaxTurns: 20,
+    defaultMaxTurns: 30,
     defaultTimeoutSeconds: 300,
   },
 
@@ -83,7 +83,7 @@ export const BUILTIN_AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
       'Follow best practices, write clean code, and ensure your changes are correct. ' +
       'Test your changes when possible. Provide a summary of changes made.',
     allowedTools: IMPLEMENTER_TOOLS,
-    defaultMaxTurns: 25,
+    defaultMaxTurns: 50,
     defaultTimeoutSeconds: 600,
   },
 
@@ -96,7 +96,7 @@ export const BUILTIN_AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
       'Run tests, check for bugs, verify correctness, and identify issues. ' +
       'Provide detailed verification results and recommendations.',
     allowedTools: VERIFIER_TOOLS,
-    defaultMaxTurns: 15,
+    defaultMaxTurns: 25,
     defaultTimeoutSeconds: 300,
   },
 
@@ -109,7 +109,7 @@ export const BUILTIN_AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
       'architecture, and key components. Map out the codebase, identify main modules, ' +
       'and document relationships. Provide a comprehensive overview.',
     allowedTools: EXPLORER_TOOLS,
-    defaultMaxTurns: 15,
+    defaultMaxTurns: 20,
     defaultTimeoutSeconds: 300,
   },
 
@@ -117,7 +117,7 @@ export const BUILTIN_AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
     name: 'general',
     description: 'General-purpose agent with access to all tools.',
     allowedTools: undefined, // All tools
-    defaultMaxTurns: 20,
+    defaultMaxTurns: 40,
     defaultTimeoutSeconds: 300,
   },
 };

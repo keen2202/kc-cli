@@ -17,4 +17,8 @@ export interface PromptTemplate {
   documentation: string;
   /** Reasoning instructions */
   reasoning: string;
+  /** Planning phase instructions (3-phase workflow) */
+  planning?: string;
+  /** Build/test command hints for language-specific projects */
+  build?: string;
 }
