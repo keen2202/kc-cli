@@ -226,6 +226,41 @@ export function calculateTokensSaved(before: ChatMessage[], after: ChatMessage[]
 }
 
 /**
+ * Estimate token savings from importance-aware compaction.
+ * Returns rough estimate of tokens saved vs. uniform compaction.
+ */
+export function estimateCompactionSavings(
+  totalTurns: number,
+  keyFindingsCount: number,
+  failedAttemptsCount: number,
+  explorationCount: number
+): { savedTokens: number; savingsPercent: number } {
+  // Assume ~2K tokens per turn on average
+  const AVG_TOKENS_PER_TURN = 2000;
+  const totalTokens = totalTurns * AVG_TOKENS_PER_TURN;
+
+  // Without importance tagging: compact everything uniformly after 15 turns
+  // ~50% compaction ratio
+  const uniformSavings = Math.max(0, (totalTurns - 15)) * AVG_TOKENS_PER_TURN * 0.5;
+
+  // With importance tagging:
+  // - key_findings: 0% compaction (preserved)
+  // - failed_attempts after 3 turns: 90% compaction
+  // - exploration after 10 turns: 60% compaction
+  const failedSavings = Math.max(0, failedAttemptsCount - 3) * AVG_TOKENS_PER_TURN * 0.9;
+  const explorationSavings = Math.max(0, explorationCount - 10) * AVG_TOKENS_PER_TURN * 0.6;
+  const taggedSavings = failedSavings + explorationSavings;
+
+  const savingsDelta = taggedSavings - uniformSavings;
+  const savingsPercent = totalTokens > 0 ? (savingsDelta / totalTokens) * 100 : 0;
+
+  return {
+    savedTokens: Math.max(0, Math.round(savingsDelta)),
+    savingsPercent: Math.round(savingsPercent * 10) / 10,
+  };
+}
+
+/**
  * Free tiktoken encoder resources (for graceful shutdown).
  */
 export function disposeTokenizer(): void {
