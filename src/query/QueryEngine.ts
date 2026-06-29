@@ -20,6 +20,7 @@ import { CacheMetrics } from '../services/cacheMetrics';
 import { CachePrefixService, buildCacheStrategy } from '../services/cachePrefix';
 import { estimateTaskComplexity } from '../api/prompts/task-prompts';
 import { autoStageFile, autoCommitAll } from '../utils/git';
+import { KCError } from '../utils/errors';
 import { spawn } from 'child_process';
 
 // Sub-modules
@@ -485,9 +486,11 @@ export class QueryEngine {
             if (!hasTools && this.zeroPatchRetries > 0 && this.modifiedFiles.size === 0) {
               const maxRetries = this.config.patchGuarantee?.maxZeroPatchRetries ?? 3;
               if (this.zeroPatchRetries >= maxRetries) {
-                const err = new Error('Agent exited without modifying any files after exhausting zero-patch retries');
-                (err as any).code = 'model_no_patch';
-                (err as any).context = { zeroPatchRetries: this.zeroPatchRetries };
+                const err = new KCError(
+                  'model_no_patch',
+                  'Agent exited without modifying any files after exhausting zero-patch retries',
+                  { zeroPatchRetries: this.zeroPatchRetries }
+                );
                 yield {
                   type: 'agent:error',
                   error: err,
@@ -934,6 +937,33 @@ export class QueryEngine {
 
   // ── Pre-Exit Test Verification (Area 2) ──
 
+  /**
+   * Validate that a test command doesn't contain shell injection patterns.
+   * Only allows known test runners with sanitized arguments.
+   */
+  private isTestCommandSafe(command: string): boolean {
+    // Reject shell metacharacters that enable command chaining
+    if (/[;&|`$(){}$\n\r]/.test(command.replace('{test_names}', ''))) {
+      return false;
+    }
+    // Allow only known test runner prefixes
+    const allowedRunners = ['pytest', 'vitest', 'npx vitest', 'go test', 'cargo test', 'jest', 'npx jest', 'python -m pytest'];
+    const trimmed = command.trim();
+    return allowedRunners.some(runner => trimmed.startsWith(runner));
+  }
+
+  /**
+   * Check if a file read would be redundant (content unchanged since last read).
+   * Returns shortened note if cached, null if fresh content should be used.
+   */
+  checkFileReadDedup(filePath: string, content: string): string | null {
+    const cacheResult = this.fileContentCache.check(filePath, content);
+    if (cacheResult !== 'fresh') {
+      return `[File unchanged since turn ${cacheResult.cachedSince}: ${filePath} — use existing context.]`;
+    }
+    return null;
+  }
+
   private async verifyBeforeExit(
     testNames: string[],
     config: PatchGuaranteeConfig
@@ -945,6 +975,12 @@ export class QueryEngine {
     const testList = testNames.join(' ');
     const command = config.testCommand.replace('{test_names}', testList);
     const cwd = getState().cwd;
+
+    // Validate command to prevent shell injection
+    if (!this.isTestCommandSafe(command)) {
+      logger.query.warn(`[QueryEngine] Unsafe test command rejected: ${command.slice(0, 100)}`);
+      return { canExit: true, reason: 'tests_not_found' };
+    }
 
     try {
       const result = await new Promise<{ stdout: string; stderr: string; code: number }>(
@@ -1093,6 +1129,10 @@ export class QueryEngine {
     this.lastModifiedTurn = 0;
     this.zeroPatchRetries = 0;
     this.verificationRetries = 0;
+    this.planningHandler.reset();
+    this.fileContentCache.invalidateAll();
+    this.readHistory.clear();
+    this.editHistory.clear();
     this.abortController = new AbortController();
     if (this.stateMachine.currentState !== 'idle') {
       this.stateMachine.forceTransitionTo('idle');
