@@ -1,7 +1,7 @@
 // QueryEngine compaction phase logic
 
 import { logger } from '../services/logger';
-import type { ChatMessage, StreamEvent } from '../query/protocol';
+import type { ChatMessage, StreamEvent, TurnTag } from '../query/protocol';
 import type { AgentEvent } from '../state/types';
 import { shouldCompact, microcompact, fullCompact, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES, needsForceTruncation, forceTruncate } from '../services/compaction';
 import { estimateMessageTokensArray } from '../utils/tokenEstimation';
@@ -179,6 +179,51 @@ export class CompactionHandler {
       }
       return { messages, method: 'none' as const };
     }
+  }
+
+  /**
+   * Prune failed_attempt messages older than maxAge turns.
+   * These are dead ends — keep a 1-line marker, drop the content.
+   */
+  pruneFailedAttempts(
+    messages: ChatMessage[],
+    tags: Map<string, TurnTag>,
+    maxAge: number
+  ): { messages: ChatMessage[]; pruned: number } {
+    let pruned = 0;
+    const kept: ChatMessage[] = [];
+
+    for (let idx = 0; idx < messages.length; idx++) {
+      const msg = messages[idx];
+      const tag = tags.get(msg.id);
+      const age = messages.length - idx;
+
+      if (tag && tag.importance === 'failed_attempt' && age > maxAge) {
+        pruned++;
+        // Skip this message (prune it)
+        continue;
+      }
+      kept.push(msg);
+    }
+
+    return { messages: kept, pruned };
+  }
+
+  /**
+   * Identify old exploration messages for compaction.
+   * Returns messages eligible for summarization (older than maxAge).
+   * key_finding messages are never eligible.
+   */
+  getExplorationToCompact(
+    messages: ChatMessage[],
+    tags: Map<string, TurnTag>,
+    maxAge: number
+  ): ChatMessage[] {
+    return messages.filter((msg, idx) => {
+      const tag = tags.get(msg.id);
+      if (!tag || tag.importance !== 'exploration') return false;
+      return (messages.length - idx) > maxAge;
+    });
   }
 
   /** Reset failure count */

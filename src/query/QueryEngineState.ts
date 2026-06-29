@@ -1,6 +1,6 @@
 // QueryEngine conversation state management
 
-import type { ChatMessage } from '../query/protocol';
+import type { ChatMessage, TurnTag, MessageWithTag } from '../query/protocol';
 import { estimateMessageTokensArray } from '../utils/tokenEstimation';
 import { SessionTree, type SessionNode } from '../state/session-tree';
 
@@ -31,6 +31,7 @@ export class ConversationState {
   private tree: SessionTree;
   private cachedTokenEstimate: number | null = null;
   private maxMessages: number;
+  private turnTags = new Map<string, TurnTag>();
 
   constructor(config: ConversationStateConfig = {}) {
     this.maxMessages = config.maxMessages ?? DEFAULT_MAX_MESSAGES;
@@ -111,6 +112,30 @@ export class ConversationState {
       if (this.messages[i].role === 'user') return this.messages[i];
     }
     return undefined;
+  }
+
+  /** Tag a message with importance metadata for compaction decisions */
+  tagMessage(messageId: string, tag: TurnTag): void {
+    this.turnTags.set(messageId, tag);
+  }
+
+  /** Get the tag for a message, if any */
+  getTag(messageId: string): TurnTag | undefined {
+    return this.turnTags.get(messageId);
+  }
+
+  /** Get all messages with their tags for compaction decisions */
+  getMessagesWithTags(): MessageWithTag[] {
+    return this.messages.map((msg, i) => ({
+      message: msg,
+      tag: this.turnTags.get(msg.id) || {
+        importance: 'exploration' as const,
+        keywords: [],
+        filePaths: [],
+        applied: false,
+      },
+      turnIndex: i,
+    }));
   }
 
   /** Trim messages to stay within the max limit, protecting anchor messages */
