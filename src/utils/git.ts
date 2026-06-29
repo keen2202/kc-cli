@@ -157,3 +157,28 @@ export async function autoCommitAll(cwd: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Get set of files modified in the working tree (both staged and unstaged).
+ * Returns absolute paths relative to cwd.
+ */
+export async function getModifiedFiles(cwd: string): Promise<string[]> {
+  try {
+    // Collect staged changes
+    const { stdout: staged } = await spawnGit('diff --cached --name-only', cwd, 5000);
+    // Collect unstaged changes
+    const { stdout: unstaged } = await spawnGit('diff --name-only', cwd, 5000);
+    // Collect untracked files
+    const { stdout: untracked } = await spawnGit('ls-files --others --exclude-standard', cwd, 5000);
+
+    const files = new Set<string>();
+    for (const list of [staged, unstaged, untracked]) {
+      for (const f of list.trim().split('\n')) {
+        if (f.trim()) files.add(f.trim());
+      }
+    }
+    return Array.from(files);
+  } catch {
+    return [];
+  }
+}
