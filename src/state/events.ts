@@ -1,7 +1,7 @@
 // Shared event types - single source of truth for agent and orchestrator events
 // Single source of truth for agent and orchestrator event types
 
-import type { ChatMessage, ToolCall, ToolResult } from '../query/protocol';
+import type { ChatMessage, ToolCall, ToolResult, PlanningFinding } from '../query/protocol';
 
 /**
  * Token usage tracking
@@ -85,4 +85,8 @@ export type AgentEvent =
   | { type: 'agent:tool_hint'; toolName: string; hint: string; timestamp: number }
   | { type: 'agent:thinking_delta'; thinking: string; timestamp: number }
   | { type: 'agent:cache_status'; hit: boolean; timestamp: number }
+  // Planning events
+  | { type: 'agent:planning_started'; timestamp: number }
+  | { type: 'agent:planning_turn'; turn: number; timestamp: number }
+  | { type: 'agent:planning_complete'; findings: PlanningFinding[]; timestamp: number }
   | MultiAgentEvent;

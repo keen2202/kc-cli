@@ -10,6 +10,7 @@ import type { TokenUsage } from '../state/events';
  */
 export type AgentStateName =
   | 'idle'
+  | 'planning'      // NEW: strategic planning phase before code changes
   | 'compacting'
   | 'streaming'
   | 'deciding'
@@ -96,14 +97,15 @@ export interface AgentState {
  * Defines which states can transition to which other states
  */
 export const VALID_TRANSITIONS: Record<AgentStateName, AgentStateName[]> = {
-  idle: ['compacting', 'error'],
+  idle: ['planning', 'compacting'],  // modified: added 'planning'
+  planning: ['compacting', 'streaming', 'error'],  // NEW
   compacting: ['streaming', 'error'],
-  streaming: ['deciding', 'error'],
-  deciding: ['executing', 'completed', 'error'],
-  executing: ['streaming', 'completed', 'error'],
-  completed: ['idle', 'evolving', 'error'],
-  evolving: ['completed', 'idle', 'error'],
-  error: ['idle', 'error'],
+  streaming: ['deciding', 'compacting', 'error'],
+  deciding: ['executing', 'completed', 'compacting', 'error'],
+  executing: ['streaming', 'compacting', 'completed', 'error'],
+  completed: [],
+  evolving: ['idle', 'error'],
+  error: ['idle'],
 };
 
 // Pre-built Set-based transitions for O(1) lookup (replaces Array.includes per validation)

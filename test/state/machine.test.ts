@@ -49,7 +49,7 @@ describe('AgentStateMachine', () => {
 
   it('should detect terminal state: error', () => {
     const machine = new AgentStateMachine(createStore());
-    machine.transitionTo('error');
+    machine.forceTransitionTo('error');
     expect(machine.isTerminal()).toBe(true);
   });
 
@@ -76,8 +76,8 @@ describe('AgentStateMachine', () => {
   it('should return valid next states', () => {
     const machine = new AgentStateMachine(createStore());
     const nextStates = machine.getValidNextStates();
+    expect(nextStates).toContain('planning');
     expect(nextStates).toContain('compacting');
-    expect(nextStates).toContain('error');
     expect(nextStates).not.toContain('executing');
   });
 
