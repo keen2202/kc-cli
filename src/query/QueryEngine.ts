@@ -34,7 +34,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { FileContentCache } from '../services/cache/FileContentCache';
 import { ImportanceTagger } from './QueryEngineImportance';
-import type { TurnTag, ContextEfficiencyConfig, PlanningPhaseConfig } from './protocol';
+import type { TurnTag, ContextEfficiencyConfig, PlanningPhaseConfig, PatchGuaranteeConfig } from './protocol';
 
 export interface QueryEngineConfig {
   model: string;
@@ -71,6 +71,9 @@ export interface QueryEngineConfig {
 
   /** Strategic planning phase configuration (Area 1) */
   planningPhase?: PlanningPhaseConfig;
+
+  /** Patch guarantee configuration (Area 2) */
+  patchGuarantee?: PatchGuaranteeConfig;
 }
 
 /**
@@ -127,6 +130,10 @@ export class QueryEngine {
 
   // Area 1: Planning phase handler
   private planningHandler: PlanningPhaseHandler;
+
+  // Area 2: Patch Guarantee — zero-patch detection
+  private zeroPatchRetries = 0;
+  private verificationRetries = 0;
 
   constructor(config: QueryEngineConfig, tools: ToolDefinition[]) {
     this.config = config;
@@ -462,6 +469,23 @@ export class QueryEngine {
           case 'deciding':
             const minTurnsEnforced = this.config.minTurns || 0;
             const hasTools = turnCount >= maxTurns ? false : await this.decidingPhase(turnCount, minTurnsEnforced);
+
+            // Area 2: Zero-patch exhaustion error
+            if (!hasTools && this.zeroPatchRetries > 0 && this.modifiedFiles.size === 0) {
+              const maxRetries = this.config.patchGuarantee?.maxZeroPatchRetries ?? 3;
+              if (this.zeroPatchRetries >= maxRetries) {
+                const err = new Error('Agent exited without modifying any files after exhausting zero-patch retries');
+                (err as any).code = 'model_no_patch';
+                (err as any).context = { zeroPatchRetries: this.zeroPatchRetries };
+                yield {
+                  type: 'agent:error',
+                  error: err,
+                  recoverable: false,
+                  timestamp: Date.now(),
+                } as AgentEvent;
+              }
+            }
+
             if (hasTools) {
               this.stateMachine.transitionTo('executing');
             } else {
@@ -754,6 +778,48 @@ export class QueryEngine {
       }
     }
 
+    // Area 2: Patch Guarantee — zero-patch detection
+    if (!hasToolCalls) {
+      const pgConfig: PatchGuaranteeConfig = {
+        enabled: this.config.patchGuarantee?.enabled ?? true,
+        maxZeroPatchRetries: this.config.patchGuarantee?.maxZeroPatchRetries ?? 3,
+        maxVerificationRetries: this.config.patchGuarantee?.maxVerificationRetries ?? 2,
+        verificationTimeout: this.config.patchGuarantee?.verificationTimeout ?? 60,
+        testCommand: this.config.patchGuarantee?.testCommand ?? 'pytest {test_names} -x',
+      };
+
+      if (!pgConfig.enabled) return hasToolCalls;
+
+      // B1: Zero-patch detection
+      if (this.modifiedFiles.size === 0) {
+        if (this.zeroPatchRetries < pgConfig.maxZeroPatchRetries) {
+          this.zeroPatchRetries++;
+          const remaining = pgConfig.maxZeroPatchRetries - this.zeroPatchRetries;
+          const steerMsg = [
+            '## PATCH REQUIRED',
+            '',
+            `You are about to exit but have modified ZERO files. Retry ${this.zeroPatchRetries}/${pgConfig.maxZeroPatchRetries}.`,
+            '',
+            'Before giving up, verify:',
+            '1. Did you run the FAIL_TO_PASS tests? What exact error do they show?',
+            '2. Did you read the source files related to those errors?',
+            '3. Form a specific hypothesis and make at least one edit.',
+            '',
+            `You have ${remaining} more retry attempt(s) before this session is marked as failed.`,
+          ].join('\n');
+
+          logger.query.warn(`[QueryEngine] Zero-patch detection: retry ${this.zeroPatchRetries}/${pgConfig.maxZeroPatchRetries}`);
+          this.steer(steerMsg);
+
+          return true; // Force continuation
+        }
+
+        // Retries exhausted — emit structured error
+        logger.query.error('[QueryEngine] Zero-patch retries exhausted — model_no_patch');
+        return false; // Let the state machine handle the error
+      }
+    }
+
     return hasToolCalls;
   }
 
@@ -887,6 +953,8 @@ export class QueryEngine {
     this.followUpQueue = [];
     this.modifiedFiles.clear();
     this.lastModifiedTurn = 0;
+    this.zeroPatchRetries = 0;
+    this.verificationRetries = 0;
     this.abortController = new AbortController();
     if (this.stateMachine.currentState !== 'idle') {
       this.stateMachine.forceTransitionTo('idle');

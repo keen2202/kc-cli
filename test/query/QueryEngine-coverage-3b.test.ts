@@ -135,7 +135,7 @@ describe('QueryEngine Coverage Part 3b', () => {
 
   function createEngine(overrides: Record<string, any> = {}) {
     return new QueryEngine(
-      { model: 'test-model', provider: 'openai' as LLMProvider, apiKey: 'test-key', maxTurns: 10, maxBudgetUsd: null, systemPrompt: 'You are helpful.', planningPhase: { enabled: false }, ...overrides },
+      { model: 'test-model', provider: 'openai' as LLMProvider, apiKey: 'test-key', maxTurns: 10, maxBudgetUsd: null, systemPrompt: 'You are helpful.', planningPhase: { enabled: false }, patchGuarantee: { enabled: false }, ...overrides },
       []
     );
   }

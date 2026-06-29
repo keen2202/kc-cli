@@ -221,6 +221,7 @@ describe('QueryEngine Coverage Part 1', () => {
         maxBudgetUsd: null,
         systemPrompt: 'You are helpful.',
         planningPhase: { enabled: false },
+        patchGuarantee: { enabled: false },
         ...overrides,
       },
       []
