@@ -66,3 +66,58 @@ export type StreamEvent =
   | { type: 'tool_use_end'; toolCall: ToolCall; result: ToolResult }
   | { type: 'error'; error: Error }
   | { type: 'complete'; message: AssistantMessage };
+
+// ─── Benchmark Optimization Types (v3.3) ─────────────────────────
+
+/** Per-turn importance classification for smart compaction. */
+export type TurnImportance = 'key_finding' | 'exploration' | 'failed_attempt';
+
+/** Metadata attached to each conversation turn. */
+export interface TurnTag {
+  importance: TurnImportance;
+  keywords: string[];
+  filePaths: string[];
+  testOutput?: string;
+  applied: boolean;
+}
+
+/** A ChatMessage annotated with its TurnTag for compaction decisions. */
+export interface MessageWithTag {
+  message: ChatMessage;
+  tag: TurnTag;
+  turnIndex: number;
+}
+
+/** Structured finding from the planning phase. */
+export interface PlanningFinding {
+  hypothesis: string;
+  relevantFiles: string[];
+  testErrorSummary?: string;
+  confidence: 'low' | 'medium' | 'high';
+}
+
+/** Configuration for the strategic planning phase. */
+export interface PlanningPhaseConfig {
+  enabled: boolean;
+  maxTurns: number;
+  exemptFromBudget: boolean;
+}
+
+/** Configuration for patch guarantee mechanism. */
+export interface PatchGuaranteeConfig {
+  enabled: boolean;
+  maxZeroPatchRetries: number;
+  maxVerificationRetries: number;
+  verificationTimeout: number;
+  testCommand: string;
+}
+
+/** Configuration for context window efficiency. */
+export interface ContextEfficiencyConfig {
+  enabled: boolean;
+  importanceTagging: boolean;
+  dedupCache: boolean;
+  dedupCacheSize: number;
+  failedAttemptMaxAge: number;
+  explorationMaxAge: number;
+}

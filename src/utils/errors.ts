@@ -76,6 +76,7 @@ export type ErrorCode =
   | 'sandbox_denied'
   | 'session_not_found'
   | 'budget_exceeded'
+  | 'model_no_patch'
   | 'unknown';
 
 /**
