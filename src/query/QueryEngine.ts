@@ -30,6 +30,10 @@ import { estimateMessageTokensArray } from '../utils/tokenEstimation';
 
 import { v4 as uuidv4 } from 'uuid';
 
+import { FileContentCache } from '../services/cache/FileContentCache';
+import { ImportanceTagger } from './QueryEngineImportance';
+import type { TurnTag, ContextEfficiencyConfig } from './protocol';
+
 export interface QueryEngineConfig {
   model: string;
   provider: LLMProvider;
@@ -55,6 +59,13 @@ export interface QueryEngineConfig {
   autoExtendTurns?: boolean;
   /** Hard ceiling for auto-extended turns (default 100) */
   maxTurnsCeiling?: number;
+  /** Minimum turns before agent is allowed to exit (prevents early abandonment) */
+  minTurns?: number;
+  /** Auto-commit interval in turns (0 = disabled, default 0) */
+  autoCommitInterval?: number;
+
+  /** Context window efficiency configuration (Area 3) */
+  contextEfficiency?: ContextEfficiencyConfig;
 }
 
 /**
@@ -103,6 +114,12 @@ export class QueryEngine {
   private modifiedFiles: Set<string> = new Set();
   private lastModifiedTurn: number = 0;
 
+  // Area 3: Context efficiency components
+  private fileContentCache: FileContentCache;
+  private importanceTagger: ImportanceTagger;
+  private readHistory = new Map<string, number>();
+  private editHistory = new Map<string, number>();
+
   constructor(config: QueryEngineConfig, tools: ToolDefinition[]) {
     this.config = config;
     this.abortController = new AbortController();
@@ -150,6 +167,12 @@ export class QueryEngine {
       config.provider,
       buildCacheStrategy(config.provider),
     );
+
+    // Initialize context efficiency components
+    this.fileContentCache = new FileContentCache(
+      config.contextEfficiency?.dedupCacheSize ?? 500
+    );
+    this.importanceTagger = new ImportanceTagger();
   }
 
   /**
@@ -219,6 +242,52 @@ export class QueryEngine {
             yield* this.streamingPhase();
             turnCount++;
 
+            // Area 3: Context Efficiency — tag each turn for smart compaction
+            if (this.config.contextEfficiency?.importanceTagging ?? true) {
+              this.fileContentCache.setTurn(turnCount);
+              const allMsgs = this.conversation.getMessages();
+              let lastAssistantMsg: AssistantMessage | undefined;
+              for (let i = allMsgs.length - 1; i >= 0; i--) {
+                if (allMsgs[i].role === 'assistant') {
+                  lastAssistantMsg = allMsgs[i] as AssistantMessage;
+                  break;
+                }
+              }
+              if (lastAssistantMsg) {
+                // Collect tool names and outputs from this turn
+                const toolNames = (lastAssistantMsg.toolCalls || []).map(tc => tc.toolName);
+                const toolOutputs: string[] = [];
+                // Scan recent tool messages for outputs
+                for (let i = allMsgs.length - 1; i >= 0; i--) {
+                  const m = allMsgs[i];
+                  if (m.role === 'tool' && m.toolResults) {
+                    for (const tr of m.toolResults) {
+                      if (tr.output) toolOutputs.push(typeof tr.output === 'string' ? tr.output : String(tr.output));
+                    }
+                  }
+                }
+
+                const tag = this.importanceTagger.tagTurn(
+                  lastAssistantMsg,
+                  toolNames,
+                  toolOutputs,
+                  turnCount,
+                  Array.from(this.modifiedFiles)
+                );
+                this.conversation.tagMessage(lastAssistantMsg.id, tag);
+
+                // Track file read/edit history for duplicate detection
+                for (const fp of tag.filePaths) {
+                  if (toolNames.includes('write') || toolNames.includes('edit')) {
+                    this.editHistory.set(fp, turnCount);
+                    this.fileContentCache.invalidate(fp);
+                  } else {
+                    this.readHistory.set(fp, turnCount);
+                  }
+                }
+              }
+            }
+
             // Phase 1 reminder (first turn)
             if (turnCount === 1 && maxTurns > 10) {
               this.steer(`[Phase 1 - Planning] You are in the planning phase. Focus on reading files and understanding the codebase. Do not make changes yet. Formulate a concrete plan before proceeding to implementation.`);
@@ -239,6 +308,31 @@ export class QueryEngine {
                 content: `[Progress Checkpoint - Turn ${turnCount}/${maxTurns}]\nModified files so far:\n${fileList}\n\nRemember these modifications as you continue working. You have ${remaining} turns remaining.`,
                 timestamp: Date.now(),
               });
+            }
+
+            // P0: Periodic auto-commit (every N turns when there are uncommitted changes)
+            const autoCommitInterval = this.config.autoCommitInterval || 0;
+            if (autoCommitInterval > 0 && turnCount > 0 && turnCount % autoCommitInterval === 0) {
+              try {
+                const committed = await autoCommitAll(getState().cwd);
+                if (committed) {
+                  logger.query.info(`[QueryEngine] Periodic auto-commit at turn ${turnCount}`);
+                  yield this.createTextDeltaEvent(`[Auto-commit checkpoint at turn ${turnCount}]\n`);
+                }
+              } catch {
+                // Non-fatal
+              }
+            }
+
+            // P1: Anti-abandonment — inject encouragement when agent tries to exit too early
+            const minTurns = this.config.minTurns || 0;
+            if (minTurns > 0 && turnCount < minTurns) {
+              // Check if agent is about to exit (no tool calls in last message)
+              const lastMsg = this.conversation.getLastMessage();
+              if (lastMsg && lastMsg.role === 'assistant' && (!(lastMsg as any).toolCalls || (lastMsg as any).toolCalls.length === 0)) {
+                const remaining = minTurns - turnCount;
+                this.steer(`[Anti-Abandonment] You have only completed ${turnCount} turns. You must continue working for at least ${remaining} more turns before you can stop. Keep exploring the codebase and making progress.`);
+              }
             }
 
             if (turnCount >= maxTurns) {
@@ -268,7 +362,8 @@ export class QueryEngine {
             break;
 
           case 'deciding':
-            const hasTools = turnCount >= maxTurns ? false : await this.decidingPhase();
+            const minTurnsEnforced = this.config.minTurns || 0;
+            const hasTools = turnCount >= maxTurns ? false : await this.decidingPhase(turnCount, minTurnsEnforced);
             if (hasTools) {
               this.stateMachine.transitionTo('executing');
             } else {
@@ -530,12 +625,38 @@ export class QueryEngine {
     yield this.createTurnCompleteEvent(assistantMsg);
   }
 
-  private async decidingPhase(): Promise<boolean> {
+  private async decidingPhase(turnCount: number = 0, minTurns: number = 0): Promise<boolean> {
     const lastMsg = this.conversation.getLastMessage();
-    if (!lastMsg || lastMsg.role !== 'assistant') return false;
+    if (!lastMsg || lastMsg.role !== 'assistant') {
+      // P1: If below minTurns, force continuation
+      if (turnCount < minTurns) {
+        return true; // Force agent to continue
+      }
+      return false;
+    }
 
     const assistantMsg = lastMsg as AssistantMessage;
-    return !!(assistantMsg.toolCalls && assistantMsg.toolCalls.length > 0);
+    const hasToolCalls = !!(assistantMsg.toolCalls && assistantMsg.toolCalls.length > 0);
+
+    // P1: Anti-abandonment — if below minTurns and agent has no tool calls, force continuation
+    if (!hasToolCalls && turnCount < minTurns) {
+      logger.query.info(`[QueryEngine] Anti-abandonment: turn ${turnCount} < minTurns ${minTurns}, forcing continuation`);
+      return true; // Force agent to continue
+    }
+
+    // P0: Forced commit on exit — if agent wants to exit with uncommitted changes, force a commit
+    if (!hasToolCalls && this.modifiedFiles.size > 0) {
+      try {
+        const committed = await autoCommitAll(getState().cwd);
+        if (committed) {
+          logger.query.info(`[QueryEngine] Forced commit on exit: ${this.modifiedFiles.size} files`);
+        }
+      } catch {
+        // Non-fatal
+      }
+    }
+
+    return hasToolCalls;
   }
 
   private async *executingPhase(): AsyncGenerator<StreamEvent | AgentEvent> {
