@@ -4,6 +4,7 @@ export { TieredCache, cacheKey, contentKey, type CacheEntry, type CacheStats, ty
 export { CacheManager, getCacheManager, type CacheCategory, type GlobalCacheStats } from './CacheManager';
 export { stableHash } from './compression';
 export { CacheConsistencyManager, getConsistencyManager } from './consistency';
+export { FileContentCache } from './FileContentCache';
 
 /**
  * Format a human-readable cache dashboard showing all cache hit rates
