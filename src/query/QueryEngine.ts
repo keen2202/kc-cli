@@ -28,11 +28,13 @@ import { MemoryHandler } from './QueryEngineMemory';
 import { ErrorHandler } from './QueryEngineError';
 import { estimateMessageTokensArray } from '../utils/tokenEstimation';
 
+import { PlanningPhaseHandler } from './QueryEnginePlanning';
+
 import { v4 as uuidv4 } from 'uuid';
 
 import { FileContentCache } from '../services/cache/FileContentCache';
 import { ImportanceTagger } from './QueryEngineImportance';
-import type { TurnTag, ContextEfficiencyConfig } from './protocol';
+import type { TurnTag, ContextEfficiencyConfig, PlanningPhaseConfig } from './protocol';
 
 export interface QueryEngineConfig {
   model: string;
@@ -66,6 +68,9 @@ export interface QueryEngineConfig {
 
   /** Context window efficiency configuration (Area 3) */
   contextEfficiency?: ContextEfficiencyConfig;
+
+  /** Strategic planning phase configuration (Area 1) */
+  planningPhase?: PlanningPhaseConfig;
 }
 
 /**
@@ -120,6 +125,9 @@ export class QueryEngine {
   private readHistory = new Map<string, number>();
   private editHistory = new Map<string, number>();
 
+  // Area 1: Planning phase handler
+  private planningHandler: PlanningPhaseHandler;
+
   constructor(config: QueryEngineConfig, tools: ToolDefinition[]) {
     this.config = config;
     this.abortController = new AbortController();
@@ -173,6 +181,17 @@ export class QueryEngine {
       config.contextEfficiency?.dedupCacheSize ?? 500
     );
     this.importanceTagger = new ImportanceTagger();
+
+    // Initialize planning phase handler
+    this.planningHandler = new PlanningPhaseHandler(config.planningPhase || {});
+
+    // Link planning handler to tool executor for defense-in-depth filtering
+    this.toolExecutor.setToolBlockCheck((toolName: string) => {
+      if (this.planningHandler.isEnabled && !this.planningHandler.isToolAllowed(toolName)) {
+        return this.planningHandler.getBlockedToolMessage(toolName);
+      }
+      return null;
+    });
   }
 
   /**
@@ -229,8 +248,87 @@ export class QueryEngine {
         const currentState = this.stateMachine.currentState;
 
         switch (currentState) {
+          case 'planning': {
+            // Inject planning system prompt on first planning turn
+            if (this.planningHandler.currentTurn === 0) {
+              this.conversation.addMessage({
+                id: `planning_system_${Date.now()}`,
+                role: 'system',
+                content: this.planningHandler.getSystemPrompt(),
+                timestamp: Date.now(),
+              });
+              yield {
+                type: 'agent:planning_started',
+                timestamp: Date.now(),
+              } as AgentEvent;
+            }
+
+            // Run one streaming turn (read/search tools only)
+            yield* this.streamingPhase();
+
+            // Check if agent signaled completion
+            const lastMsg = this.conversation.getLastMessage();
+            const lastAssistantMsg = lastMsg && lastMsg.role === 'assistant'
+              ? lastMsg as AssistantMessage
+              : undefined;
+            const isComplete = lastAssistantMsg
+              ? this.planningHandler.evaluateComplete(lastAssistantMsg)
+              : false;
+
+            const hasMoreBudget = this.planningHandler.recordTurn();
+
+            yield {
+              type: 'agent:planning_turn',
+              turn: this.planningHandler.currentTurn,
+              timestamp: Date.now(),
+            } as AgentEvent;
+
+            if (isComplete || !hasMoreBudget) {
+              // Extract findings from planning phase assistant messages
+              const allMsgs = this.conversation.getMessages();
+              const planMsgs: AssistantMessage[] = [];
+              for (let i = allMsgs.length - 1; i >= 0 && planMsgs.length < this.planningHandler.currentTurn; i--) {
+                if (allMsgs[i].role === 'assistant') {
+                  planMsgs.unshift(allMsgs[i] as AssistantMessage);
+                }
+              }
+              const findings = this.planningHandler.extractFindings(planMsgs);
+
+              yield {
+                type: 'agent:planning_complete',
+                findings,
+                timestamp: Date.now(),
+              } as AgentEvent;
+
+              // Add findings summary to conversation for the main phase
+              if (findings.length > 0) {
+                const summary = findings.map(f =>
+                  `- Hypothesis: ${f.hypothesis}\n  Files: ${f.relevantFiles.join(', ')}\n  Confidence: ${f.confidence}`
+                ).join('\n\n');
+                this.conversation.addMessage({
+                  id: `planning_findings_${Date.now()}`,
+                  role: 'system',
+                  content: `## Planning Phase Complete\n\nKey findings:\n\n${summary}\n\nYou may now edit files. Proceed with implementation.`,
+                  timestamp: Date.now(),
+                });
+              }
+
+              if (isComplete && !this.planningHandler.isExemptFromBudget) {
+                turnCount += this.planningHandler.currentTurn;
+              }
+
+              this.stateMachine.transitionTo('streaming');
+            }
+            // else: continue planning loop (state stays 'planning')
+            break;
+          }
+
           case 'idle':
-            this.stateMachine.transitionTo('compacting');
+            if (this.planningHandler.isEnabled) {
+              this.stateMachine.transitionTo('planning');
+            } else {
+              this.stateMachine.transitionTo('compacting');
+            }
             break;
 
           case 'compacting':

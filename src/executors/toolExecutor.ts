@@ -109,6 +109,9 @@ export class ToolExecutor {
   private executionEnv: ExecutionEnv;
   private readonly defaultTimeoutMs = DEFAULT_TOOL_TIMEOUT_MS;
 
+  // Optional tool block check for defense-in-depth phase restrictions
+  private toolBlockCheck: ((toolName: string) => string | null) | null = null;
+
   constructor(
     tools: ToolDefinition[],
     cwd: string,
@@ -174,6 +177,18 @@ export class ToolExecutor {
           output: `Unknown tool: ${toolCall.toolName}`,
           isError: true,
         };
+      }
+
+      // 1b. Planning phase tool restriction (defense-in-depth)
+      if (this.toolBlockCheck) {
+        const blockMsg = this.toolBlockCheck(toolCall.toolName);
+        if (blockMsg) {
+          return {
+            toolCallId: toolCall.id,
+            output: blockMsg,
+            isError: true,
+          };
+        }
       }
 
       // 2. Plugin preToolUse hook (may modify input)
@@ -551,6 +566,16 @@ export class ToolExecutor {
    */
   getSandboxManager(): SandboxManager {
     return this.sandboxManager;
+  }
+
+  /**
+   * Set an optional tool block check callback.
+   * If set and returns a non-null string, the tool execution is blocked
+   * with the returned message. Used for defense-in-depth phase restrictions
+   * (e.g., blocking write/edit during planning phase).
+   */
+  setToolBlockCheck(check: ((toolName: string) => string | null) | null): void {
+    this.toolBlockCheck = check;
   }
 
   /**

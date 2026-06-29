@@ -220,6 +220,7 @@ describe('QueryEngine Coverage Part 1', () => {
         maxTurns: 10,
         maxBudgetUsd: null,
         systemPrompt: 'You are helpful.',
+        planningPhase: { enabled: false },
         ...overrides,
       },
       []

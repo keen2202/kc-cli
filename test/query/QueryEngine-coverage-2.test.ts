@@ -230,6 +230,7 @@ describe('QueryEngine Coverage Part 2', () => {
         maxTurns: 10,
         maxBudgetUsd: null,
         systemPrompt: 'You are helpful.',
+        planningPhase: { enabled: false },
         ...overrides,
       },
       []
@@ -625,6 +626,7 @@ describe('QueryEngine Coverage Part 2', () => {
           provider: 'ollama' as LLMProvider,
           maxTurns: 5,
           maxBudgetUsd: null,
+          planningPhase: { enabled: false },
         },
         []
       );
@@ -643,6 +645,7 @@ describe('QueryEngine Coverage Part 2', () => {
           apiKey: 'test-key',
           maxTurns: 5,
           maxBudgetUsd: null,
+          planningPhase: { enabled: false },
         },
         []
       );
