@@ -132,8 +132,8 @@ export function detectBypassAttempts(command: string): {
     vectors.push('non-ascii-chars');
   }
 
-  // Multiple command chaining
-  if (/[;&|]/.test(command) && !/\|\|/.test(command)) {
+  // Multiple command chaining (&&, ;, |, ||)
+  if (/[;&|]/.test(command)) {
     vectors.push('command-chaining');
   }
 

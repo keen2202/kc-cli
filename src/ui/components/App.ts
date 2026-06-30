@@ -44,6 +44,7 @@ import { getBreakpoint, type Density } from '../layout';
 import type { QueryEngine } from '../../query/QueryEngine';
 import type { AgentEvent } from '../../state/types';
 import type { StreamEvent } from '../../query/protocol';
+import { normalizeUIEvent, type CanonicalEventType } from '../event-normalizer';
 
 /** Threshold: use virtual scrolling when message count exceeds this */
 const VIRTUAL_SCROLL_THRESHOLD = 100;
@@ -556,9 +557,12 @@ export class App {
 
   private handleEvent(event: AgentEvent | StreamEvent, assistantMsg: ChatMessage | null): void {
     if (!assistantMsg) return;
-    // Normalize agent:* prefixed events to canonical types
-    const type = event.type.replace(/^agent:/, '');
-    const ev = event as any; // discriminated union broken by prefix normalization — refactor event types to fix
+    // Normalize agent:* prefixed events to canonical UI types
+    const normalized = normalizeUIEvent(event);
+    const type = normalized.type;
+    // Raw event access requires permissive typing due to the union of AgentEvent | StreamEvent
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ev = normalized.raw as any;
 
     switch (type) {
       case 'text_delta':

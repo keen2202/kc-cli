@@ -7,6 +7,8 @@ import type { PermissionResult } from '../permissions/protocol';
 import type { ToolExecutionState } from '../state/types';
 import type { PluginHooks } from '../plugins/types';
 import { hasPermissionsToUseTool } from '../permissions/engine';
+import { isReadOnlyBashCommand } from '../permissions/readonlyCommands';
+import type { AgentToolRestriction } from '../orchestrator/protocol';
 import { SandboxManager } from '../services/sandbox';
 import { mergeSandboxPolicy } from '../services/sandbox-policy';
 import { createLocalExecutionEnv } from '../services/execution-env-local';
@@ -111,6 +113,8 @@ export class ToolExecutor {
 
   // Optional tool block check for defense-in-depth phase restrictions
   private toolBlockCheck: ((toolName: string) => string | null) | null = null;
+  // Agent-specific tool restrictions (e.g., read-only Bash for researcher)
+  private agentToolRestrictions: AgentToolRestriction[] = [];
 
   constructor(
     tools: ToolDefinition[],
@@ -191,6 +195,23 @@ export class ToolExecutor {
         }
       }
 
+      // 1c. Agent tool restrictions (e.g., researcher read-only Bash)
+      if (this.agentToolRestrictions.length > 0) {
+        const restriction = this.agentToolRestrictions.find(r => r.toolName === toolCall.toolName);
+        if (restriction) {
+          if (restriction.restrictions.readOnly && toolCall.toolName === 'Bash') {
+            const command = (toolCall.input as Record<string, unknown>).command as string;
+            if (command && !isReadOnlyBashCommand(command)) {
+              return {
+                toolCallId: toolCall.id,
+                output: `Agent restricted to read-only Bash commands. Blocked: ${command.slice(0, 100)}`,
+                isError: true,
+              };
+            }
+          }
+        }
+      }
+
       // 2. Plugin preToolUse hook (may modify input)
       let effectiveInput = toolCall.input;
       if (this.pluginHooks?.preToolUse) {
@@ -210,9 +231,9 @@ export class ToolExecutor {
       }
 
       // 2b. Tool prepare hook (may modify input, skip execution, or provide early result)
-      if (tool.prepare) {
+      if ((tool as any).prepare) {
         try {
-          const prepareResult = await tool.prepare(effectiveInput, context);
+          const prepareResult = await (tool as any).prepare(effectiveInput, context);
           if (prepareResult.skip) {
             const skipResult = (prepareResult.result ?? {
               toolCallId: toolCall.id,
@@ -287,9 +308,9 @@ export class ToolExecutor {
 
       // 5. Tool finalize hook (may transform result)
       let finalResult = result;
-      if (tool.finalize) {
+      if ((tool as any).finalize) {
         try {
-          finalResult = (await tool.finalize(effectiveInput, result, context)) as ToolResult;
+          finalResult = (await (tool as any).finalize(effectiveInput, result, context)) as ToolResult;
         } catch (err) {
           logger.tools.error('[Finalize] hook error: ' + String(err));
         }
@@ -576,6 +597,14 @@ export class ToolExecutor {
    */
   setToolBlockCheck(check: ((toolName: string) => string | null) | null): void {
     this.toolBlockCheck = check;
+  }
+
+  /**
+   * Set agent-specific tool restrictions for capability enforcement.
+   * Used by the orchestrator to enforce read-only Bash, etc.
+   */
+  setAgentToolRestrictions(restrictions: AgentToolRestriction[]): void {
+    this.agentToolRestrictions = restrictions;
   }
 
   /**

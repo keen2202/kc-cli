@@ -70,6 +70,9 @@ export const BUILTIN_AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
       'DO NOT modify any files or make changes to the codebase. ' +
       'Provide detailed findings and insights.',
     allowedTools: RESEARCHER_TOOLS,
+    toolRestrictions: [
+      { toolName: 'Bash', restrictions: { readOnly: true } },
+    ],
     defaultMaxTurns: 30,
     defaultTimeoutSeconds: 300,
   },

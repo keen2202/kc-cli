@@ -28,7 +28,7 @@ export class PermissionHandler {
 
   constructor(options: PermissionHandlerOptions = {}) {
     this.options = {
-      autoReadOnly: options.autoReadOnly ?? true,
+      autoReadOnly: options.autoReadOnly ?? false,
       timeout: options.timeout ?? 0,
       verbose: options.verbose ?? false,
     };
@@ -68,6 +68,18 @@ export class PermissionHandler {
 
     // Ask user
     if (behavior === 'ask') {
+      // autoReadOnly: skip interactive prompt and auto-approve
+      if (this.options.autoReadOnly) {
+        this.logDecision(toolCall.toolName, 'auto_approved');
+        return {
+          behavior: 'allow',
+          updatedInput: toolCall.input,
+          decisionReason: {
+            type: 'auto_readonly',
+            reason: 'Auto-approved read-only operation',
+          },
+        };
+      }
       return this.askUser(toolCall, message);
     }
 

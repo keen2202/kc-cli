@@ -128,6 +128,7 @@ export function recordToMemConfig(record: ResourceRegistrationRecord<'Mem'>): Me
     maxMemoriesPerType: (p.maxMemoriesPerType as number) ?? 50,
     maxSessionSnapshots: (p.maxSessionSnapshots as number) ?? 100,
     sessionRetentionDays: (p.sessionRetentionDays as number) ?? 30,
+    sessionArchiveRetentionDays: (p.sessionArchiveRetentionDays as number) ?? 90,
     relevanceSearchLimit: (p.relevanceSearchLimit as number) ?? 5,
   };
 }

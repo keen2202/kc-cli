@@ -305,8 +305,13 @@ export class InProcessBackend implements SubAgentBackend {
     });
   }
 
+  /** Per-agent message queues for inter-agent communication */
+  private messageQueues = new Map<string, Array<SubAgentMessage>>();
+
   /**
-   * Send a message to a sub-agent
+   * Send a message to a sub-agent via EventBus.
+   * Messages are emitted as inter-agent events on the target agent's namespace
+   * for async consumption, and also queued for sync polling.
    */
   async sendMessage(agentId: string, message: SubAgentMessage): Promise<void> {
     const runtime = this.activeAgents.get(agentId);
@@ -314,9 +319,45 @@ export class InProcessBackend implements SubAgentBackend {
       throw new Error(`Agent ${agentId} not found`);
     }
 
-    // For now, just log the message
-    // In full implementation, this would add to agent's message queue
-    logger.orchestrator.info(`Message to ${agentId}: ` + String(message));
+    // Queue the message for sync access
+    if (!this.messageQueues.has(agentId)) {
+      this.messageQueues.set(agentId, []);
+    }
+    const queue = this.messageQueues.get(agentId)!;
+    if (queue.length >= 256) {
+      queue.splice(0, queue.length - 256 + 1); // Cap queue size
+    }
+    queue.push(message);
+
+    // Emit as inter-agent event on the target agent's EventBus
+    this.eventBus.emit(agentId, {
+      type: 'agent:inter_agent_message',
+      agentId,
+      from: message.from,
+      messageType: message.type,
+      payload: message.payload,
+      timestamp: Date.now(),
+    } as unknown as AgentEvent);
+
+    logger.orchestrator.info(
+      `Message to ${agentId} from ${message.from}: type=${message.type}`
+    );
+
+    // Handle shutdown messages immediately
+    if (message.type === 'shutdown') {
+      await this.shutdown(agentId, false);
+    }
+  }
+
+  /**
+   * Drain pending messages for an agent (for polling).
+   */
+  drainMessages(agentId: string): SubAgentMessage[] {
+    const queue = this.messageQueues.get(agentId);
+    if (!queue || queue.length === 0) return [];
+    const drained = [...queue];
+    queue.length = 0;
+    return drained;
   }
 
   /**

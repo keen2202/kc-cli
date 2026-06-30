@@ -88,7 +88,7 @@ describe('OllamaClient - Comprehensive Coverage', () => {
       expect(info.provider).toBe('ollama');
       expect(info.maxTokens).toBe(8192);
       expect(info.supportsStreaming).toBe(true);
-      expect(info.supportsTools).toBe(true);
+      expect(info.supportsTools).toBe(false); // llama3 doesn't support tool calling
     });
 
     it('should return info for llama3.1 (128000)', () => {
@@ -116,9 +116,9 @@ describe('OllamaClient - Comprehensive Coverage', () => {
       expect(client.getModelInfo().maxTokens).toBe(32768);
     });
 
-    it('should return info for qwen2 (32768)', () => {
+    it('should return info for qwen2 (32000)', () => {
       const client = new OllamaClient({ model: 'qwen2' });
-      expect(client.getModelInfo().maxTokens).toBe(32768);
+      expect(client.getModelInfo().maxTokens).toBe(32000);
     });
 
     it('should return info for qwen2.5 (128000)', () => {
@@ -146,10 +146,10 @@ describe('OllamaClient - Comprehensive Coverage', () => {
       expect(client.getModelInfo().maxTokens).toBe(100000);
     });
 
-    it('should default to 8192 for unknown model', () => {
+    it('should default to base ollama capabilities for unknown model', () => {
       const client = new OllamaClient({ model: 'unknown-model-xyz' });
       const info = client.getModelInfo();
-      expect(info.maxTokens).toBe(8192);
+      expect(info.maxTokens).toBe(32000); // Falls back to base ollama maxContextWindow
       expect(info.model).toBe('unknown-model-xyz');
     });
   });

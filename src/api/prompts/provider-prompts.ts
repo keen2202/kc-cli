@@ -34,6 +34,8 @@ const anthropicPrompt: PromptTemplate = {
 - Explain the "why" not just the "what"
 - Use consistent formatting`,
 
+  creative: `When generating creative content, focus on clarity and usefulness. Structure your output logically, validate against requirements, and ensure the result is actionable.`,
+
   reasoning: `Think through problems step by step. Consider edge cases and potential issues before implementing solutions.`,
 
   planning: `Work in three phases:
@@ -69,6 +71,8 @@ const openaiPrompt: PromptTemplate = {
   refactoring: `Refactor code incrementally, running tests after each change. Preserve behavior while improving structure and readability.`,
 
   documentation: `Write clear, concise documentation with examples. Focus on practical usage and common patterns.`,
+
+  creative: `When generating creative content, focus on clarity and usefulness. Structure your output logically, validate against requirements, and ensure the result is actionable.`,
 
   reasoning: `Break down complex problems into manageable steps. Consider multiple approaches before choosing one.`,
 
@@ -111,6 +115,8 @@ const deepseekPrompt: PromptTemplate = {
 
   documentation: `编写简洁精确的文档，包含代码示例。解释"为什么"而不仅仅是"是什么"。`,
 
+  creative: `创意生成时保持结构化思维。先明确需求，再生成内容，确保输出实用且符合要求。`,
+
   reasoning: `逐步思考问题。在实现方案前考虑边界情况和潜在问题。`,
 
   planning: `按三阶段工作：
@@ -152,6 +158,8 @@ const qwenPrompt: PromptTemplate = {
 
   documentation: `文档要简洁明了，包含使用示例。`,
 
+  creative: `创意生成时保持结构化思维。先明确需求，再生成内容，确保输出实用且符合要求。`,
+
   reasoning: `分析问题时考虑多种方案，选择最合适的实现。`,
 
   planning: `按三阶段工作：规划→执行→验证。先用 3-5 轮了解代码结构和制定计划，然后按计划逐步实现，最后 3-5 轮运行测试和审查修改。`,
@@ -169,6 +177,8 @@ const glmPrompt: PromptTemplate = {
   refactoring: `小步重构，保持功能不变。`,
 
   documentation: `编写清晰的文档和注释。`,
+
+  creative: `创意生成时保持结构化思维。先明确需求，再生成内容，确保输出实用。`,
 
   reasoning: `逐步分析问题，考虑边界情况。`,
 
@@ -188,6 +198,8 @@ const ollamaPrompt: PromptTemplate = {
 
   documentation: `Keep docs short and practical.`,
 
+  creative: `Generate creative content with clear structure. Validate against requirements and ensure actionable output.`,
+
   reasoning: `Think step by step. Keep solutions simple.`,
 
   planning: `Work in three phases: Plan (read files, make a plan), Execute (implement step by step), Verify (test and review).`,
@@ -205,6 +217,8 @@ const defaultPrompt: PromptTemplate = {
   refactoring: `Refactor incrementally with tests.`,
 
   documentation: `Write clear documentation with examples.`,
+
+  creative: `Generate creative content with clear structure. Validate against requirements and ensure actionable output.`,
 
   reasoning: `Think through problems step by step.`,
 

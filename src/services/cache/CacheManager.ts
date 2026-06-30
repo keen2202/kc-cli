@@ -320,8 +320,19 @@ export class CacheManager {
 }
 
 /**
- * Convenience: get the global CacheManager instance
+ * Convenience: get the global CacheManager instance.
+ * Checks the ServiceContainer first (enables test-time replacement),
+ * falling back to the class-level singleton.
  */
 export function getCacheManager(): CacheManager {
+  try {
+    const { getServiceContainer } = require('../../services/ServiceContainer');
+    const container = getServiceContainer();
+    if (container.has('cacheManager')) {
+      return container.resolve('cacheManager') as CacheManager;
+    }
+  } catch {
+    // ServiceContainer not available — use direct singleton
+  }
   return CacheManager.getInstance();
 }

@@ -13,7 +13,7 @@ describe('BUILTIN_AGENT_DEFINITIONS', () => {
     expect(def.description).toContain('Read-only');
     expect(def.allowedTools).toContain('FileRead');
     expect(def.allowedTools).toContain('Grep');
-    expect(def.defaultMaxTurns).toBe(20);
+    expect(def.defaultMaxTurns).toBe(30);
     expect(def.defaultTimeoutSeconds).toBe(300);
   });
 
@@ -22,7 +22,7 @@ describe('BUILTIN_AGENT_DEFINITIONS', () => {
     expect(def.name).toBe('implementer');
     expect(def.allowedTools).toContain('FileWrite');
     expect(def.allowedTools).toContain('FileEdit');
-    expect(def.defaultMaxTurns).toBe(25);
+    expect(def.defaultMaxTurns).toBe(50);
     expect(def.defaultTimeoutSeconds).toBe(600);
   });
 
@@ -30,14 +30,14 @@ describe('BUILTIN_AGENT_DEFINITIONS', () => {
     const def = BUILTIN_AGENT_DEFINITIONS.verifier;
     expect(def.name).toBe('verifier');
     expect(def.allowedTools).toContain('Bash');
-    expect(def.defaultMaxTurns).toBe(15);
+    expect(def.defaultMaxTurns).toBe(25);
   });
 
   it('should define explorer agent', () => {
     const def = BUILTIN_AGENT_DEFINITIONS.explorer;
     expect(def.name).toBe('explorer');
     expect(def.allowedTools).toContain('FileRead');
-    expect(def.defaultMaxTurns).toBe(15);
+    expect(def.defaultMaxTurns).toBe(20);
   });
 
   it('should define general agent with no tool restrictions', () => {

@@ -23,6 +23,19 @@ function createMockProcess() {
   return proc;
 }
 
+/** Helper: frame JSON with Content-Length header for MCP spec compliance */
+function frameMessage(obj: unknown): string {
+  const json = JSON.stringify(obj);
+  return `Content-Length: ${Buffer.byteLength(json)}\r\n\r\n${json}`;
+}
+
+/** Helper: extract the first JSON-RPC message from a Content-Length framed write call */
+function extractWrittenJson(writeMock: any, callIndex: number = 0): any {
+  const raw = writeMock.mock.calls[callIndex][0] as string;
+  const headerEnd = raw.indexOf('\r\n\r\n');
+  return JSON.parse(raw.slice(headerEnd + 4));
+}
+
 describe('StdioTransport', () => {
   let transport: StdioTransport;
 
@@ -34,10 +47,7 @@ describe('StdioTransport', () => {
 
   describe('connect', () => {
     it('should spawn a process and connect successfully', async () => {
-      // The transport has a 100ms startup delay
       const connectPromise = transport.connect('mcp-server', ['--port', '3000']);
-
-      // The transport waits 100ms then resolves if process exists
       await new Promise(r => setTimeout(r, 150));
       await connectPromise;
 
@@ -61,26 +71,17 @@ describe('StdioTransport', () => {
 
     it('should reject if spawn errors', async () => {
       const connectPromise = transport.connect('bad-cmd', []);
-
-      // Emit error before the 100ms timeout
       setTimeout(() => {
         mockProcess.emit('error', new Error('ENOENT'));
       }, 10);
-
       await expect(connectPromise).rejects.toThrow('Failed to spawn MCP server');
     });
 
     it('should reject if process exits before startup timeout', async () => {
-      // Set process to null before timeout
       const connectPromise = transport.connect('bad-cmd', []);
-
       setTimeout(() => {
-        // Simulate process dying
         mockProcess.emit('exit', 1);
       }, 10);
-
-      // The transport should resolve (process exists initially) or reject
-      // The 100ms timeout checks if process is still alive
       try {
         await connectPromise;
       } catch (e) {
@@ -94,24 +95,23 @@ describe('StdioTransport', () => {
       await expect(transport.sendRequest('test')).rejects.toThrow('not connected');
     });
 
-    it('should write JSON-RPC message to stdin', async () => {
+    it('should write JSON-RPC message with Content-Length framing', async () => {
       const p = transport.connect('server', []);
       await new Promise(r => setTimeout(r, 150));
       await p;
 
       const requestPromise = transport.sendRequest('test-method', { key: 'value' });
 
-      // Verify message was written
       expect(mockProcess.stdin.write).toHaveBeenCalledTimes(1);
-      const written = JSON.parse(mockProcess.stdin.write.mock.calls[0][0].replace('\n', ''));
+      const written = extractWrittenJson(mockProcess.stdin.write);
       expect(written.jsonrpc).toBe('2.0');
       expect(written.method).toBe('test-method');
       expect(written.params).toEqual({ key: 'value' });
       expect(written.id).toBe(1);
 
-      // Simulate response
+      // Simulate response with Content-Length framing
       mockProcess.stdout.emit('data', Buffer.from(
-        JSON.stringify({ jsonrpc: '2.0', id: written.id, result: { success: true } }) + '\n'
+        frameMessage({ jsonrpc: '2.0', id: written.id, result: { success: true } })
       ));
 
       const result = await requestPromise;
@@ -125,9 +125,9 @@ describe('StdioTransport', () => {
 
       const requestPromise = transport.sendRequest('test');
 
-      const written = JSON.parse(mockProcess.stdin.write.mock.calls[0][0].replace('\n', ''));
+      const written = extractWrittenJson(mockProcess.stdin.write);
       mockProcess.stdout.emit('data', Buffer.from(
-        JSON.stringify({ jsonrpc: '2.0', id: written.id, error: { code: -32600, message: 'Bad request' } }) + '\n'
+        frameMessage({ jsonrpc: '2.0', id: written.id, error: { code: -32600, message: 'Bad request' } })
       ));
 
       await expect(requestPromise).rejects.toThrow('MCP error -32600: Bad request');
@@ -141,12 +141,12 @@ describe('StdioTransport', () => {
       const req1 = transport.sendRequest('m1');
       const req2 = transport.sendRequest('m2');
 
-      const w1 = JSON.parse(mockProcess.stdin.write.mock.calls[0][0].replace('\n', ''));
-      const w2 = JSON.parse(mockProcess.stdin.write.mock.calls[1][0].replace('\n', ''));
+      const w1 = extractWrittenJson(mockProcess.stdin.write, 0);
+      const w2 = extractWrittenJson(mockProcess.stdin.write, 1);
 
-      // Send both responses in one chunk
-      const chunk = JSON.stringify({ jsonrpc: '2.0', id: w1.id, result: 'r1' }) + '\n' +
-                    JSON.stringify({ jsonrpc: '2.0', id: w2.id, result: 'r2' }) + '\n';
+      // Send both responses in one chunk with Content-Length framing
+      const chunk = frameMessage({ jsonrpc: '2.0', id: w1.id, result: 'r1' }) +
+                    frameMessage({ jsonrpc: '2.0', id: w2.id, result: 'r2' });
       mockProcess.stdout.emit('data', Buffer.from(chunk));
 
       expect(await req1).toBe('r1');
@@ -159,9 +159,9 @@ describe('StdioTransport', () => {
       await p;
 
       const req = transport.sendRequest('test');
-      const w = JSON.parse(mockProcess.stdin.write.mock.calls[0][0].replace('\n', ''));
+      const w = extractWrittenJson(mockProcess.stdin.write);
 
-      const full = JSON.stringify({ jsonrpc: '2.0', id: w.id, result: 'ok' }) + '\n';
+      const full = frameMessage({ jsonrpc: '2.0', id: w.id, result: 'ok' });
       const mid = Math.floor(full.length / 2);
 
       mockProcess.stdout.emit('data', Buffer.from(full.slice(0, mid)));
@@ -170,18 +170,18 @@ describe('StdioTransport', () => {
       expect(await req).toBe('ok');
     });
 
-    it('should ignore malformed JSON lines', async () => {
+    it('should ignore malformed Content-Length frames', async () => {
       const p = transport.connect('server', []);
       await new Promise(r => setTimeout(r, 150));
       await p;
 
       const req = transport.sendRequest('test');
-      const w = JSON.parse(mockProcess.stdin.write.mock.calls[0][0].replace('\n', ''));
+      const w = extractWrittenJson(mockProcess.stdin.write);
 
-      // Send malformed line first, then valid response
-      mockProcess.stdout.emit('data', Buffer.from('not json\n'));
+      // Send garbled data first, then valid response
+      mockProcess.stdout.emit('data', Buffer.from('garbage\r\n\r\nnot-json'));
       mockProcess.stdout.emit('data', Buffer.from(
-        JSON.stringify({ jsonrpc: '2.0', id: w.id, result: 'ok' }) + '\n'
+        frameMessage({ jsonrpc: '2.0', id: w.id, result: 'ok' })
       ));
 
       expect(await req).toBe('ok');
@@ -208,8 +208,8 @@ describe('StdioTransport', () => {
       transport.sendRequest('m1');
       transport.sendRequest('m2');
 
-      const msg1 = JSON.parse(mockProcess.stdin.write.mock.calls[0][0].replace('\n', ''));
-      const msg2 = JSON.parse(mockProcess.stdin.write.mock.calls[1][0].replace('\n', ''));
+      const msg1 = extractWrittenJson(mockProcess.stdin.write, 0);
+      const msg2 = extractWrittenJson(mockProcess.stdin.write, 1);
       expect(msg2.id).toBe(msg1.id + 1);
     });
   });
@@ -223,9 +223,8 @@ describe('StdioTransport', () => {
       const handler = vi.fn();
       transport.onNotification(handler);
 
-      // Send a notification (no id field)
       mockProcess.stdout.emit('data', Buffer.from(
-        JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }) + '\n'
+        frameMessage({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' })
       ));
 
       expect(handler).toHaveBeenCalledWith({

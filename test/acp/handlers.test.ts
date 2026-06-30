@@ -184,9 +184,9 @@ describe('ACP Handlers', () => {
           model: 'test-model',
           provider: 'test-provider',
           apiKey: 'test-key',
-          maxTurns: 50,
+          maxTurns: 80,
         }),
-        []
+        expect.any(Array)
       );
     });
 

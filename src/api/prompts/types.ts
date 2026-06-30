@@ -15,6 +15,8 @@ export interface PromptTemplate {
   refactoring: string;
   /** Documentation instructions */
   documentation: string;
+  /** Creative content generation instructions */
+  creative: string;
   /** Reasoning instructions */
   reasoning: string;
   /** Planning phase instructions (3-phase workflow) */

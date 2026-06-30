@@ -54,6 +54,7 @@ export async function scanMemoryFiles(
         description: header.description || '',
         type: memoryType,
         mtime: stat.mtimeMs,
+        confidence: header.confidence,
       });
     } catch {
       // Skip invalid files

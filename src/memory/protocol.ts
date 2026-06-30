@@ -90,6 +90,7 @@ export interface MemoryManifestEntry {
   description: string;
   type: MemoryType;
   mtime: number;
+  confidence?: 'low' | 'high';
 }
 
 /**
@@ -114,6 +115,7 @@ export interface MemoryConfig {
   maxMemoriesPerType: number;
   maxSessionSnapshots: number;
   sessionRetentionDays: number;
+  sessionArchiveRetentionDays: number;
   relevanceSearchLimit: number;
 }
 
@@ -131,5 +133,6 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   maxMemoriesPerType: 50,
   maxSessionSnapshots: 100,
   sessionRetentionDays: 30,
+  sessionArchiveRetentionDays: 90,
   relevanceSearchLimit: 5,
 };

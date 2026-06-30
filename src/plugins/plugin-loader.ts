@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import type { Plugin, PluginManifest } from './types';
 import { createLogger } from '../services/logger';
 
@@ -116,6 +117,21 @@ async function discoverPackageJsonPlugins(projectDir: string): Promise<string[]>
   return pluginDirs;
 }
 
+/**
+ * Verify the integrity of a plugin entry file against an expected SHA-256 hash.
+ * Uses timingSafeEqual to prevent timing attacks on hash comparison.
+ */
+async function verifyPluginIntegrity(filePath: string, expectedHash: string): Promise<boolean> {
+  try {
+    const content = await fs.promises.readFile(filePath);
+    const actual = createHash('sha256').update(content).digest('hex');
+    if (actual.length !== expectedHash.length) return false;
+    return timingSafeEqual(Buffer.from(actual, 'hex'), Buffer.from(expectedHash, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
 export async function loadPlugin(pluginDir: string): Promise<Plugin | null> {
   try {
     const manifestPath = path.join(pluginDir, 'package.json');
@@ -130,6 +146,21 @@ export async function loadPlugin(pluginDir: string): Promise<Plugin | null> {
 
     const mainPath = path.join(pluginDir, manifest.main || 'index.js');
     if (!fs.existsSync(mainPath)) return null;
+
+    // Integrity verification: require hash in production mode
+    const isDev = process.env.KC_DEV_MODE === 'true';
+    if (manifest.integrity) {
+      const valid = await verifyPluginIntegrity(mainPath, manifest.integrity);
+      if (!valid) {
+        logger.warn('Plugin integrity check failed — file has been modified', { pluginDir, mainPath });
+        return null;
+      }
+    } else if (!isDev) {
+      logger.warn('Plugin rejected: missing integrity hash in production mode', { pluginDir, name: manifest.name });
+      return null;
+    } else {
+      logger.warn(`Plugin ${manifest.name} has no integrity hash — skipping verification in dev mode`);
+    }
 
     const mod = await import(mainPath);
     const plugin: Plugin = mod.default || mod.plugin || mod;

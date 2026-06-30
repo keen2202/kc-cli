@@ -22,6 +22,7 @@ vi.mock('../../src/bootstrap/state', () => ({
 
 vi.mock('../../src/permissions/protectedPaths', () => ({
   containsProtectedPath: vi.fn().mockReturnValue(false),
+  isSystemWriteDirectory: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock('../../src/services/cache', () => ({

@@ -111,7 +111,7 @@ export class PromptBuilder {
       case 'documentation':
         return this.template.documentation;
       case 'creative':
-        return this.template.reasoning;
+        return this.template.creative;
       case 'general':
       default:
         return '';

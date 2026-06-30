@@ -15,6 +15,7 @@ type MessageHandler = (message: JSONRPCResponse | JSONRPCNotification) => void;
 export class StdioTransport {
   private process: ChildProcess | null = null;
   private buffer = '';
+  private contentLength = -1;
   private messageId = 0;
   private pendingRequests = new Map<number, {
     resolve: (result: unknown) => void;
@@ -112,8 +113,9 @@ export class StdioTransport {
     return new Promise((resolve, reject) => {
       this.pendingRequests.set(id, { resolve, reject });
 
-      const message = JSON.stringify(request) + '\n';
-      this.process!.stdin!.write(message);
+      const message = JSON.stringify(request);
+      const header = `Content-Length: ${Buffer.byteLength(message)}\r\n\r\n`;
+      this.process!.stdin!.write(header + message);
 
       // Timeout after 30 seconds
       setTimeout(() => {
@@ -170,6 +172,8 @@ export class StdioTransport {
       this.process = null;
     }
     this.pendingRequests.clear();
+    this.buffer = '';
+    this.contentLength = -1;
     this.isDisconnecting = false;
   }
 
@@ -181,20 +185,39 @@ export class StdioTransport {
   }
 
   private processBuffer(): void {
-    // indexOf-based incremental parsing instead of split('\n') to avoid allocating array for entire buffer
-    let newlineIdx: number;
-    while ((newlineIdx = this.buffer.indexOf('\n')) !== -1) {
-      const line = this.buffer.slice(0, newlineIdx);
-      this.buffer = this.buffer.slice(newlineIdx + 1);
+    // Content-Length framed parsing per MCP specification.
+    // Handles partial messages, multiple messages in a single buffer,
+    // and messages split across buffer boundaries.
+    while (true) {
+      // Phase 1: Parse header to get content length
+      if (this.contentLength < 0) {
+        const headerEnd = this.buffer.indexOf('\r\n\r\n');
+        if (headerEnd === -1) return; // Header not complete yet
 
-      const trimmed = line.trim();
-      if (!trimmed) continue;
+        const header = this.buffer.slice(0, headerEnd);
+        const match = header.match(/Content-Length:\s*(\d+)/i);
+        if (!match) {
+          // Malformed header - discard and try next
+          this.buffer = this.buffer.slice(headerEnd + 4);
+          continue;
+        }
+        this.contentLength = parseInt(match[1], 10);
+        this.buffer = this.buffer.slice(headerEnd + 4);
+      }
+
+      // Phase 2: Wait for complete body
+      if (this.buffer.length < this.contentLength) return;
+
+      // Phase 3: Extract and parse body
+      const body = this.buffer.slice(0, this.contentLength);
+      this.buffer = this.buffer.slice(this.contentLength);
+      this.contentLength = -1;
 
       try {
-        const message = JSON.parse(trimmed);
+        const message = JSON.parse(body);
         this.handleMessage(message);
       } catch {
-        // Ignore malformed lines
+        // Ignore malformed messages
       }
     }
   }

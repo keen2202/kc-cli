@@ -224,11 +224,32 @@ function resolveValue(path: string, context: RuleEvaluationContext): string {
  * Match a pattern against a value.
  * Supports: exact match, glob (* and ?), regex (/pattern/)
  */
+/**
+ * Maximum allowed length for a regex pattern (256 characters).
+ * Prevents resource exhaustion from extremely long patterns.
+ */
+const MAX_PATTERN_LENGTH = 256;
+
+/**
+ * Check if a regex pattern is safe from ReDoS attacks.
+ * Rejects patterns with nested quantifiers: (a+)+, (a*)*, (a+)*, (a*)+
+ */
+function isRegexSafe(pattern: string): boolean {
+  if (pattern.length > MAX_PATTERN_LENGTH) return false;
+  // Detect nested quantifiers: a quantifier inside a group that is itself quantified
+  const nestedQuantifier = /\([^)]*(?:\+|\*|\{\d+,?\d*\})[^)]*\)[\s]*[\+\*]/;
+  return !nestedQuantifier.test(pattern);
+}
+
 export function matchEnhancedPattern(pattern: string, value: string): boolean {
   // Regex pattern (starts and ends with /)
   if (pattern.startsWith('/') && pattern.endsWith('/')) {
+    const body = pattern.slice(1, -1);
+    if (!isRegexSafe(body)) {
+      return false;
+    }
     try {
-      const regex = new RegExp(pattern.slice(1, -1));
+      const regex = new RegExp(body);
       return regex.test(value);
     } catch (_err) {
       console.error("Suppressed error:", _err);

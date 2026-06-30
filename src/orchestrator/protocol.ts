@@ -119,6 +119,15 @@ export interface SubAgentMessage {
 }
 
 /**
+ * Per-tool restriction for an agent profile.
+ * Used to enforce capability limits (e.g., read-only Bash for researcher).
+ */
+export interface AgentToolRestriction {
+  toolName: string;
+  restrictions: Record<string, unknown>;
+}
+
+/**
  * Agent definition for pre-defined agent types
  */
 export interface AgentDefinition {
@@ -127,6 +136,8 @@ export interface AgentDefinition {
   systemPrompt?: string;
   allowedTools?: ToolName[];
   deniedTools?: ToolName[];
+  /** Per-tool capability restrictions enforced at execution time */
+  toolRestrictions?: AgentToolRestriction[];
   defaultMaxTurns?: number;
   defaultTimeoutSeconds?: number;
 }

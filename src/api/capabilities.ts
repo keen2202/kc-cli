@@ -278,15 +278,53 @@ const MODEL_OVERRIDES: Record<string, Partial<ProviderCapabilities>> = {
     maxOutputTokens: 4_096,
   },
 
-  // Ollama models
+  // Ollama models — tool support and context window are model-dependent
   'ollama/llama3': {
     maxContextWindow: 8_192,
-    maxOutputTokens: 2_048,
     supportsToolUse: false,
+  },
+  'ollama/llama3.1': {
+    maxContextWindow: 128_000,
+    supportsToolUse: true,
+  },
+  'ollama/llama3.2': {
+    maxContextWindow: 128_000,
+    supportsToolUse: true,
+  },
+  'ollama/llama3.3': {
+    maxContextWindow: 128_000,
+    supportsToolUse: true,
+  },
+  'ollama/mistral': {
+    maxContextWindow: 8_192,
+    supportsToolUse: false,
+  },
+  'ollama/mixtral': {
+    maxContextWindow: 32_768,
+    supportsToolUse: true,
   },
   'ollama/qwen2': {
     maxContextWindow: 32_000,
-    maxOutputTokens: 4_096,
+    supportsToolUse: true,
+  },
+  'ollama/qwen2.5': {
+    maxContextWindow: 128_000,
+    supportsToolUse: true,
+  },
+  'ollama/gemma2': {
+    maxContextWindow: 8_192,
+    supportsToolUse: false,
+  },
+  'ollama/phi3': {
+    maxContextWindow: 128_000,
+    supportsToolUse: false,
+  },
+  'ollama/deepseek-coder': {
+    maxContextWindow: 16_384,
+    supportsToolUse: true,
+  },
+  'ollama/codellama': {
+    maxContextWindow: 100_000,
     supportsToolUse: true,
   },
 };
@@ -329,8 +367,8 @@ export function hasCapability(provider: string, capability: keyof ProviderCapabi
 /**
  * Get the recommended temperature for a provider/model.
  */
-export function getRecommendedTemperature(provider: string, model?: number): number {
-  return getCapabilities(provider, model ? String(model) : undefined).recommendedTemperature;
+export function getRecommendedTemperature(provider: string, model?: string): number {
+  return getCapabilities(provider, model).recommendedTemperature;
 }
 
 /**

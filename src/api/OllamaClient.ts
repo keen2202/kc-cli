@@ -5,6 +5,7 @@ import { BaseApiClient, ApiError } from './BaseApiClient';
 import type { LLMStreamEvent, LLMRequestConfig, LLMResponse, TokenUsage } from './BaseApiClient';
 import type { ChatMessage, ToolCall } from '../query/protocol';
 import type { ToolDefinition } from '../tools/protocol';
+import { getCapabilities } from './capabilities';
 
 export interface OllamaConfig {
   baseUrl?: string;
@@ -93,30 +94,16 @@ export class OllamaClient extends BaseApiClient {
    * Get model information
    */
   getModelInfo() {
-    // Ollama supports many models, context window varies
-    const modelInfo: Record<string, { maxTokens: number }> = {
-      'llama3': { maxTokens: 8192 },
-      'llama3.1': { maxTokens: 128000 },
-      'llama3.2': { maxTokens: 128000 },
-      'llama3.3': { maxTokens: 128000 },
-      'mistral': { maxTokens: 8192 },
-      'mixtral': { maxTokens: 32768 },
-      'qwen2': { maxTokens: 32768 },
-      'qwen2.5': { maxTokens: 128000 },
-      'gemma2': { maxTokens: 8192 },
-      'phi3': { maxTokens: 128000 },
-      'deepseek-coder': { maxTokens: 16384 },
-      'codellama': { maxTokens: 100000 },
-    };
-
-    const info = modelInfo[this.model] || { maxTokens: 8192 };
+    // Query capabilities.ts for model-specific tool support instead of hardcoding.
+    // Ollama tool support is model-dependent (e.g., qwen2 supports tools, llama3 does not).
+    const caps = getCapabilities('ollama', this.model);
 
     return {
       provider: 'ollama',
       model: this.model,
-      maxTokens: info.maxTokens,
-      supportsStreaming: true,
-      supportsTools: true, // Depends on model capabilities
+      maxTokens: caps.maxContextWindow,
+      supportsStreaming: caps.supportsStreaming,
+      supportsTools: caps.supportsToolUse,
     };
   }
 

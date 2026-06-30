@@ -252,6 +252,8 @@ describe('loadPlugin', () => {
   let realReadFile: typeof readFile;
 
   beforeAll(async () => {
+    // Enable dev mode to skip integrity hash requirement in tests
+    process.env.KC_DEV_MODE = 'true';
     const realFs = await vi.importActual<typeof import('fs')>('fs');
     realExistsSync = vi.fn((p: any) => realFs.existsSync(p)) as any;
     realReadFile = vi.fn(async (p: any, encoding?: any) => realFs.promises.readFile(p, encoding)) as any;

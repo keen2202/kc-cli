@@ -27,6 +27,7 @@ import {
   getKcCliBasePath,
 } from './paths';
 import { parseFrontmatter, composeMemoryFile, validateMemoryType } from './frontmatter';
+import { invalidateScoreCache } from './relevanceSearch';
 
 export class FileMemoryService implements MemoryService {
   /**
@@ -78,6 +79,7 @@ export class FileMemoryService implements MemoryService {
     await fs.writeFile(tempPath, content, 'utf-8');
     await fs.rename(tempPath, filePath);
 
+    invalidateScoreCache();
     return fileName;
   }
 
@@ -173,6 +175,8 @@ export class FileMemoryService implements MemoryService {
         throw err;
       }
     }
+
+    invalidateScoreCache();
   }
 
   /**
@@ -205,6 +209,8 @@ export class FileMemoryService implements MemoryService {
     const tempPath = `${filePath}.tmp`;
     await fs.writeFile(tempPath, content, 'utf-8');
     await fs.rename(tempPath, filePath);
+
+    invalidateScoreCache();
   }
 
   // ==================== Session Operations ====================
@@ -330,18 +336,46 @@ export class FileMemoryService implements MemoryService {
   }
 
   /**
-   * Prune old sessions beyond retention period
+   * Prune old sessions beyond retention period.
+   * @param retentionDays - Retention for active sessions (default 30 days)
+   * @param archiveRetentionDays - Retention for archived sessions (default 90 days). Omit to skip archive pruning.
    */
-  async pruneOldSessions(retentionDays: number): Promise<number> {
+  async pruneOldSessions(retentionDays: number, archiveRetentionDays?: number): Promise<number> {
     const cutoffTime = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
     const sessions = await this.listSessions();
 
     let prunedCount = 0;
 
+    // Prune active sessions
     for (const session of sessions) {
       if (session.metadata.lastModified < cutoffTime) {
         await this.deleteSession(session.sessionId);
         prunedCount++;
+      }
+    }
+
+    // Prune archived sessions
+    if (archiveRetentionDays !== undefined) {
+      const archiveCutoff = Date.now() - archiveRetentionDays * 24 * 60 * 60 * 1000;
+      const archiveDir = getArchivePath();
+
+      try {
+        const archiveFiles = await fs.readdir(archiveDir);
+        for (const file of archiveFiles) {
+          if (!file.endsWith('.json')) continue;
+          const filePath = path.join(archiveDir, file);
+          try {
+            const stat = await fs.stat(filePath);
+            if (stat.mtimeMs < archiveCutoff) {
+              await fs.unlink(filePath);
+              prunedCount++;
+            }
+          } catch {
+            // Skip files that can't be stat'd or deleted
+          }
+        }
+      } catch {
+        // Archive directory doesn't exist yet — nothing to prune
       }
     }
 

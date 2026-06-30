@@ -66,26 +66,6 @@ export interface ToolDefinition<Input = Record<string, unknown>, Output = unknow
   getToolUseSummary?: (input: Input) => string | null;
   getActivityDescription?: (input: Input) => string | null;
 
-  /**
-   * Optional pre-execution hook called before the tool's `call()`.
-   * Can modify input, skip execution entirely, or provide an early result.
-   */
-  prepare?: (
-    input: Input,
-    context: ToolUseContext
-  ) => Promise<{ input: Input; skip?: boolean; result?: ToolResult<Output> }>;
-
-  /**
-   * Optional post-execution hook called after the tool's `call()`.
-   * Can transform or augment the result before it is returned.
-   * Note: result parameter uses ToolResult<unknown> for type variance compatibility.
-   */
-  finalize?: (
-    input: Input,
-    result: ToolResult<unknown>,
-    context: ToolUseContext
-  ) => Promise<ToolResult<Output>>;
-
   shouldDefer?: boolean;
   alwaysLoad?: boolean;
   searchHint?: string;
@@ -101,28 +81,9 @@ export interface ToolDefinition<Input = Record<string, unknown>, Output = unknow
   agpImplementationDescriptor?: string;
 }
 
-export type ToolName =
-  | 'Bash'
-  | 'FileRead'
-  | 'FileWrite'
-  | 'FileEdit'
-  | 'Glob'
-  | 'Grep'
-  | 'WebFetch'
-  | 'WebSearch'
-  | 'Sql'
-  | 'Docker'
-  | 'Deploy'
-  | 'Monitor'
-  | 'Run'
-  | 'Git'
-  | 'TodoWrite'
-  | 'Agent'
-  | 'AskUser'
-  | 'TaskCreate'
-  | 'TaskGet'
-  | 'Config'
-  | 'TeamCreate';
+import type { TOOL_MANIFEST } from './registry';
+
+export type ToolName = typeof TOOL_MANIFEST[number]['name'];
 
 export interface ToolRegistry {
   tools: Map<ToolName, ToolDefinition>;

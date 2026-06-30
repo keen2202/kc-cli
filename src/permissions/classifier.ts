@@ -3,14 +3,70 @@
 import type { PermissionResult, PermissionContext } from '../permissions/protocol';
 import { LOW_RISK_BASH_PATTERNS, MEDIUM_RISK_BASH_PATTERNS } from './readonlyCommands';
 import { containsProtectedPath } from './protectedPaths';
-import { normalizeCommand } from './commandNormalizer';
+import { normalizeCommand, splitSubCommands } from './commandNormalizer';
 
 // Module-level constants (avoid allocation per call)
 const SAFE_TOOLS = new Set(['FileRead', 'Glob', 'Grep', 'Monitor']);
-const RM_RF_REGEX = /\brm\s+-rf/;
-const DESTRUCTIVE_REGEX = /\b(mkfs|dd|Format)\b/;
 const CLASSIFIER_TIMEOUT_MS = 5000;
 const MAX_CLASSIFICATIONS_PER_SEC = 10;
+
+// Comprehensive destructive command patterns.
+// Each pattern is tested against the normalized command form.
+const DESTRUCTIVE_PATTERNS: { pattern: RegExp; description: string }[] = [
+  // Recursive delete: rm with -r, -rf, -R, -fr, -recursive, --recursive
+  { pattern: /\brm\b\s+(?:-\S*[rR]\S*|--recursive)/, description: 'Recursive delete' },
+  // Force delete: rm with -f or --force (catches rm -rf too)
+  { pattern: /\brm\b\s+(?:-\S*f|--force)/, description: 'Force delete' },
+  // Filesystem format
+  { pattern: /\b(?:mkfs|mke2fs|mkfs\.\w+)\b/, description: 'Filesystem format' },
+  // Disk write: dd with output file
+  { pattern: /\bdd\b.*\bof=/, description: 'Disk write (dd)' },
+  // Disk partitioning (always destructive)
+  { pattern: /\b(?:fdisk|parted)\b/, description: 'Disk partitioning' },
+  // Recursive permission changes
+  { pattern: /\bchmod\b\s+.*-[rR]/, description: 'Recursive chmod' },
+  { pattern: /\bchown\b\s+.*-[rR]/, description: 'Recursive chown' },
+  // Firewall modification
+  { pattern: /\biptables\b/, description: 'Firewall modification' },
+  // Service control
+  { pattern: /\bsystemctl\b\s+(?:start|stop|disable|mask)/, description: 'Service control' },
+  // Bootloader modification
+  { pattern: /\b(?:update-grub|grub-install)\b/, description: 'Bootloader modification' },
+  // LVM creation
+  { pattern: /\b(?:pvcreate|lvcreate|vgcreate)\b/, description: 'LVM creation' },
+  // Shutdown/reboot
+  { pattern: /\b(?:shutdown|reboot|halt|poweroff)\b/, description: 'System shutdown' },
+];
+
+/**
+ * Check if a command is dangerous.
+ * Normalizes the command first to prevent pattern-matching bypass,
+ * then checks against all destructive patterns.
+ */
+export function isDangerousCommand(command: string): { dangerous: boolean; reason?: string } {
+  const normalized = normalizeCommand(command);
+  for (const { pattern, description } of DESTRUCTIVE_PATTERNS) {
+    if (pattern.test(normalized)) {
+      return { dangerous: true, reason: description };
+    }
+  }
+  return { dangerous: false };
+}
+
+/**
+ * Check if a compound command contains any dangerous sub-commands.
+ * Splits on &&, ;, |, || and checks each sub-command independently.
+ */
+export function isDangerousCompoundCommand(command: string): { dangerous: boolean; reason?: string } {
+  const subCommands = splitSubCommands(command);
+  for (const subCmd of subCommands) {
+    const result = isDangerousCommand(subCmd);
+    if (result.dangerous) {
+      return result;
+    }
+  }
+  return { dangerous: false };
+}
 
 export interface ClassifierDecision {
   behavior: 'allow' | 'deny' | 'ask';
@@ -118,24 +174,17 @@ export class PermissionClassifier {
       };
     }
 
-    // Always deny known dangerous patterns (pre-compiled regex)
+    // Check for dangerous commands — split compound commands and check each
     const rawCommand = (input.command as string) || '';
-    const command = normalizeCommand(rawCommand);
-
-    if (RM_RF_REGEX.test(command)) {
-      return {
-        behavior: 'deny',
-        confidence: 0.99,
-        reason: 'Dangerous recursive delete command',
-      };
-    }
-
-    if (DESTRUCTIVE_REGEX.test(command)) {
-      return {
-        behavior: 'deny',
-        confidence: 0.99,
-        reason: 'Destructive system command',
-      };
+    if (rawCommand) {
+      const dangerous = isDangerousCompoundCommand(rawCommand);
+      if (dangerous.dangerous) {
+        return {
+          behavior: 'deny',
+          confidence: 0.99,
+          reason: dangerous.reason || 'Dangerous command detected',
+        };
+      }
     }
 
     return null;

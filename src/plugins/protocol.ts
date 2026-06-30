@@ -17,13 +17,6 @@ export interface PluginPermissionRule {
   priority: number;
 }
 
-export interface PluginPrompt {
-  name: string;
-  template: string;
-  description: string;
-  args?: Record<string, { type: string; description: string; required?: boolean }>;
-}
-
 export interface PluginMCPConfig {
   serverId: string;
   command: string;
@@ -38,7 +31,6 @@ export interface Plugin {
   tools?: ToolDefinition[];
   hooks?: PluginHooks;
   permissionRules?: PluginPermissionRule[];
-  prompts?: PluginPrompt[];
   mcpServers?: PluginMCPConfig[];
   imAdapters?: IMAdapter[];
   onInit?(): Promise<void>;
@@ -51,6 +43,8 @@ export interface PluginManifest {
   description?: string;
   main: string;
   kcPlugin?: boolean;
+  /** Integrity hash (SHA-256) of the plugin entry file. Required in production mode. */
+  integrity?: string;
 }
 
 export type PluginStatus = 'loaded' | 'initialized' | 'error' | 'disabled';

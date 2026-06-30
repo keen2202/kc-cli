@@ -184,6 +184,30 @@ export class PluginManager {
   }
 
   /**
+   * Collect MCP server configurations from all initialized plugins.
+   * Plugin MCP servers are merged with user/project config (plugin servers lowest priority).
+   */
+  getPluginMCPServers(): Array<{
+    serverId: string;
+    command: string;
+    args?: string[];
+    env?: Record<string, string>;
+  }> {
+    const servers: Array<{
+      serverId: string;
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+    }> = [];
+    for (const [, loaded] of this.plugins) {
+      if (loaded.status === 'initialized' && loaded.plugin.mcpServers) {
+        servers.push(...loaded.plugin.mcpServers);
+      }
+    }
+    return servers;
+  }
+
+  /**
    * Collect IM adapters from all initialized plugins.
    */
   getPluginIMAdapters(): IMAdapter[] {

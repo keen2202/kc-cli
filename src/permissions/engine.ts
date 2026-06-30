@@ -8,8 +8,10 @@ import type {
 } from '../permissions/protocol';
 import type { PluginPermissionRule } from '../plugins/types';
 import { getState } from '../bootstrap/state';
-import { containsProtectedPath } from './protectedPaths';
+import { containsProtectedPath, isSystemWriteDirectory } from './protectedPaths';
 import { parseRuleString } from './rules';
+import { splitSubCommands } from './commandNormalizer';
+import { classifier } from './classifier';
 import { getCacheManager } from '../services/cache';
 
 export interface PermissionEngineConfig {
@@ -38,8 +40,10 @@ function getCachedRule(ruleString: string): { toolName: string; ruleContent?: st
  * 1. Check global deny rules (alwaysDenyRules)
  * 2. Tool-specific permission check (tool.checkPermissions)
  * 3. Security checks (bypass-immune)
+ * 3.5. Plugin permission rules (can tighten but never loosen security decisions)
  * 4. Bypass permission mode
  * 5. Check global allow rules (alwaysAllowRules)
+ * 5.5. Check always-ask rules
  * 6. Default based on mode
  */
 export async function hasPermissionsToUseTool(
@@ -52,6 +56,7 @@ export async function hasPermissionsToUseTool(
     ) => PermissionResult;
     content?: string; // For content-specific rules
     config?: PermissionEngineConfig; // Permission engine configuration
+    autoReadOnly?: boolean; // Auto-approve read-only operations in non-interactive modes
     pluginManager?: { getPluginPermissionRules(): PluginPermissionRule[] }; // Plugin manager for plugin rules
   } = {}
 ): Promise<PermissionResult> {
@@ -99,15 +104,6 @@ export async function hasPermissionsToUseTool(
     };
   }
 
-  // Step 1.5: Check plugin permission rules (after global deny, before tool-specific)
-  if (options.pluginManager) {
-    const pluginRules = options.pluginManager.getPluginPermissionRules();
-    const pluginMatch = matchPluginRules(pluginRules, toolName, options.content);
-    if (pluginMatch) {
-      return pluginMatch;
-    }
-  }
-
   // Step 2: Tool-specific permission check
   if (options.toolCheckPermissions) {
     const toolResult = options.toolCheckPermissions(input, context);
@@ -146,9 +142,18 @@ export async function hasPermissionsToUseTool(
 
   // Step 3: Security checks (bypass-immune)
   const securityResult = checkSecurityCritical(toolName, input);
-  if (securityResult && securityResult.behavior === 'ask') {
-    return securityResult;
+
+  // Step 3.5: Check plugin permission rules (after security-critical, before bypass)
+  // Plugin rules can tighten security (ask→deny) but never loosen bypass-immune decisions
+  {
+    const pluginResult = applyPluginRulesAfterSecurity(
+      securityResult, options.pluginManager, toolName, options.content
+    );
+    if (pluginResult) return pluginResult;
   }
+
+  // If security flagged this and no plugin escalated, return security decision now
+  if (securityResult) return securityResult;
 
   // Step 4: Bypass permission mode
   if (context.bypassPermissions) {
@@ -195,12 +200,50 @@ export async function hasPermissionsToUseTool(
         behavior: 'deny',
         message: `Permission denied in dontAsk mode`,
       };
-    case 'auto':
-      // Use classifier (placeholder - would call LLM classifier)
-      return {
-        behavior: 'ask',
-        message: `Auto classifier needs to evaluate '${toolName}'`,
-      };
+    case 'auto': {
+      const classification = await classifier.classify(toolName, input, context);
+      switch (classification.behavior) {
+        case 'allow':
+          return {
+            behavior: 'allow',
+            updatedInput: input,
+            decisionReason: {
+              type: 'auto_allowed',
+              reason: classification.reason,
+            },
+          };
+        case 'deny':
+          return {
+            behavior: 'deny',
+            message: classification.reason,
+            decisionReason: {
+              type: 'auto_denied',
+              reason: classification.reason,
+            },
+          };
+        case 'ask':
+        default:
+          // autoReadOnly: promote read-only tool asks to allow
+          if (options.autoReadOnly && classification.confidence >= 0.7) {
+            return {
+              behavior: 'allow',
+              updatedInput: input,
+              decisionReason: {
+                type: 'auto_allowed',
+                reason: `Auto-approved read-only operation: ${classification.reason}`,
+              },
+            };
+          }
+          return {
+            behavior: 'ask',
+            message: classification.reason,
+            decisionReason: {
+              type: 'auto_ask',
+              reason: classification.reason,
+            },
+          };
+      }
+    }
     case 'plan':
       return {
         behavior: 'deny',
@@ -215,24 +258,83 @@ export async function hasPermissionsToUseTool(
 }
 
 /**
+ * Recursively extract all string values from an input object.
+ * Handles nested objects, arrays, and array elements.
+ */
+function extractAllStringValues(input: Record<string, unknown>): string[] {
+  const values: string[] = [];
+  for (const value of Object.values(input)) {
+    if (typeof value === 'string') {
+      values.push(value);
+    } else if (Array.isArray(value)) {
+      for (const item of value) {
+        if (typeof item === 'string') {
+          values.push(item);
+        } else if (item && typeof item === 'object') {
+          values.push(...extractAllStringValues(item as Record<string, unknown>));
+        }
+      }
+    } else if (value && typeof value === 'object') {
+      values.push(...extractAllStringValues(value as Record<string, unknown>));
+    }
+  }
+  return values;
+}
+
+// Tools capable of writing to the filesystem
+const WRITE_CAPABLE_TOOLS = new Set([
+  'FileWrite', 'FileEdit', 'Bash', 'Run', 'NotebookEdit',
+]);
+
+/**
  * Check if operation is security-critical (bypass-immune)
+ * Walks ALL string-valued input properties recursively to catch
+ * protected paths in non-standard field names (source, target, files[], etc.)
+ * Also splits compound commands (&&, ;, |, ||) and checks each sub-command.
  */
 function checkSecurityCritical(
   toolName: string,
   input: Record<string, unknown>
 ): PermissionResult | null {
-  // Check for protected paths
-  const pathToCheck = (input.path as string) || (input.command as string) || '';
+  const stringValues = extractAllStringValues(input);
+  const isWriteTool = WRITE_CAPABLE_TOOLS.has(toolName);
 
-  if (containsProtectedPath(pathToCheck)) {
-    return {
-      behavior: 'ask',
-      message: `Access to protected path requires explicit permission`,
-      decisionReason: {
-        type: 'security_critical',
-        reason: `Protected path access detected`,
-      },
-    };
+  // Expand compound commands into individual sub-commands for analysis
+  const allValuesToCheck: string[] = [];
+  for (const value of stringValues) {
+    allValuesToCheck.push(value);
+    // If value looks like a compound command, split and check each part
+    if (/[;&|]/.test(value)) {
+      const subCommands = splitSubCommands(value);
+      for (const subCmd of subCommands) {
+        allValuesToCheck.push(subCmd.trim());
+      }
+    }
+  }
+
+  for (const value of allValuesToCheck) {
+    if (!value) continue;
+    // System write directories: deny for write-capable tools only
+    if (isWriteTool && isSystemWriteDirectory(value)) {
+      return {
+        behavior: 'deny',
+        message: `Writing to system directory is not allowed: ${value}`,
+        decisionReason: {
+          type: 'security_critical',
+          reason: `System write directory access detected: ${value}`,
+        },
+      };
+    }
+    if (containsProtectedPath(value)) {
+      return {
+        behavior: 'ask',
+        message: `Access to protected path requires explicit permission`,
+        decisionReason: {
+          type: 'security_critical',
+          reason: `Protected path access detected: ${value}`,
+        },
+      };
+    }
   }
 
   return null;
@@ -284,6 +386,33 @@ function matchPattern(pattern: string, content: string): boolean {
   const regex = new RegExp(`^${regexPattern}$`, 'i');
   patternCache.set(pattern, regex);
   return regex.test(content);
+}
+
+/**
+ * Apply plugin permission rules after security-critical checks have already run.
+ * Plugins can tighten security (ask→deny, allow→deny, allow→ask) but can NEVER
+ * loosen a security-critical decision. This prevents plugins from bypassing
+ * bypass-immune protected path checks.
+ */
+function applyPluginRulesAfterSecurity(
+  securityResult: PermissionResult | null,
+  pluginManager: { getPluginPermissionRules(): PluginPermissionRule[] } | undefined,
+  toolName: string,
+  content?: string
+): PermissionResult | null {
+  if (!pluginManager) return null;
+  const pluginRules = pluginManager.getPluginPermissionRules();
+  const pluginMatch = matchPluginRules(pluginRules, toolName, content);
+  if (!pluginMatch) return null;
+
+  // If security already flagged this as ask, plugin can only escalate to deny
+  if (securityResult && securityResult.behavior === 'ask') {
+    if (pluginMatch.behavior === 'deny') return pluginMatch;
+    return securityResult; // plugin allow/ask cannot override security ask
+  }
+
+  // No security issue — plugin decision stands
+  return pluginMatch;
 }
 
 /**

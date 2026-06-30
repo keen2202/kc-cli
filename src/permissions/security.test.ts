@@ -110,6 +110,73 @@ describe('Permission System Security', () => {
         expect(containsProtectedPath(p)).toBe(true);
       }
     });
+
+    // H2: Expanded protected path coverage
+    it('detects credential and secret paths', () => {
+      const paths = [
+        '/etc/ssl/private/key.pem',
+        '/etc/pki/ca.crt',
+        '/run/secrets/db_password',
+      ];
+      for (const p of paths) {
+        expect(containsProtectedPath(p)).toBe(true);
+      }
+    });
+
+    it('detects database credential paths', () => {
+      const paths = [
+        '/etc/mysql/my.cnf',
+        '/etc/postgresql/pg_hba.conf',
+      ];
+      for (const p of paths) {
+        expect(containsProtectedPath(p)).toBe(true);
+      }
+    });
+
+    it('detects persistence and privilege escalation paths', () => {
+      const paths = [
+        '/etc/cron.d/evil',
+        '/etc/cron.hourly/backdoor',
+        '/etc/cron.daily/persist',
+        '/etc/systemd/system/backdoor.service',
+        '/etc/ld.so.preload',
+      ];
+      for (const p of paths) {
+        expect(containsProtectedPath(p)).toBe(true);
+      }
+    });
+
+    it('detects sudo and auth backdoor paths', () => {
+      const paths = [
+        '/etc/sudoers.d/admin',
+        '/etc/pam.d/sshd',
+      ];
+      for (const p of paths) {
+        expect(containsProtectedPath(p)).toBe(true);
+      }
+    });
+
+    it('detects shell and profile injection paths', () => {
+      const paths = [
+        '/etc/environment',
+        '/etc/profile.d/evil.sh',
+        '/root/.bashrc',
+        '/root/.profile',
+      ];
+      for (const p of paths) {
+        expect(containsProtectedPath(p)).toBe(true);
+      }
+    });
+
+    it('detects application config token paths', () => {
+      const paths = [
+        '/home/user/.config/gh/hosts.yml',
+        '/home/user/.config/hub/config',
+      ];
+      for (const p of paths) {
+        expect(containsProtectedPath(p)).toBe(true);
+      }
+    });
   });
 
   describe('Command Injection Prevention', () => {

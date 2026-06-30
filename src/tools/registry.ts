@@ -43,7 +43,7 @@ export interface ToolManifestEntry {
  * Tool manifest — registry of all available tool modules.
  * Used for auto-discovery and lazy loading.
  */
-export const TOOL_MANIFEST: ToolManifestEntry[] = [
+export const TOOL_MANIFEST = [
   // CRITICAL — always eagerly loaded
   { name: 'Bash', modulePath: './tools/BashTool/index.js', priority: ToolPriority.CRITICAL, eager: true },
   { name: 'FileRead', modulePath: './tools/FileReadTool/index.js', priority: ToolPriority.CRITICAL, eager: true },
@@ -71,7 +71,7 @@ export const TOOL_MANIFEST: ToolManifestEntry[] = [
   { name: 'Deploy', modulePath: './tools/DeployTool/index.js', priority: ToolPriority.DEFERRED, eager: false },
   { name: 'TeamCreate', modulePath: './orchestrator/team-create-tool.js', priority: ToolPriority.DEFERRED, eager: false },
   { name: 'LSP', modulePath: './lsp/tool.js', priority: ToolPriority.DEFERRED, eager: false },
-];
+] as const;
 
 /**
  * Load a tool module dynamically.

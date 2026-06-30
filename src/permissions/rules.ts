@@ -89,20 +89,34 @@ export function createRulesFromConfig(
 }
 
 /**
- * Merge rules from multiple sources
- * Priority: policy > flag > project > user > local > cliArg > session
+ * Merge rules from multiple sources.
+ * Priority: policy > flag > project > user > local > cliArg > session.
+ * When multiple rules match the same tool+pattern, the most restrictive
+ * behavior wins: deny > ask > allow.
  */
 export function mergeRuleSets(ruleSets: PermissionRule[][]): PermissionRule[] {
   const merged: PermissionRule[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, { rule: PermissionRule; index: number }>();
 
-  // Reverse order so higher priority sources are processed last
+  // Behavior strictness: higher = more restrictive
+  const BEHAVIOR_RANK: Record<string, number> = { allow: 0, ask: 1, deny: 2 };
+
+  // Higher priority sources processed last (they override)
   for (const rules of [...ruleSets].reverse()) {
     for (const rule of rules) {
       const key = formatRuleString(rule.ruleValue);
-      if (!seen.has(key)) {
-        seen.add(key);
+      const existing = seen.get(key);
+      if (!existing) {
+        seen.set(key, { rule, index: merged.length });
         merged.push(rule);
+      } else {
+        // Keep the most restrictive behavior
+        const existingRank = BEHAVIOR_RANK[existing.rule.ruleBehavior] ?? 0;
+        const newRank = BEHAVIOR_RANK[rule.ruleBehavior] ?? 0;
+        if (newRank > existingRank) {
+          merged[existing.index] = rule;
+          seen.set(key, { rule, index: existing.index });
+        }
       }
     }
   }

@@ -5,7 +5,8 @@ import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import * as path from 'path';
-import * as fs from 'fs';
+import { assertPathWithinWorkspace } from '../../utils/path';
+import { walkDirectory } from '../../utils/fs-walk';
 
 const GlobInputSchema = z.object({
   pattern: z.string().describe('Glob pattern (e.g., "**/*.ts", "src/**/*.tsx")'),
@@ -24,6 +25,8 @@ export const tool = buildTool<GlobInput, string>({
 
   call: async (input, context): Promise<ToolResultType<string>> => {
     try {
+      assertPathWithinWorkspace(input.path, context.cwd);
+
       const searchPath = path.resolve(context.cwd, input.path);
       const results: string[] = [];
 
@@ -33,7 +36,7 @@ export const tool = buildTool<GlobInput, string>({
       // Convert glob pattern to regex
       function globToRegex(pattern: string): RegExp {
         const regex = pattern
-          .replace(GLOB_ESCAPE_REGEX, '\\$&') // Escape special regex chars (except * and ?)
+          .replace(GLOB_ESCAPE_REGEX, '\\$&')
           .replace(/\*\*/g, '___DOUBLE___')
           .replace(/\*/g, '___SINGLE___')
           .replace(/___DOUBLE___/g, '.*')
@@ -45,44 +48,21 @@ export const tool = buildTool<GlobInput, string>({
       const patternRegex = globToRegex(input.pattern);
       const ignorePatterns = input.ignore.map(globToRegex);
 
-      // Recursively find files
-      async function searchDir(dir: string) {
-        if (results.length >= input.max_results) return;
-
-        const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-
-        for (const entry of entries) {
-          if (results.length >= input.max_results) break;
-
-          const fullPath = path.join(dir, entry.name);
-          const relativePath = path.relative(context.cwd, fullPath);
-
-          // Check ignore patterns
-          if (ignorePatterns.some(pattern => pattern.test(relativePath))) {
-            continue;
+      await walkDirectory(searchPath, {
+        maxResults: input.max_results,
+        baseDir: context.cwd,
+        onFile: async (entry) => {
+          if (ignorePatterns.some(p => p.test(entry.relativePath))) return;
+          if (patternRegex.test(entry.relativePath)) {
+            results.push(entry.relativePath);
           }
-
-          if (entry.isDirectory()) {
-            // Skip hidden directories and node_modules
-            if (!entry.name.startsWith('.') && entry.name !== 'node_modules') {
-              await searchDir(fullPath);
-            }
-          } else if (entry.isFile()) {
-            // Check if file matches pattern
-            if (patternRegex.test(relativePath)) {
-              results.push(relativePath);
-            }
-          }
-        }
-      }
-
-      await searchDir(searchPath);
+        },
+      });
 
       if (results.length === 0) {
         return toolResult(`No files found matching pattern: ${input.pattern}`);
       }
 
-      // Format results
       const formatted = results.join('\n');
 
       return toolResult(

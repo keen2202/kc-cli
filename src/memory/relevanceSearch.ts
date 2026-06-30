@@ -62,6 +62,7 @@ export function markMemoriesReferenced(fileNames: string[]): void {
     entry.referenced++;
     feedbackMap.set(fileName, entry);
   }
+  invalidateScoreCache();
 }
 
 /**
@@ -189,6 +190,13 @@ function calculateRelevanceScoreInner(
 
   // Apply feedback multiplier
   score *= getFeedbackMultiplier(memory.fileName);
+
+  // Apply confidence multiplier
+  if (memory.confidence === 'high') {
+    score *= 1.2;
+  } else if (memory.confidence === 'low') {
+    score *= 0.8;
+  }
 
   // Cache the score
   scoreCache.set(cacheKey, score);

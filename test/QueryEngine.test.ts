@@ -735,7 +735,7 @@ describe('State Store Integration', () => {
     const state = createInitialState();
     expect(state.turnCount).toBe(0);
     expect(state.totalTokensUsed).toBe(0);
-    expect(state.maxTurns).toBe(50);
+    expect(state.maxTurns).toBe(80);
   });
 
   it('should accept initial config overrides', async () => {

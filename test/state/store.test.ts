@@ -115,7 +115,7 @@ describe('createInitialState', () => {
     const state = createInitialState();
     expect(state.currentState).toBe('idle');
     expect(state.turnCount).toBe(0);
-    expect(state.maxTurns).toBe(50);
+    expect(state.maxTurns).toBe(80);
     expect(state.model).toBe('deepseek-v4-pro');
   });
 

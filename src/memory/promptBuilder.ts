@@ -6,6 +6,7 @@ import type { MemoryEntry } from './types';
 import { getProjectMemoryPath } from './paths';
 import { scanMemoryFiles, loadMemoryEntrypoint, formatMemoryManifest } from './scanner';
 import { findRelevantMemories, getMemoryFreshnessText } from './relevanceSearch';
+import { parseFrontmatter } from './frontmatter';
 
 /**
  * Build the complete memory prompt for injection into the system prompt
@@ -69,24 +70,17 @@ async function loadRelevantMemories(
         fs.stat(filePath),
       ]);
 
-      // Parse frontmatter
-      const frontmatterMatch = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
-      if (!frontmatterMatch) return null;
-
-      const [, yamlBlock, body] = frontmatterMatch;
-
-      // Extract type from YAML
-      const typeMatch = yamlBlock.match(/^type:\s*(\w+)/m);
-      const nameMatch = yamlBlock.match(/^name:\s*["']?([^"'\n]+)["']?/m);
-      const descMatch = yamlBlock.match(/^description:\s*["']?([^"'\n]+)["']?/m);
-
-      const type = typeMatch ? (typeMatch[1] as MemoryEntry['header']['type']) : 'project';
-      const name = nameMatch ? nameMatch[1].trim() : fileName.replace('.md', '');
-      const description = descMatch ? descMatch[1].trim() : '';
+      // Parse frontmatter using shared parser
+      const { header, body } = parseFrontmatter(content);
+      if (!header.name || !header.type) return null;
 
       return {
-        header: { name, description, type },
-        content: body.trim(),
+        header: {
+          name: header.name,
+          description: header.description || '',
+          type: header.type,
+        },
+        content: body,
         filePath,
         fileName,
         mtime: stat.mtimeMs,

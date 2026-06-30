@@ -16,8 +16,9 @@ export function createPluginMiddleware(): EventMiddleware & { register(hooks: Pl
   const hooks: PluginEventHooks[] = [];
 
   const middleware: EventMiddleware = (event: UIEvent, next: () => void) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ev = event as any;
-    const type = (ev.type || '').replace(/^agent:/, '');
+    const type = (ev.type || '').startsWith('agent:') ? (ev.type as string).slice(6) : (ev.type || '');
 
     for (const hook of hooks) {
       try {

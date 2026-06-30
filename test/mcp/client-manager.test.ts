@@ -49,16 +49,24 @@ function httpConfig(overrides: Partial<MCPServerConfig> = {}): MCPServerConfig {
   };
 }
 
+/** Helper: frame a JSON object with Content-Length header */
+function frameStdio(obj: unknown): string {
+  const json = JSON.stringify(obj);
+  return `Content-Length: ${Buffer.byteLength(json)}\r\n\r\n${json}`;
+}
+
 /** Simulate a JSON-RPC response from the stdio child process */
 function simulateStdioResponse(id: number, result: unknown) {
-  const response = JSON.stringify({ jsonrpc: '2.0', id, result }) + '\n';
-  mockChildProcess.stdout.emit('data', Buffer.from(response));
+  mockChildProcess.stdout.emit('data', Buffer.from(
+    frameStdio({ jsonrpc: '2.0', id, result })
+  ));
 }
 
 /** Simulate a JSON-RPC error response */
 function simulateStdioError(id: number, code: number, message: string) {
-  const response = JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } }) + '\n';
-  mockChildProcess.stdout.emit('data', Buffer.from(response));
+  mockChildProcess.stdout.emit('data', Buffer.from(
+    frameStdio({ jsonrpc: '2.0', id, error: { code, message } })
+  ));
 }
 
 /** Configure the spawn mock to auto-respond to MCP protocol messages */
@@ -67,30 +75,35 @@ function setupStdioAutoRespond() {
     const proc = createMockProcess();
     mockChildProcess = proc;
 
-    // Auto-respond to stdin writes
+    // Auto-respond to stdin writes (Content-Length framed protocol)
     proc.stdin.write.mockImplementation((data: string) => {
-      const msg = JSON.parse(data.replace('\n', ''));
+      const headerEnd = data.indexOf('\r\n\r\n');
+      const msg = JSON.parse(data.slice(headerEnd + 4));
       const id = msg.id;
+      const frame = (obj: unknown) => {
+        const json = JSON.stringify(obj);
+        return `Content-Length: ${Buffer.byteLength(json)}\r\n\r\n${json}`;
+      };
 
       setTimeout(() => {
         if (msg.method === 'initialize') {
           proc.stdout.emit('data', Buffer.from(
-            JSON.stringify({ jsonrpc: '2.0', id, result: { protocolVersion: '2024-11-05', capabilities: {}, serverInfo: { name: 'test-server', version: '1.0.0' } } }) + '\n'
+            frame({ jsonrpc: '2.0', id, result: { protocolVersion: '2024-11-05', capabilities: {}, serverInfo: { name: 'test-server', version: '1.0.0' } } })
           ));
         } else if (msg.method === 'notifications/initialized') {
-          proc.stdout.emit('data', Buffer.from(JSON.stringify({ jsonrpc: '2.0', id, result: {} }) + '\n'));
+          proc.stdout.emit('data', Buffer.from(frame({ jsonrpc: '2.0', id, result: {} })));
         } else if (msg.method === 'tools/list') {
           proc.stdout.emit('data', Buffer.from(
-            JSON.stringify({ jsonrpc: '2.0', id, result: { tools: [{ name: 'tool1', description: 'First', inputSchema: { type: 'object' } }, { name: 'tool2', description: 'Second', inputSchema: { type: 'object' } }] } }) + '\n'
+            frame({ jsonrpc: '2.0', id, result: { tools: [{ name: 'tool1', description: 'First', inputSchema: { type: 'object' } }, { name: 'tool2', description: 'Second', inputSchema: { type: 'object' } }] } })
           ));
         } else if (msg.method === 'tools/call') {
           proc.stdout.emit('data', Buffer.from(
-            JSON.stringify({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: 'call result' }] } }) + '\n'
+            frame({ jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: 'call result' }] } })
           ));
         } else if (msg.method === 'ping') {
-          proc.stdout.emit('data', Buffer.from(JSON.stringify({ jsonrpc: '2.0', id, result: {} }) + '\n'));
+          proc.stdout.emit('data', Buffer.from(frame({ jsonrpc: '2.0', id, result: {} })));
         } else {
-          proc.stdout.emit('data', Buffer.from(JSON.stringify({ jsonrpc: '2.0', id, result: {} }) + '\n'));
+          proc.stdout.emit('data', Buffer.from(frame({ jsonrpc: '2.0', id, result: {} })));
         }
       }, 0);
       return true;

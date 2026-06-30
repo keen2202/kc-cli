@@ -6,6 +6,8 @@ import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import * as path from 'path';
 import * as fs from 'fs';
+import { assertPathWithinWorkspace } from '../../utils/path';
+import { walkDirectory } from '../../utils/fs-walk';
 
 const GrepInputSchema = z.object({
   pattern: z.string().describe('Regex pattern to search for'),
@@ -26,6 +28,8 @@ export const tool = buildTool<GrepInput, string>({
 
   call: async (input, context): Promise<ToolResultType<string>> => {
     try {
+      assertPathWithinWorkspace(input.path, context.cwd);
+
       const searchPath = path.resolve(context.cwd, input.path);
       const flags = input.case_sensitive ? 'g' : 'gi';
       let regex: RegExp;
@@ -42,69 +46,51 @@ export const tool = buildTool<GrepInput, string>({
         globRegex = new RegExp(input.file_pattern.replace(/\*/g, '.*').replace(/\?/g, '.'));
       }
 
-      // Recursively search files
-      async function searchDir(dir: string) {
-        if (results.length >= input.max_results) return;
+      await walkDirectory(searchPath, {
+        maxResults: input.max_results,
+        baseDir: context.cwd,
+        onFile: async (entry) => {
+          if (results.length >= input.max_results) return false;
+          if (globRegex && !globRegex.test(entry.name)) return;
 
-        const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+          try {
+            const content = await fs.promises.readFile(entry.fullPath, 'utf-8');
+            const lines = content.split('\n');
 
-        for (const entry of entries) {
-          if (results.length >= input.max_results) break;
+            for (let i = 0; i < lines.length; i++) {
+              if (regex.test(lines[i])) {
+                const matchLine = lines[i].trim();
 
-          const fullPath = path.join(dir, entry.name);
-
-          if (entry.isDirectory()) {
-            // Skip hidden directories and node_modules
-            if (!entry.name.startsWith('.') && entry.name !== 'node_modules') {
-              await searchDir(fullPath);
-            }
-          } else if (entry.isFile()) {
-            // Check file pattern filter
-            if (globRegex && !globRegex.test(entry.name)) continue;
-
-            try {
-              const content = await fs.promises.readFile(fullPath, 'utf-8');
-              const lines = content.split('\n');
-
-              for (let i = 0; i < lines.length; i++) {
-                if (regex.test(lines[i])) {
-                  const matchLine = lines[i].trim();
-
-                  // Get context lines if requested
-                  let contextLines: string | undefined;
-                  if (input.context_lines > 0) {
-                    const start = Math.max(0, i - input.context_lines);
-                    const end = Math.min(lines.length, i + input.context_lines + 1);
-                    contextLines = lines.slice(start, end).map((l, idx) => {
-                      const lineNum = start + idx + 1;
-                      return lineNum === i + 1 ? `> ${lineNum}: ${l}` : `  ${lineNum}: ${l}`;
-                    }).join('\n');
-                  }
-
-                  results.push({
-                    file: path.relative(context.cwd, fullPath),
-                    line: i + 1,
-                    match: matchLine,
-                    context: contextLines,
-                  });
-
-                  if (results.length >= input.max_results) break;
+                let contextLines: string | undefined;
+                if (input.context_lines > 0) {
+                  const start = Math.max(0, i - input.context_lines);
+                  const end = Math.min(lines.length, i + input.context_lines + 1);
+                  contextLines = lines.slice(start, end).map((l, idx) => {
+                    const lineNum = start + idx + 1;
+                    return lineNum === i + 1 ? `> ${lineNum}: ${l}` : `  ${lineNum}: ${l}`;
+                  }).join('\n');
                 }
-              }
-            } catch {
-              // Skip files that can't be read
-            }
-          }
-        }
-      }
 
-      await searchDir(searchPath);
+                results.push({
+                  file: entry.relativePath,
+                  line: i + 1,
+                  match: matchLine,
+                  context: contextLines,
+                });
+
+                if (results.length >= input.max_results) break;
+              }
+            }
+          } catch {
+            // Skip files that can't be read
+          }
+        },
+      });
 
       if (results.length === 0) {
         return toolResult(`No matches found for pattern: ${input.pattern}`);
       }
 
-      // Format results
       const formatted = results.map(r => {
         if (r.context) {
           return `${r.file}:${r.line}\n${r.context}`;

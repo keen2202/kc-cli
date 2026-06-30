@@ -1,4 +1,6 @@
 import type { EventMiddleware, UIEvent } from '../event-bus';
+import { BudgetEnforcer } from '../../services/budget';
+import type { BudgetSnapshot } from '../../services/budget';
 
 interface BudgetState {
   used: number;
@@ -9,28 +11,27 @@ interface BudgetState {
 
 /**
  * BudgetMiddleware - Tracks cumulative token usage from turn_complete events.
+ * Delegates token/cost tracking to BudgetEnforcer service.
  * Emits warning at 80% budget. Blocks further queries at 100%.
  */
 export function createBudgetMiddleware(limit: number): EventMiddleware & { getState(): BudgetState; reset(): void } {
-  const state: BudgetState = {
-    used: 0,
-    limit,
-    warned80: false,
-    blocked: false,
-  };
+  let enforcer = new BudgetEnforcer({ sessionTokenLimit: limit });
+  let warned80 = false;
+  let blocked = false;
 
   const middleware: EventMiddleware = (event: UIEvent, next: () => void) => {
     const ev = event as any;
-    const type = (ev.type || '').replace(/^agent:/, '');
+    const type = (ev.type || '').startsWith('agent:') ? (ev.type as string).slice(6) : (ev.type || '');
 
     if (type === 'turn_complete' && ev.usage) {
-      state.used += ev.usage.totalTokens || 0;
+      enforcer.recordUsage(ev.usage.totalTokens || 0);
 
-      const pct = state.used / state.limit;
-      if (pct >= 1 && !state.blocked) {
-        state.blocked = true;
-      } else if (pct >= 0.8 && !state.warned80) {
-        state.warned80 = true;
+      const snapshot = enforcer.getSessionUsage();
+      const pct = snapshot.tokens / limit;
+      if (pct >= 1 && !blocked) {
+        blocked = true;
+      } else if (pct >= 0.8 && !warned80) {
+        warned80 = true;
       }
     }
 
@@ -38,7 +39,14 @@ export function createBudgetMiddleware(limit: number): EventMiddleware & { getSt
   };
 
   return Object.assign(middleware, {
-    getState: () => ({ ...state }),
-    reset: () => { state.used = 0; state.warned80 = false; state.blocked = false; },
+    getState: (): BudgetState => {
+      const snapshot = enforcer.getSessionUsage();
+      return { used: snapshot.tokens, limit, warned80, blocked };
+    },
+    reset: () => {
+      enforcer = new BudgetEnforcer({ sessionTokenLimit: limit });
+      warned80 = false;
+      blocked = false;
+    },
   });
 }
