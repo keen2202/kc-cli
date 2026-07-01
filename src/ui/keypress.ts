@@ -10,6 +10,8 @@ export interface KeypressEvent {
   name: string;
   ctrl: boolean;
   meta: boolean;
+  shift?: boolean;
+  isPrintable?: boolean;
 }
 
 /**
@@ -20,11 +22,20 @@ export function parseKeypress(chunk: string): KeypressEvent {
   const empty: KeypressEvent = { name: '', ctrl: false, meta: false };
   if (!chunk) return empty;
 
+  // Shift+Enter: kitty protocol \x1B[13;2u
+  if (chunk === '\x1B[13;2u') return { name: 'return', ctrl: false, meta: false, shift: true };
+
+  // Shift+Tab: \x1B[Z
+  if (chunk === '\x1B[Z') return { name: 'tab', ctrl: false, meta: false, shift: true };
+
   // Arrow keys: ESC [ A/B/C/D
   if (chunk === '\x1B[A') return { name: 'up', ctrl: false, meta: false };
   if (chunk === '\x1B[B') return { name: 'down', ctrl: false, meta: false };
   if (chunk === '\x1B[C') return { name: 'left', ctrl: false, meta: false };
   if (chunk === '\x1B[D') return { name: 'right', ctrl: false, meta: false };
+
+  // Delete key: ESC [ 3 ~
+  if (chunk === '\x1B[3~') return { name: 'delete', ctrl: false, meta: false };
 
   // Bare escape
   if (chunk === '\x1B') return { name: 'escape', ctrl: false, meta: false };
@@ -45,8 +56,20 @@ export function parseKeypress(chunk: string): KeypressEvent {
   // Backspace (DEL)
   if (chunk === '\x7F') return { name: 'backspace', ctrl: false, meta: false };
 
-  // Regular character
-  return { name: chunk, ctrl: false, meta: false };
+  // Regular character: IME-composed text or any printable Unicode character.
+  // Use code-point count (not UTF-16 code units) so that characters outside
+  // the BMP are recognized as single printable characters.
+  return { name: chunk, ctrl: false, meta: false, isPrintable: isPrintableUnicode(chunk) };
+}
+
+/** Returns true when every code point in `s` is a printable (non-control) character. */
+function isPrintableUnicode(s: string): boolean {
+  if (!s) return false;
+  for (const cp of s) {
+    const code = cp.codePointAt(0)!;
+    if (code < 0x20 || code === 0x7f || (code >= 0x80 && code <= 0x9f)) return false;
+  }
+  return true;
 }
 
 /**

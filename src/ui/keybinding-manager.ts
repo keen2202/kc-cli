@@ -80,16 +80,26 @@ export function createDefaultKeybindings(): KeybindingManager {
 
   const defaults: Keybinding[] = [
     { key: 'ctrl+k', command: 'palette', description: 'Open command palette' },
+    { key: 'ctrl+o', command: 'modelSelector', description: 'Open model selector' },
+    { key: 'ctrl+s', command: 'sessionSwitcher', description: 'Switch session' },
+    { key: 'ctrl+n', command: 'newSession', description: 'New session' },
+    { key: 'ctrl+e', command: 'externalEditor', when: 'input', description: 'Open external editor' },
+    { key: 'ctrl+f', command: 'filePicker', when: 'input', description: 'File picker' },
+    { key: 'ctrl+r', command: 'deleteAttachment', when: 'input', description: 'Delete attachment mode' },
     { key: 'ctrl+i', command: 'steer', when: 'idle', description: 'Toggle steer mode' },
     { key: 'ctrl+l', command: 'clear', description: 'Clear conversation' },
-    { key: 'ctrl+c', command: 'cancel', when: 'streaming', description: 'Cancel current operation' },
+    { key: 'ctrl+x', command: 'cancel', when: 'streaming', description: 'Cancel current operation' },
+    { key: 'ctrl+c', command: 'quit', when: 'idle', description: 'Quit kc-cli' },
     { key: 'ctrl+d', command: 'exit', when: 'idle', description: 'Exit (empty input)' },
     { key: 'ctrl+t', command: 'toggleSidebar', description: 'Toggle sidebar' },
     { key: 'ctrl+shift+t', command: 'toggleThinking', description: 'Toggle thinking chain' },
     { key: 'escape', command: 'closeOverlay', when: 'overlay', description: 'Close overlay' },
+    { key: 'escape', command: 'cancelMode', when: 'delete-mode', description: 'Exit delete mode' },
+    { key: 'tab', command: 'toggleAgentMode', when: 'idle', description: 'Toggle build/plan mode' },
+    { key: 'tab', command: 'autocomplete', when: 'input', description: 'Autocomplete' },
     { key: 'up', command: 'historyPrev', when: 'input', description: 'Previous history' },
     { key: 'down', command: 'historyNext', when: 'input', description: 'Next history' },
-    { key: 'tab', command: 'autocomplete', when: 'input', description: 'Autocomplete' },
+    { key: '?', command: 'help', description: 'Show help' },
   ];
 
   for (const binding of defaults) {

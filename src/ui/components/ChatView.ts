@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import { renderToolCallCard, type ToolCallData } from './ToolCallCard';
 import { renderThinkingChain, type ThinkingChain } from './ThinkingChainView';
+import { renderMarkdown } from './MarkdownRenderer';
 import type { Theme, ThemeTokens } from '../theme';
 
 export interface ChatMessage {
@@ -21,14 +22,20 @@ export function renderChatMessage(
 
   if (msg.role === 'user') {
     const prefix = tokens ? tokens['chat.user']('> ') : chalk.cyan.bold('> ');
-    lines.push(prefix + msg.content);
+    if (msg.content) {
+      const mdLines = renderMarkdown(msg.content, theme);
+      lines.push(prefix + mdLines.join('\n'));
+    } else {
+      lines.push(prefix);
+    }
   } else if (msg.role === 'assistant') {
     // Render thinking chain above assistant content
     if (thinkingChain && tokens) {
       lines.push(renderThinkingChain(thinkingChain, tokens));
     }
     if (msg.content) {
-      lines.push(msg.content);
+      const mdLines = renderMarkdown(msg.content, theme);
+      lines.push(mdLines.join('\n'));
     }
     if (msg.toolCalls && msg.toolCalls.length > 0) {
       for (const tc of msg.toolCalls) {

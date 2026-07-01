@@ -3,377 +3,28 @@
 // KC-CLI: Intelligent CLI Agent System
 // Main entry point
 
-import { Command } from 'commander';
 import chalk from 'chalk';
-import * as path from 'path';
 import { getErrorMessage } from './utils/errors';
 
-import { getGlobalRegistry } from './agp/registry';
-
 import { profileCheckpoint, getProfileReport } from './bootstrap/profiler';
-import { initializeState, getState, updateState } from './bootstrap/state';
+import { getState, updateState } from './bootstrap/state';
 import { loadConfig } from './bootstrap/config';
 import { toolRegistry, registerBuiltInTools } from './tools';
 import { QueryEngine } from './query/QueryEngine';
 import type { AgentEvent } from './state/types';
 import type { StreamEvent } from './query/protocol';
-import type { LLMProvider } from './api';
 import type { PermissionMode } from './permissions/protocol';
-import { formatToolResult, formatBanner, formatSeparator, setBareMode } from './ui';
+import { formatToolResult } from './ui';
 import { Spinner } from './ui/spinner';
-import { updateStatus, clearStatus } from './ui/statusline';
-import { MCPClientManager, convertMCPTool, loadMCPConfig } from './mcp';
+import { handleBranch, handleCheckout, handleHistory } from './commands/branch';
 import { UserProfileService } from './services/userProfile';
 import type { UserLevel } from './services/userProfile';
-import { setLogLevel } from './services/logger';
-import type { LogLevel } from './services/logger';
-import { handleBranch, handleCheckout, handleHistory } from './commands/branch';
-import { detectProjectLanguage } from './utils/project-detect';
 
-// Apply LOG_LEVEL env var at startup
-if (process.env.LOG_LEVEL) {
-  const validLevels: LogLevel[] = ['debug', 'info', 'warn', 'error'];
-  const level = process.env.LOG_LEVEL.toLowerCase() as LogLevel;
-  if (validLevels.includes(level)) {
-    setLogLevel(level);
-  }
-}
+import { main } from './bootstrap/app';
 
 let currentSpinner: Spinner | null = null;
 
-const VERSION = '0.1.0';
-
-const BANNER = formatBanner(VERSION);
-
-async function main() {
-  profileCheckpoint('start');
-
-  const program = new Command();
-
-  program
-    .name('kc')
-    .description('KC-CLI - Intelligent CLI Agent System')
-    .version(VERSION)
-    .argument('[prompt]', 'What would you like me to do?')
-    .option('-c, --cwd <directory>', 'Working directory', process.cwd())
-    .option('-m, --mode <mode>', 'Permission mode', 'default')
-    .option('--model <model>', 'LLM model to use')
-    .option('--provider <provider>', 'LLM provider (anthropic/openai/ollama)')
-    .option('--max-turns <number>', 'Maximum number of agent turns')
-    .option('--max-budget <amount>', 'Maximum budget in USD')
-    .option('--auto-extend-turns', 'Automatically extend turn budget when progress is detected')
-    .option('-v, --verbose', 'Enable verbose output')
-    .option('--print', 'Print response and exit (non-interactive)')
-    .option('--bare', 'Minimal mode: skip hooks and heavy initialization')
-    .option('--bypass-permissions', 'Bypass all permission checks')
-    .option('--profile', 'Show startup profile')
-    .option('--json', 'Output events as NDJSON (for IDE integration)')
-    .option('--json-pretty', 'Output events as formatted JSON (for debugging)')
-    .option('--acp', 'Run as ACP server (JSON-RPC over stdio)')
-    .option('--im', 'Run in IM bridge mode (connect to configured IM platforms)')
-    .action(async (prompt: string | undefined, opts: any) => {
-      if (opts.acp) {
-        const { ACPServer } = await import('./acp');
-        const server = new ACPServer();
-        await server.start();
-        return;
-      }
-      await runAgent(prompt, opts);
-    });
-
-  // Additional commands
-  program
-    .command('config')
-    .description('Show current configuration')
-    .action(async () => {
-      await showConfig();
-    });
-
-  program
-    .command('tools')
-    .description('List available tools')
-    .action(async () => {
-      await listTools();
-    });
-
-  await program.parseAsync(process.argv);
-}
-
-async function runAgent(prompt: string | undefined, opts: any) {
-  console.log(BANNER);
-  profileCheckpoint('banner');
-
-  // Phase 1: Initialize state
-  const cwd = path.resolve(opts.cwd || process.cwd());
-  initializeState({
-    cwd,
-    verbose: opts.verbose || false,
-    printMode: opts.print || false,
-    bareMode: opts.bare || false,
-    permissionMode: opts.bypassPermissions ? 'bypassPermissions' : (opts.mode || 'default'),
-    maxTurns: opts.maxTurns ? parseInt(opts.maxTurns) : null,
-    maxBudgetUsd: opts.maxBudget ? parseFloat(opts.maxBudget) : null,
-  });
-
-  if (opts.bare) {
-    setBareMode(true);
-  }
-
-  profileCheckpoint('state_init');
-
-  // Phase 2: Load configuration
-  const { config, layers } = await loadConfig(cwd);
-  updateState({ config });
-
-  if (opts.verbose) {
-    console.log(chalk.gray(`\nConfig loaded from ${layers.length} sources:`));
-    for (const layer of layers) {
-      console.log(chalk.gray(`  - ${layer.source}`));
-    }
-  }
-
-  // Apply config overrides
-  const model = opts.model || config.model;
-  const provider = opts.provider || config.provider;
-  const apiKey = config.apiKey;
-  const apiBaseUrl = config.apiBaseUrl;
-  profileCheckpoint('config_load');
-
-  // Phase 3: Register tools
-  if (!opts.bare) {
-    await registerBuiltInTools();
-  }
-  profileCheckpoint('tools_registered');
-
-  // Phase 3b: Initialize MCP servers (parallel connection)
-  let mcpManager: MCPClientManager | null = null;
-  if (!opts.bare) {
-    try {
-      const mcpConfig = await loadMCPConfig(cwd);
-      if (Object.keys(mcpConfig.servers).length > 0) {
-        mcpManager = new MCPClientManager();
-
-        // Connect to all MCP servers in parallel
-        const connectionTimeout = 30000; // 30 seconds per server
-        const connectionPromises = Object.entries(mcpConfig.servers).map(
-          async ([serverId, serverConfig]) => {
-            const timeoutPromise = new Promise<never>((_, reject) => {
-              setTimeout(() => reject(new Error(`Connection timeout after ${connectionTimeout / 1000}s`)), connectionTimeout);
-            });
-
-            try {
-              await Promise.race([
-                mcpManager!.connect(serverId, serverConfig),
-                timeoutPromise,
-              ]);
-              const mcpTools = mcpManager!.getServerTools(serverId);
-              for (const mcpTool of mcpTools) {
-                const toolDef = convertMCPTool(mcpTool, serverId, mcpManager!);
-                toolRegistry.registerMCPTool(toolDef);
-              }
-              if (opts.verbose) {
-                console.log(chalk.gray(`  MCP: ${serverId} (${mcpTools.length} tools)`));
-              }
-              return { serverId, success: true, toolCount: mcpTools.length };
-            } catch (error) {
-              console.warn(chalk.yellow(`Warning: MCP server "${serverId}" failed to connect: ${error instanceof Error ? error.message : error}`));
-              return { serverId, success: false, error };
-            }
-          }
-        );
-
-        // Wait for all connections to complete (success or failure)
-        const results = await Promise.allSettled(connectionPromises);
-
-        // Log summary
-        const succeeded = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
-        const failed = results.length - succeeded;
-        if (failed > 0) {
-          console.log(chalk.yellow(`MCP: ${succeeded} connected, ${failed} failed`));
-        }
-      }
-    } catch (_err) {
-      console.error("Suppressed error:", _err);
-      // MCP config loading is optional, ignore errors
-    }
-  }
-  profileCheckpoint('mcp_initialized');
-
-  // Phase 3c: Initialize plugins
-  let pluginManager: import('./plugins/plugin-manager').PluginManager | null = null;
-  if (!opts.bare) {
-    try {
-      const { PluginManager } = await import('./plugins');
-      pluginManager = new PluginManager();
-      await pluginManager.loadAll(cwd);
-      await pluginManager.initAll();
-      const pluginTools = pluginManager.getPluginTools();
-      for (const tool of pluginTools) {
-        toolRegistry.registerPluginTool(tool);
-      }
-      if (opts.verbose && pluginTools.length > 0) {
-        console.log(chalk.gray(`  Plugins: ${pluginTools.length} tool(s) loaded`));
-      }
-    } catch (_err) {
-      console.error("Suppressed error:", _err);
-      // Plugin loading is optional
-    }
-  }
-  profileCheckpoint('plugins_initialized');
-
-  // Phase 3d: Initialize AGP (Autogenesis Protocol) system
-  if (!opts.bare) {
-    try {
-      const agpRegistry = getGlobalRegistry({
-        persistDir: path.join(cwd, '.kc-cli', 'agp'),
-        tracingEnabled: true,
-        evolution: { enabled: false, budget: 3, targetResources: [], safetyInvariants: [], autoRollback: true, persistState: true },
-      });
-      updateState({ agpRegistry } as any);
-      // Load persisted AGP state if available
-      const loaded = agpRegistry.loadState();
-      if (opts.verbose && loaded.loaded > 0) {
-        console.log(chalk.gray(`  AGP: ${loaded.loaded} resources restored from disk`));
-      }
-    } catch (_err) {
-      // AGP is optional enhancement, don't block startup
-      if (opts.verbose) {
-        console.warn(chalk.yellow(`  AGP: initialization skipped (${_err instanceof Error ? _err.message : _err})`));
-      }
-    }
-  }
-  profileCheckpoint('agp_initialized');
-
-  // Phase 3e: Initialize IM bridge (if configured)
-  let imBridge: import('./im/im-bridge').IMBridge | null = null;
-  if (opts.im || config.im?.enabled) {
-    try {
-      const { IMBridge } = await import('./im/im-bridge');
-      const { FeishuAdapter } = await import('./im/adapters/feishu');
-
-      const imConfig = config.im!;
-      const engineFactory = async () => {
-        const sessionTools = toolRegistry.getAllTools();
-        return new QueryEngine(
-          {
-            model,
-            provider: provider as LLMProvider,
-            apiKey,
-            apiBaseUrl,
-            maxTurns: getState().maxTurns || config.maxTurns || 80,
-            maxBudgetUsd: getState().maxBudgetUsd,
-            systemPrompt: buildSystemPrompt(sessionTools),
-            permissionRules: {
-              deny: config.permissions.deny,
-              ask: config.permissions.ask,
-              allow: config.permissions.allow,
-            },
-          },
-          sessionTools
-        );
-      };
-
-      imBridge = new IMBridge(imConfig, engineFactory);
-
-      if (imConfig.adapters.feishu?.enabled) {
-        imBridge.registerAdapter(new FeishuAdapter(imConfig.adapters.feishu));
-      }
-
-      // Register plugin-contributed adapters
-      if (pluginManager) {
-        const pluginAdapters = pluginManager.getPluginIMAdapters();
-        for (const adapter of pluginAdapters) {
-          imBridge.registerAdapter(adapter);
-        }
-      }
-
-      await imBridge.startAll();
-      console.log(chalk.green('IM bridge started'));
-
-      // Register shutdown handler
-      const shutdownIM = async () => {
-        if (imBridge) {
-          await imBridge.shutdownAll();
-        }
-      };
-      process.on('SIGINT', shutdownIM);
-      process.on('SIGTERM', shutdownIM);
-    } catch (err) {
-      console.error(chalk.red(`IM bridge failed to start: ${err instanceof Error ? err.message : err}`));
-    }
-    profileCheckpoint('im_initialized');
-  }
-
-  // Phase 4: Create query engine
-  const tools = toolRegistry.getAllTools();
-
-  if (opts.verbose) {
-    console.log(chalk.gray(`\nLoaded ${tools.length} tools:`));
-    for (const tool of tools) {
-      const readOnly = tool.isReadOnly ? '(read-only)' : '';
-      console.log(chalk.gray(`  - ${tool.name} ${readOnly}`));
-    }
-    console.log(chalk.gray(`\nLLM Provider: ${provider}`));
-    console.log(chalk.gray(`Model: ${model}`));
-    console.log(chalk.gray(`API Key: ${apiKey ? '✓ Set' : '✗ Not set'}`));
-  }
-
-  const systemPrompt = buildSystemPrompt(tools);
-
-  const queryEngine = new QueryEngine(
-    {
-      model,
-      provider: provider as LLMProvider,
-      apiKey,
-      apiBaseUrl,
-      maxTurns: getState().maxTurns || config.maxTurns || 80,
-      maxBudgetUsd: getState().maxBudgetUsd,
-      systemPrompt,
-      autoExtendTurns: opts.autoExtendTurns || config.autoExtendTurns || false,
-      maxTurnsCeiling: config.maxTurnsCeiling || 100,
-      permissionRules: {
-        deny: config.permissions.deny,
-        ask: config.permissions.ask,
-        allow: config.permissions.allow,
-      },
-    },
-    tools
-  );
-
-  profileCheckpoint('engine_created');
-
-  updateStatus({
-    provider,
-    model,
-    maxTurns: getState().maxTurns || 80,
-    sessionStartTime: Date.now(),
-  });
-
-  // Phase 5: Run REPL or single prompt
-  if (opts.json || opts.jsonPretty) {
-    // JSON output mode - pipe events as NDJSON
-    await runJSONMode(queryEngine, prompt, opts.jsonPretty);
-  } else if (prompt) {
-    // Single prompt mode
-    await executePrompt(queryEngine, prompt);
-  } else if (!opts.bare && process.stdout.isTTY) {
-    // Ink-based interactive UI
-    const { renderInkUI } = await import('./ui/renderer');
-    renderInkUI({
-      queryEngine,
-      provider,
-      model,
-      maxTurns: getState().maxTurns || 80,
-    });
-  } else {
-    // Fallback readline REPL (bare mode or non-TTY)
-    await runREPL(queryEngine);
-  }
-
-  if (opts.profile) {
-    console.log('\n' + getProfileReport());
-  }
-}
+// ── JSON output mode ──
 
 async function runJSONMode(queryEngine: QueryEngine, prompt: string | undefined, pretty: boolean): Promise<void> {
   const stringify = pretty
@@ -394,7 +45,6 @@ async function runJSONMode(queryEngine: QueryEngine, prompt: string | undefined,
   };
 
   if (prompt) {
-    // Single prompt in JSON mode
     (async () => {
       try {
         for await (const event of queryEngine.submitMessage(prompt)) {
@@ -405,7 +55,6 @@ async function runJSONMode(queryEngine: QueryEngine, prompt: string | undefined,
       }
     })();
   } else {
-    // Interactive JSON mode - read prompts from stdin line by line
     const readline = await import('readline');
     const rl = readline.createInterface({ input: process.stdin });
 
@@ -423,6 +72,8 @@ async function runJSONMode(queryEngine: QueryEngine, prompt: string | undefined,
   }
 }
 
+// ── Single prompt mode ──
+
 async function executePrompt(queryEngine: QueryEngine, prompt: string) {
   console.log(chalk.bold('\n🤔 Processing your request...\n'));
 
@@ -437,6 +88,8 @@ async function executePrompt(queryEngine: QueryEngine, prompt: string) {
     process.exit(1);
   }
 }
+
+// ── Stream event handler (CLI mode) ──
 
 function handleStreamEvent(event: AgentEvent | StreamEvent): void {
   if (event.type.startsWith('agent:')) {
@@ -539,6 +192,8 @@ function handleStreamEvent(event: AgentEvent | StreamEvent): void {
   }
 }
 
+// ── Fallback REPL (bare mode or non-TTY) ──
+
 async function runREPL(queryEngine: QueryEngine) {
   const readline = await import('readline');
 
@@ -551,7 +206,6 @@ async function runREPL(queryEngine: QueryEngine) {
   console.log(chalk.gray('Type your prompt and press Enter.'));
   console.log(chalk.gray('Type /help for commands, /exit to quit.\n'));
 
-  // Graceful shutdown handler
   const cleanup = () => {
     console.log(chalk.yellow('\n👋 Goodbye!'));
     rl.close();
@@ -564,7 +218,6 @@ async function runREPL(queryEngine: QueryEngine) {
     rl.question(chalk.cyan.bold('kc> '), async (input) => {
       const trimmed = input.trim();
 
-      // Handle commands
       if (trimmed.startsWith('/')) {
         await handleCommand(trimmed, queryEngine, rl);
         askQuestion();
@@ -576,7 +229,6 @@ async function runREPL(queryEngine: QueryEngine) {
         return;
       }
 
-      // Execute prompt
       try {
         for await (const event of queryEngine.submitMessage(trimmed)) {
           handleStreamEvent(event);
@@ -587,13 +239,15 @@ async function runREPL(queryEngine: QueryEngine) {
         );
       }
 
-      console.log(); // Separator
+      console.log();
       askQuestion();
     });
   };
 
   askQuestion();
 }
+
+// ── REPL command handler ──
 
 async function handleCommand(
   command: string,
@@ -607,6 +261,7 @@ async function handleCommand(
     case '/help':
       console.log(chalk.bold('\n📖 Available Commands:'));
       console.log(chalk.gray('  /help          - Show this help'));
+      console.log(chalk.gray('  /key <api-key> - Set API key at runtime'));
       console.log(chalk.gray('  /clear         - Clear conversation'));
       console.log(chalk.gray('  /mode <mode>   - Set permission mode'));
       console.log(chalk.gray('  /tools         - List available tools'));
@@ -632,6 +287,21 @@ async function handleCommand(
         console.log(chalk.yellow(`Current mode: ${getState().permissionMode}\n`));
       }
       break;
+
+    case '/key': {
+      const key = parts[1];
+      if (key) {
+        const validationError = queryEngine.setApiKey(key);
+        if (validationError) {
+          console.log(chalk.red(`✗ Invalid API key: ${validationError}\n`));
+        } else {
+          console.log(chalk.green('✓ API key updated.\n'));
+        }
+      } else {
+        console.log(chalk.yellow('Usage: /key <api-key>\n'));
+      }
+      break;
+    }
 
     case '/tools':
       const tools = toolRegistry.getAllTools();
@@ -699,6 +369,8 @@ async function handleCommand(
   }
 }
 
+// ── Subcommand: show config ──
+
 async function showConfig() {
   const { config, layers } = await loadConfig(process.cwd());
   console.log(chalk.bold('\n⚙️  Configuration:\n'));
@@ -721,6 +393,8 @@ async function showConfig() {
   console.log();
 }
 
+// ── Subcommand: list tools ──
+
 async function listTools() {
   await registerBuiltInTools();
   const tools = toolRegistry.getAllTools();
@@ -737,75 +411,19 @@ async function listTools() {
   }
 }
 
-import type { ToolDefinition } from './tools/protocol';
+// ── Entry ──
 
-function buildSystemPrompt(tools: ToolDefinition[]): string {
-  const toolNames = tools.map(t => t.name).join(', ');
-
-  // Detect project language for build hints
-  const cwd = getState().cwd;
-  const langInfo = detectProjectLanguage(cwd);
-  let buildHints = '';
-  if (langInfo) {
-    const hints: string[] = [`\nProject language: ${langInfo.language}`];
-    if (langInfo.buildCommands.length > 0) hints.push(`Build commands: ${langInfo.buildCommands.join(', ')}`);
-    if (langInfo.testCommands.length > 0) hints.push(`Test commands: ${langInfo.testCommands.join(', ')}`);
-    if (langInfo.lintCommands.length > 0) hints.push(`Lint commands: ${langInfo.lintCommands.join(', ')}`);
-    hints.push('Always verify your changes compile before considering the task complete.');
-    hints.push('Run the appropriate test suite after making changes.');
-    buildHints = hints.join('\n');
-  }
-
-  return `You are KC-CLI, an intelligent CLI agent that helps with software development tasks.
-
-You have access to the following tools: ${toolNames}
-
-Work in three phases:
-
-Phase 1 - Planning (first 3-5 turns):
-- Read the task instruction carefully
-- List relevant files and directories to understand project structure
-- Read key files that will need modification
-- Formulate a concrete plan with ordered steps before making changes
-
-Phase 2 - Execution:
-- Follow your plan step by step
-- Make one logical change at a time
-- Verify each change compiles/passes before proceeding
-- Track which files you have modified
-
-Phase 3 - Verification (last 3-5 turns):
-- Run tests to verify your changes
-- Review all modified files for correctness
-- Fix any issues found
-- Provide a summary of all changes made
-${buildHints}
-
-Guidelines:
-1. Always think step-by-step before taking action
-2. Use tools to gather information before making changes
-3. Be careful with destructive operations
-4. Explain what you're doing and why
-5. Ask for clarification when needed
-6. Follow best practices for code quality and security
-
-Available capabilities:
-- Read, write, and edit files
-- Execute bash commands
-- Search code and files
-- Git operations
-- Web search and fetch
-- Database queries
-- Docker operations
-- Application deployment
-- System monitoring
-- Compile, test, and run programs
-
-Always work methodically and keep the user informed of your progress.`;
-}
-
-// Run main
-main().catch((error) => {
+main({
+  onInteractiveUI: async ({ queryEngine, provider, model, maxTurns }) => {
+    const { renderInkUI } = await import('./ui/renderer');
+    renderInkUI({ queryEngine, provider, model, maxTurns });
+  },
+  onRunREPL: runREPL,
+  onExecutePrompt: executePrompt,
+  onRunJSONMode: runJSONMode,
+  onShowConfig: showConfig,
+  onListTools: listTools,
+}).catch((error) => {
   console.error(chalk.red('Fatal error:'), error);
   process.exit(1);
 });

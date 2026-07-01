@@ -1,7 +1,8 @@
-// Chalk-based renderer - entry point for the terminal UI
+// React-Ink based renderer for the terminal UI
 
+import { render } from 'ink';
 import type { QueryEngine } from '../query/QueryEngine';
-import { runApp } from './components/App';
+import { AppRoot } from './components/AppRoot.js';
 
 interface RenderOptions {
   queryEngine: QueryEngine;
@@ -12,24 +13,40 @@ interface RenderOptions {
 }
 
 export function renderInkUI(options: RenderOptions): void {
-  runApp({
-    queryEngine: options.queryEngine,
-    provider: options.provider,
-    model: options.model,
-    maxTurns: options.maxTurns,
-    themeName: options.themeName,
-  }).catch((error) => {
-    console.error('UI error:', error);
-    process.exit(1);
-  });
+  const { waitUntilExit } = render(
+    <AppRoot
+      queryEngine={options.queryEngine}
+      provider={options.provider}
+      model={options.model}
+      maxTurns={options.maxTurns}
+      themeName={options.themeName}
+    />,
+    {
+      stdout: process.stdout,
+      stdin: process.stdin,
+    },
+  );
+
+  // Safety net: if stdin raw mode works but useInput somehow fails,
+  // SIGINT (Ctrl+C) will still exit via Ink's default handler.
+  // Additional SIGTERM handler for kill signals.
+  const onTerminate = () => {
+    process.exit(0);
+  };
+  process.once('SIGTERM', onTerminate);
+
+  waitUntilExit()
+    .then(() => {
+      process.off('SIGTERM', onTerminate);
+    })
+    .catch((error) => {
+      console.error('UI error:', error);
+      process.exit(1);
+    });
 }
 
-// ── Performance utilities (exported for testing) ──
+// ── Performance utilities (preserved for testing compatibility) ──
 
-/**
- * Throttle function - executes at most once per `interval` ms.
- * The last call within a burst is guaranteed to execute.
- */
 export function createThrottle<T extends (...args: any[]) => void>(
   fn: T,
   intervalMs: number,
@@ -43,11 +60,9 @@ export function createThrottle<T extends (...args: any[]) => void>(
     const elapsed = now - lastCallTime;
 
     if (elapsed >= intervalMs) {
-      // Enough time passed - execute immediately
       lastCallTime = now;
       fn(...args);
     } else {
-      // Within throttle window - schedule trailing call
       lastArgs = args;
       if (!timer) {
         const remaining = intervalMs - elapsed;
@@ -85,9 +100,6 @@ export function createThrottle<T extends (...args: any[]) => void>(
   return throttled;
 }
 
-/**
- * Debounce function - delays execution until `delayMs` ms of silence.
- */
 export function createDebounce<T extends (...args: any[]) => void>(
   fn: T,
   delayMs: number,

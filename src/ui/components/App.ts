@@ -1,16 +1,8 @@
-import readline from 'readline';
 import chalk from 'chalk';
 import { getErrorMessage } from '../../utils/errors';
-import { renderStatusBar } from './StatusBar';
-import { renderToolCallCard, type ToolCallData } from './ToolCallCard';
-import { renderChatView, type ChatMessage } from './ChatView';
-import { classifyThinkingSteps, renderThinkingChain, type ThinkingChain } from './ThinkingChainView';
-import { renderInputBox, createInputState, type InputState } from './InputBox';
-import { renderSidebar, createSidebarData, type SidebarData, type SidebarTool } from './Sidebar';
 import { renderMultiFileDiff, type FileDiff } from '../diff-viewer';
 import {
   createPaletteState,
-  renderCommandPalette,
   paletteMoveUp,
   paletteMoveDown,
   paletteGetSelected,
@@ -19,20 +11,14 @@ import {
 } from './CommandPalette';
 import {
   createModelSelectorState,
-  renderModelSelector,
   modelSelectorMoveUp,
   modelSelectorMoveDown,
   modelSelectorGetSelected,
   type ModelSelectorState,
 } from './ModelSelector';
-import { parseKeypress } from '../keypress';
-import { VirtualScroller } from '../virtual-scroll';
-import { createThrottle, createDebounce } from '../renderer';
-import { getTheme, type Theme } from '../theme';
+import { getTheme, setTheme, THEMES, type Theme } from '../theme';
 import { UIEventBus } from '../event-bus';
 import { OverlayManager } from '../overlay-manager';
-import { renderHeader } from './Header';
-import { renderChatViewport } from './ChatViewport';
 import { CommandPaletteOverlay } from '../overlays/CommandPaletteOverlay';
 import { ModelSelectorOverlay } from '../overlays/ModelSelectorOverlay';
 import { HelpPanelOverlay } from '../overlays/HelpPanelOverlay';
@@ -40,21 +26,38 @@ import { createDefaultKeybindings, type KeybindingManager } from '../keybinding-
 import { createLogMiddleware } from '../middleware/log';
 import { createBudgetMiddleware } from '../middleware/budget';
 import { createBridgeMiddleware } from '../middleware/bridge';
-import { getBreakpoint, type Density } from '../layout';
+import { InputManager, type InputDelegates } from './InputManager';
+import { DiffManager } from './DiffManager';
+import { RenderEngine, type RenderState } from './RenderEngine';
+import {
+  createAutocompleteState,
+  filterAutocompleteItems,
+  autocompleteMoveUp,
+  autocompleteMoveDown,
+  autocompleteGetSelected,
+  buildAutocompleteItems,
+  type AutocompleteState,
+} from './AutocompletePopup';
 import type { QueryEngine } from '../../query/QueryEngine';
 import type { AgentEvent } from '../../state/types';
 import type { StreamEvent } from '../../query/protocol';
 import { normalizeUIEvent, type CanonicalEventType } from '../event-normalizer';
+import type { ChatMessage } from './ChatView';
+import type { ThinkingChain } from './ThinkingChainView';
+import { classifyThinkingSteps } from './ThinkingChainView';
+import {
+  createSidebarSelection,
+  sidebarMoveUp,
+  sidebarMoveDown,
+  sidebarMoveLeft,
+  sidebarMoveRight,
+  type SidebarSelection,
+} from './Sidebar';
+import type { SidebarData, SidebarTool } from './Sidebar';
+import { createSidebarData } from './Sidebar';
+import { createInputState, type InputState } from './InputBox';
+import { type Notification, buildSendFailedNotification, buildEmptyApiKeyNotification, buildKeyInvalidNotification } from './NotificationBar';
 
-/** Threshold: use virtual scrolling when message count exceeds this */
-const VIRTUAL_SCROLL_THRESHOLD = 100;
-/** Throttle interval for render during streaming (16ms ≈ 60fps) */
-const RENDER_THROTTLE_MS = 16;
-/** Debounce interval for keyboard input */
-const INPUT_DEBOUNCE_MS = 50;
-
-// Pre-built Sets for O(1) membership checks (replaces repeated array literal allocation)
-const DIFF_TOOLS_SET = new Set(['FileWrite', 'FileEdit']);
 const SIDEBAR_SECTIONS_SET = new Set(['tools', 'files', 'tasks', 'memory']);
 const VALID_PERMISSION_MODES_SET = new Set(['default', 'bypassPermissions', 'dontAsk', 'plan', 'acceptEdits']);
 
@@ -73,18 +76,12 @@ export class App {
   private maxTurns: number;
   private messages: ChatMessage[] = [];
   private inputState: InputState;
-  private rl!: readline.Interface;
   private turnCount: number = 0;
   private sessionStartTime: number;
   private running: boolean = true;
-  private rlClosed: boolean = false;
-  private _rawModeActive: boolean = false;
-  private _processingRawInput: boolean = false;
   private _cleanupFn: (() => void) | null = null;
   private sidebarData: SidebarData;
   private sidebarWidth: number = 34;
-  private pendingDiffs: FileDiff[] = [];
-  private activeDiffIndex: number = 0;
   private paletteState: PaletteState;
   private modelSelectorState: ModelSelectorState;
   private theme: Theme;
@@ -97,22 +94,16 @@ export class App {
   private _currentAssistantMsg: ChatMessage | null = null;
   private _currentThinkingChain: ThinkingChain | null = null;
   private _thinkingChains: Map<string, ThinkingChain> = new Map();
-  private density: Density = 'normal';
+  private autocompleteState: AutocompleteState;
+  private sidebarSelection: SidebarSelection;
+  private isStreaming: boolean = false;
+  private streamingTimer: ReturnType<typeof setInterval> | null = null;
+  private notification: Notification | null = null;
 
-  // ── Performance: virtual scrolling ──
-  private virtualScroller: VirtualScroller;
-
-  // ── Performance: throttled render ──
-  private throttledRender: ReturnType<typeof createThrottle>;
-
-  // ── Performance: debounced input ──
-  private debouncedPrompt: ReturnType<typeof createDebounce>;
-
-  // ── Performance: diff worker ──
-  private diffWorkerReady: boolean = false;
-  private diffWorker: import('worker_threads').Worker | null = null;
-  private diffCallbacks: Map<string, (result: string) => void> = new Map();
-  private diffCounter: number = 0;
+  // Extracted managers
+  private inputManager: InputManager;
+  private diffManager: DiffManager;
+  private renderEngine: RenderEngine;
 
   constructor(options: AppOptions) {
     this.queryEngine = options.queryEngine;
@@ -128,6 +119,8 @@ export class App {
     this.eventBus = new UIEventBus();
     this.overlayManager = new OverlayManager();
     this.keybindingManager = createDefaultKeybindings();
+    this.autocompleteState = createAutocompleteState();
+    this.sidebarSelection = createSidebarSelection();
 
     // Wire event pipeline: middlewares run before UI listener
     this.logMiddleware = createLogMiddleware(false);
@@ -143,34 +136,71 @@ export class App {
       this.handleEvent(event, this._currentAssistantMsg);
     });
 
-    // ── Performance: virtual scrolling for long conversations ──
-    const viewportHeight = (process.stdout.rows || 24) - 8; // Reserve header/footer
-    this.virtualScroller = new VirtualScroller({
-      viewportHeight,
-      overscan: 5,
-    });
+    // Initialize extracted managers
+    this.diffManager = new DiffManager();
+    this.diffManager.initWorker();
 
-    // ── Performance: throttle render at 16ms (60fps) ──
-    this.throttledRender = createThrottle(() => {
-      this._doRender();
-    }, RENDER_THROTTLE_MS);
-
-    // ── Performance: debounce rapid input ──
-    this.debouncedPrompt = createDebounce(() => {
+    this.renderEngine = new RenderEngine();
+    this.renderEngine.setDebouncedPromptHandler(() => {
       this.prompt();
-    }, INPUT_DEBOUNCE_MS);
-
-    this.rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
     });
 
-    // Initialize diff worker (lazy, non-blocking)
-    this.initDiffWorker();
+    this.inputManager = new InputManager(this.createInputDelegates());
+  }
+
+  private createInputDelegates(): InputDelegates {
+    return {
+      onUserInput: async (input: string) => {
+        this.addMessage({
+          id: `user-${Date.now()}`,
+          role: 'user',
+          content: input,
+          timestamp: Date.now(),
+        });
+        await this.executeQuery(input);
+      },
+      onCommand: (command: string) => {
+        this.handleCommand(command);
+      },
+      onRenderRequest: () => {
+        this.render();
+      },
+      onClearScreen: () => {
+        this.renderEngine.clearScreen();
+      },
+      onOverlayKeypress: (event) => {
+        if (this.overlayManager.handleKeypress(event)) {
+          if (this.overlayManager.isEmpty()) {
+            this.inputManager.restoreReadline();
+            this.inputManager.prompt();
+          }
+          this.renderEngine.clearScreen();
+          this.render();
+          return true;
+        }
+        return false;
+      },
+      onKeybindingCommand: (command: string) => {
+        this.executeKeybindingCommand(command);
+      },
+      isRunning: () => this.running,
+      getOverlayManager: () => this.overlayManager,
+      getKeybindingManager: () => this.keybindingManager,
+      getTheme: () => this.theme,
+    };
   }
 
   async start(): Promise<void> {
-    this.clearScreen();
+    this.renderEngine.clearScreen();
+
+    // Show notification if API key is missing (skip for ollama which needs no key)
+    if (this.provider !== 'ollama' && this.provider !== 'unknown' && typeof this.queryEngine.getApiKey === 'function') {
+      const currentKey = this.queryEngine.getApiKey();
+      if (!currentKey) {
+        this.notification = buildEmptyApiKeyNotification();
+      }
+    }
+
     this.renderImmediate();
 
     // Terminal resize handling (debounced)
@@ -180,7 +210,7 @@ export class App {
       resizeTimer = setTimeout(() => {
         resizeTimer = null;
         this.applyBreakpoint();
-        this.clearScreen();
+        this.renderEngine.clearScreen();
         this.renderImmediate();
       }, 100);
     };
@@ -203,7 +233,7 @@ export class App {
       if (resizeTimer) clearTimeout(resizeTimer);
     };
 
-    this.prompt();
+    this.inputManager.prompt();
   }
 
   /**
@@ -212,28 +242,16 @@ export class App {
    */
   private dispose(): void {
     this.running = false;
-    this.rlClosed = true;
 
     // Cancel throttled/debounced timers
-    this.throttledRender.cancel();
-    this.debouncedPrompt.cancel();
+    this.renderEngine.cancelThrottle();
+    this.renderEngine.cancelDebounce();
 
-    // Clean up raw input if active
-    if (this._rawModeActive) {
-      process.stdin.removeListener('data', this._onRawKeypress);
-      if (process.stdin.isTTY) {
-        process.stdin.setRawMode(false);
-      }
-      this._rawModeActive = false;
-    }
-
-    // Close readline (safe even if already closed)
-    if (this.rl) {
-      try { this.rl.close(); } catch { /* already closed */ }
-    }
+    // Close input manager (readline + raw mode cleanup)
+    this.inputManager.close();
 
     // Terminate diff worker
-    this.terminateDiffWorker();
+    this.diffManager.terminateWorker();
 
     // Remove process-level listeners registered in start()
     if (this._cleanupFn) {
@@ -245,278 +263,48 @@ export class App {
     this.eventBus.clear();
   }
 
-  /**
-   * Initialize the diff computation worker thread (lazy, non-blocking).
-   * Falls back to synchronous diff if worker_threads unavailable.
-   */
-  private initDiffWorker(): void {
-    try {
-      const { Worker } = require('worker_threads');
-      const workerCode = `
-        const { parentPort } = require('worker_threads');
-        parentPort.on('message', (data) => {
-          try {
-            const { id, oldContent, newContent } = data;
-            const result = computeDiff(oldContent, newContent);
-            parentPort.postMessage({ id, result });
-          } catch (err) {
-            parentPort.postMessage({ id: data.id, error: err.message });
-          }
-        });
+  // ── Render helpers ──
 
-        function computeDiff(oldContent, newContent) {
-          const oldLines = (oldContent || '').split('\\n');
-          const newLines = newContent.split('\\n');
-          const maxLen = Math.max(oldLines.length, newLines.length);
-          const parts = [];
-          for (let i = 0; i < maxLen; i++) {
-            const oldLine = oldLines[i];
-            const newLine = newLines[i];
-            if (oldLine === undefined) {
-              parts.push({ type: 'add', line: newLine, lineNum: i + 1 });
-            } else if (newLine === undefined) {
-              parts.push({ type: 'del', line: oldLine, lineNum: i + 1 });
-            } else if (oldLine !== newLine) {
-              parts.push({ type: 'del', line: oldLine, lineNum: i + 1 });
-              parts.push({ type: 'add', line: newLine, lineNum: i + 1 });
-            } else {
-              parts.push({ type: 'same', line: oldLine, lineNum: i + 1 });
-            }
-          }
-          return parts;
-        }
-      `;
-
-      this.diffWorker = new Worker(workerCode, { eval: true });
-      this.diffWorker!.on('message', (msg: { id: string; result?: any; error?: string }) => {
-        const cb = this.diffCallbacks.get(msg.id);
-        if (cb) {
-          this.diffCallbacks.delete(msg.id);
-          if (msg.error) {
-            // Fallback: return empty
-            cb('');
-          } else {
-            cb(msg.result);
-          }
-        }
-      });
-      this.diffWorker!.on('error', () => {
-        this.diffWorkerReady = false;
-        this.diffWorker = null;
-      });
-      this.diffWorkerReady = true;
-    } catch (_err) {
-      console.error("Suppressed error:", _err);
-      // worker_threads not available - will use synchronous fallback
-      this.diffWorkerReady = false;
-    }
-  }
-
-  /**
-   * Terminate the diff worker on shutdown.
-   */
-  private terminateDiffWorker(): void {
-    if (this.diffWorker) {
-      this.diffWorker.terminate().catch(() => {});
-      this.diffWorker = null;
-    }
-  }
-
-  private clearScreen(): void {
-    process.stdout.write('\x1B[2J\x1B[H');
-  }
-
-  /**
-   * Public render - throttled at 60fps during streaming.
-   * Uses the throttled version to avoid excessive re-renders.
-   */
-  private render(): void {
-    this.throttledRender();
-  }
-
-  /**
-   * Force an immediate render (bypasses throttle).
-   * Use for user-initiated actions (command input, etc.).
-   */
-  private renderImmediate(): void {
-    this.throttledRender.cancel();
-    this._doRender();
-  }
-
-  /**
-   * Actual render implementation.
-   *
-   * Layout:
-   * ┌──────────────────────────────────────────────────────────┐
-   * │ Header: kc CLI v2.0 · Model · Session                    │
-   * ├─────────────────────────────────────────────┬────────────┤
-   * │ Main Chat Area                              │ Sidebar    │
-   * │ User: Create a web server                   │ (tools/    │
-   * │ Assistant: I'll create... [streaming]       │  files/    │
-   * │ ┌─ ToolCall: Bash ──────────────────────┐   │  tasks)    │
-   * │ │ Running...                             │   │            │
-   * │ └────────────────────────────────────────┘   │            │
-   * ├─────────────────────────────────────────────┼────────────┤
-   * │ Status: ✓ Ready · 3 tools used · $0.05 spent             │
-   * └──────────────────────────────────────────────────────────┘
-   */
-  private _doRender(): void {
-    process.stdout.write('\x1B[H');
-
-    const terminalWidth = process.stdout.columns || 80;
-    const mainWidth = terminalWidth - this.sidebarWidth - 2;
-
-    // ── Header ──
-    const tokens = this.theme.resolve();
-    const borderColor = tokens['overlay.border'];
-    const headerResult = renderHeader({
-      provider: this.provider,
-      model: this.model,
-      sessionId: this.sessionStartTime.toString(36),
-      width: terminalWidth,
-      theme: this.theme,
-    });
-    for (const line of headerResult.lines) {
-      console.log(line);
-    }
-
-    // ── Sidebar + Main content ──
-    const sidebarLines = renderSidebar(this.sidebarData, this.sidebarWidth, this.theme).split('\n');
-
-    // Chat content (main area) - use virtual scrolling for long conversations
-    const chatLines = renderChatViewport({
+  private buildRenderState(): RenderState {
+    return {
+      terminalWidth: process.stdout.columns || 80,
+      terminalHeight: process.stdout.rows || 24,
+      sidebarWidth: this.sidebarWidth,
       messages: this.messages,
-      scroller: this.virtualScroller,
-      width: mainWidth,
-      height: (process.stdout.rows || 24) - 8,
+      sidebarData: this.sidebarData,
       theme: this.theme,
-      virtualScrollThreshold: VIRTUAL_SCROLL_THRESHOLD,
-      thinkingChains: this._thinkingChains,
-    });
-
-    // Interleave main content and sidebar (chat left, sidebar right)
-    const maxLines = Math.max(sidebarLines.length, chatLines.length);
-    for (let i = 0; i < maxLines; i++) {
-      const sidebarLine = sidebarLines[i] || ' '.repeat(this.sidebarWidth);
-      const chatLine = chatLines[i] || '';
-
-      // Truncate chat line to main width
-      const plainChat = chatLine.replace(/\x1B\[[0-9;]*m/g, '');
-      if (plainChat.length > mainWidth) {
-        // Re-render with truncation
-        const truncated = this.truncateAnsi(chatLine, mainWidth);
-        process.stdout.write(`${truncated}  ${sidebarLine}\n`);
-      } else {
-        const padding = ' '.repeat(Math.max(0, mainWidth - plainChat.length));
-        process.stdout.write(`${chatLine}${padding}  ${sidebarLine}\n`);
-      }
-    }
-
-    // ── Separator ──
-    const sepBorder = tokens['overlay.border'];
-    console.log(sepBorder('├' + '─'.repeat(terminalWidth - this.sidebarWidth - 1) + '┼' + '─'.repeat(this.sidebarWidth - 2) + '┤'));
-
-    // ── Overlay Layer ──
-    if (!this.overlayManager.isEmpty()) {
-      console.log('');
-      console.log(this.overlayManager.render(terminalWidth, process.stdout.rows || 24, this.theme));
-    }
-
-    // ── Status ──
-    const status = renderStatusBar({
       provider: this.provider,
       model: this.model,
+      sessionStartTime: this.sessionStartTime,
       turnCount: this.turnCount,
       maxTurns: this.maxTurns,
-      sessionStartTime: this.sessionStartTime,
-    }, this.theme);
-    if (status) {
-      console.log(status);
-    }
-
-    // ── Clear stale lines from previous render ──
-    const headerLineCount = headerResult.lines.length;
-    const overlayLines = !this.overlayManager.isEmpty() ? 2 : 0;
-    const statusLines = status ? status.split('\n').length : 0;
-    const linesRendered = headerLineCount + maxLines + 1 + overlayLines + statusLines;
-    const termHeight = process.stdout.rows || 24;
-    for (let i = linesRendered; i < termHeight; i++) {
-      process.stdout.write('\x1B[2K\n');
-    }
+      thinkingChains: this._thinkingChains,
+      overlayManager: this.overlayManager,
+      inputState: this.inputManager.getInputState(),
+      autocompleteState: this.autocompleteState,
+      isStreaming: this.isStreaming,
+      sidebarSelection: this.sidebarSelection,
+      notification: this.notification ?? undefined,
+    };
   }
 
-  /**
-   * Truncate an ANSI string to a given display width.
-   */
-  private truncateAnsi(str: string, maxWidth: number): string {
-    const plain = str.replace(/\x1B\[[0-9;]*m/g, '');
-    if (plain.length <= maxWidth) return str;
-    // Collect active ANSI codes up to the cut point, then append reset
-    const codes: string[] = [];
-    let plainIdx = 0;
-    const re = /\x1B\[([0-9;]*)m/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(str)) !== null && plainIdx < maxWidth - 1) {
-      codes.push(m[0]);
-    }
-    // Reset at the end to avoid color bleed
-    return codes.join('') + plain.slice(0, maxWidth - 1) + '…\x1B[0m';
+  private render(): void {
+    this.renderEngine.render(this.buildRenderState());
   }
+
+  private renderImmediate(): void {
+    this.renderEngine.renderImmediate(this.buildRenderState());
+  }
+
+  private applyBreakpoint(): void {
+    const { sidebarVisible } = this.renderEngine.applyBreakpoint();
+    this.sidebarData.visible = sidebarVisible;
+  }
+
+  // ── Input flow ──
 
   private prompt(): void {
-    if (!this.running || this.rlClosed) return;
-
-    // Use palette-specific prompt when palette is open
-    const promptTokens = this.theme.resolve();
-    const hasOverlay = !this.overlayManager.isEmpty();
-    const promptLabel = hasOverlay
-      ? promptTokens['input.steer']('overlay> ')
-      : promptTokens['input.prompt']('kc> ');
-
-    try {
-    this.rl.question(promptLabel, async (input) => {
-      if (!this.running) return;
-
-      // Handle overlay-specific input
-      if (hasOverlay) {
-        // Overlays use raw mode, but if we get text input, route to palette
-        if (this.paletteState.open) {
-          this.handlePaletteInput(input.trim());
-        }
-        if (this.running) this.prompt();
-        return;
-      }
-
-      const trimmed = input.trim();
-
-      // Handle commands
-      if (trimmed.startsWith('/')) {
-        this.handleCommand(trimmed);
-        this.prompt();
-        return;
-      }
-
-      if (!trimmed) {
-        this.prompt();
-        return;
-      }
-
-      // Add user message
-      this.addMessage({
-        id: `user-${Date.now()}`,
-        role: 'user',
-        content: trimmed,
-        timestamp: Date.now(),
-      });
-
-      // Execute query
-      await this.executeQuery(trimmed);
-
-      this.prompt();
-    });
-    } catch {
-      // readline was closed between guard check and question() call
-    }
+    this.inputManager.prompt();
   }
 
   private addMessage(msg: ChatMessage): void {
@@ -535,13 +323,30 @@ export class App {
     this.messages.push(assistantMsg);
     this._currentAssistantMsg = assistantMsg;
 
+    // Start streaming indicator
+    this.isStreaming = true;
+    this.streamingTimer = setInterval(() => {
+      this.render();
+    }, 150);
+
     try {
       for await (const event of this.queryEngine.submitMessage(prompt)) {
         this.eventBus.emit(event);
       }
     } catch (error) {
       const errTokens = this.theme.resolve();
-      assistantMsg.content = errTokens['error.text'](`Error: ${getErrorMessage(error)}`);
+      const errMsg = getErrorMessage(error);
+      assistantMsg.content = errTokens['error.text'](`Error: ${errMsg}`);
+      this.notification = buildSendFailedNotification(errMsg);
+      // Auto-clear notification after 8 seconds
+      setTimeout(() => { this.notification = null; this.render(); }, 8000);
+    } finally {
+      // Stop streaming indicator
+      this.isStreaming = false;
+      if (this.streamingTimer) {
+        clearInterval(this.streamingTimer);
+        this.streamingTimer = null;
+      }
     }
 
     // Persist thinking chain for this message
@@ -555,18 +360,19 @@ export class App {
     this.renderImmediate();
   }
 
+  // ── Event handling ──
+
   private handleEvent(event: AgentEvent | StreamEvent, assistantMsg: ChatMessage | null): void {
     if (!assistantMsg) return;
-    // Normalize agent:* prefixed events to canonical UI types
     const normalized = normalizeUIEvent(event);
     const type = normalized.type;
-    // Raw event access requires permissive typing due to the union of AgentEvent | StreamEvent
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ev = normalized.raw as any;
 
     switch (type) {
       case 'text_delta':
         assistantMsg.content = (assistantMsg.content || '') + ev.text;
+        this.renderEngine.markDirty('content');
         this.render();
         break;
 
@@ -581,15 +387,16 @@ export class App {
         }
         this._currentThinkingChain.rawContent += ev.thinking;
         this._currentThinkingChain.steps = classifyThinkingSteps(this._currentThinkingChain.rawContent);
+        this.renderEngine.markDirty('content');
         this.render();
         break;
       }
 
       case 'tool_started':
       case 'tool_use_start': {
-        const toolCall: ToolCallData = {
+        const toolCall = {
           toolName: ev.toolCall.toolName,
-          status: 'running',
+          status: 'running' as const,
           startTime: Date.now(),
         };
         assistantMsg.toolCalls = assistantMsg.toolCalls || [];
@@ -604,7 +411,6 @@ export class App {
         const toolCalls = assistantMsg.toolCalls || [];
         const lastTool = toolCalls[toolCalls.length - 1];
         if (lastTool) {
-          // tool_completed uses success; tool_use_end uses isError
           const failed = 'isError' in ev ? ev.result.isError : false;
           lastTool.status = failed ? 'failed' : 'completed';
           lastTool.endTime = Date.now();
@@ -616,9 +422,9 @@ export class App {
             status: lastTool.status as SidebarTool['status'],
             duration: this.calcDuration(lastTool.startTime, lastTool.endTime || Date.now()),
           });
-          this.captureDiffFromToolResult(ev.toolCall.toolName, ev.result?.metadata);
+          this.diffManager.captureDiff(ev.toolCall.toolName, ev.result?.metadata);
         }
-        this.showDiffIfPending(assistantMsg);
+        this.diffManager.showDiffPreview(this.messages, this.sidebarWidth, this.theme);
         this.renderImmediate();
         break;
       }
@@ -656,13 +462,13 @@ export class App {
       }
 
       case 'turn_complete':
-        // Turn complete — no additional UI action needed (render happens after loop)
         break;
     }
   }
 
+  // ── Sidebar ──
+
   private updateSidebarTool(tool: SidebarTool): void {
-    // Check if this tool is already in the sidebar
     const existing = this.sidebarData.tools.findIndex(t => t.name === tool.name && t.status === 'running');
     if (existing >= 0 && tool.status !== 'running') {
       this.sidebarData.tools[existing] = tool;
@@ -678,239 +484,9 @@ export class App {
     return `${elapsed.toFixed(1)}s`;
   }
 
-  /**
-   * Apply responsive breakpoint based on terminal width.
-   */
-  private applyBreakpoint(): void {
-    const cols = process.stdout.columns || 80;
-    const bp = getBreakpoint(cols);
-    this.density = bp.density;
-    this.sidebarData.visible = bp.sidebarVisible;
-  }
+  // ── Keybinding commands ──
 
-  /**
-   * Advance to the next unprocessed diff (skip accepted/rejected).
-   */
-  private advanceDiffIndex(): void {
-    const start = this.activeDiffIndex;
-    for (let i = 0; i < this.pendingDiffs.length; i++) {
-      const idx = (start + 1 + i) % this.pendingDiffs.length;
-      const d = this.pendingDiffs[idx];
-      if (d && !d.accepted && !d.rejected) {
-        this.activeDiffIndex = idx;
-        return;
-      }
-    }
-    // All processed
-  }
-
-  /**
-   * Show diff preview as a system message if there are unprocessed diffs.
-   * Automatically triggered after FileWriteTool / FileEditTool completion.
-   */
-  private showDiffIfPending(assistantMsg: ChatMessage): void {
-    const unprocessed = this.pendingDiffs.filter(d => !d.accepted && !d.rejected);
-    if (unprocessed.length === 0) return;
-
-    const maxWidth = Math.min((process.stdout.columns || 80) - this.sidebarWidth - 6, 100);
-    const diffPreview = renderMultiFileDiff(
-      unprocessed,
-      this.activeDiffIndex,
-      { maxWidth, theme: this.theme }
-    );
-
-    // Append diff preview as a system message after the assistant message
-    this.messages.push({
-      id: `diff-auto-${Date.now()}`,
-      role: 'system',
-      content: diffPreview + '\n' + chalk.gray.dim('  Use /accept, /reject, or /diff to review changes.'),
-      timestamp: Date.now(),
-    });
-  }
-
-  /**
-   * Handle input when the command palette is open.
-   * Empty input = close. Type to search. Enter on empty = select.
-   */
-  private handlePaletteInput(input: string): void {
-    if (input === '') {
-      // Try to execute the selected command
-      const selected = paletteGetSelected(this.paletteState);
-      if (selected) {
-        this.executePaletteCommand(selected.id);
-      }
-      return;
-    }
-
-    // Special keys (simulated by typed keywords)
-    switch (input.toLowerCase()) {
-      case 'esc':
-      case '/close':
-      case 'q':
-        paletteClose(this.paletteState);
-        this.clearScreen();
-        this.renderImmediate();
-        return;
-
-      case '/up':
-        paletteMoveUp(this.paletteState);
-        break;
-
-      case '/down':
-        paletteMoveDown(this.paletteState);
-        break;
-
-      default:
-        // Type-to-search
-        this.paletteState.query = input;
-        this.paletteState.selectedIndex = 0;
-        break;
-    }
-
-    this.clearScreen();
-    this.renderImmediate();
-  }
-
-  /**
-   * Handle input when the model selector is active.
-   */
-  private handleModelSelectorInput(input: string): void {
-    const lower = input.toLowerCase().trim();
-
-    if (lower === '' || lower === 'enter') {
-      // Confirm selection
-      const selected = modelSelectorGetSelected(this.modelSelectorState);
-      if (selected) {
-        // Update provider and model (runtime only)
-        const oldProvider = this.provider;
-        const oldModel = this.model;
-        this.provider = selected.providerId;
-        this.model = selected.modelId;
-
-        this.modelSelectorState.active = false;
-        this.addMessage({
-          id: `sys-${Date.now()}`,
-          role: 'system',
-          content: chalk.cyan.bold('Model changed:') +
-            chalk.dim(` ${oldProvider}/${oldModel}`) +
-            chalk.white(' → ') +
-            chalk.green.bold(`${selected.providerId}/${selected.modelId}`),
-          timestamp: Date.now(),
-        });
-      }
-      this.clearScreen();
-      this.renderImmediate();
-      return;
-    }
-
-    switch (lower) {
-      case 'esc':
-      case 'q':
-      case '/close':
-        this.modelSelectorState.active = false;
-        this.clearScreen();
-        this.renderImmediate();
-        return;
-
-      case '/up':
-        modelSelectorMoveUp(this.modelSelectorState);
-        break;
-
-      case '/down':
-        modelSelectorMoveDown(this.modelSelectorState);
-        break;
-    }
-
-    this.clearScreen();
-    this.renderImmediate();
-  }
-
-  /**
-   * Switch stdin to raw mode for arrow key navigation in overlays.
-   * Idempotent: safe to call multiple times without side effects.
-   */
-  private _enableRawInput(): void {
-    // Guard: already in raw mode — skip to prevent duplicate close()/listener add
-    if (this._rawModeActive) return;
-
-    this.rlClosed = true;
-    this._rawModeActive = true;
-    this.rl.close();
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(true);
-    }
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', this._onRawKeypress);
-  }
-
-  /**
-   * Restore readline-based input after overlay closes.
-   * Reuses the existing readline instance when possible to avoid
-   * accumulating stale stdin/stdout listeners from repeated creation.
-   */
-  private _restoreReadline(): void {
-    // Guard: not in raw mode — nothing to restore
-    if (!this._rawModeActive) return;
-
-    process.stdin.removeListener('data', this._onRawKeypress);
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(false);
-    }
-    this._rawModeActive = false;
-
-    // Only create a new readline if the current one is not usable.
-    // After rl.close(), the instance cannot be reopened, so we must recreate.
-    // However, we null-out the old reference first to avoid any residual listeners.
-    if (this.rl && typeof this.rl.close === 'function') {
-      // Ensure the old rl is fully closed and listeners detached
-      try { this.rl.close(); } catch { /* already closed */ }
-    }
-
-    this.rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-    this.rlClosed = false;
-  }
-
-  /**
-   * Handle raw keypresses - dispatch to OverlayManager, then KeybindingManager.
-   * Includes a reentrancy guard to prevent duplicate processing from rapid keypresses.
-   */
-  private _onRawKeypress = (chunk: string): void => {
-    // Reentrancy guard: prevent duplicate processing if a previous keypress
-    // is still mid-dispatch (e.g., overlay close + readline recreation)
-    if (this._processingRawInput) return;
-    this._processingRawInput = true;
-
-    try {
-      const event = parseKeypress(chunk);
-
-      // First, try overlay dispatch
-      if (this.overlayManager.handleKeypress(event)) {
-        if (this.overlayManager.isEmpty()) {
-          this._restoreReadline();
-          this.prompt();
-        }
-        this.clearScreen();
-        this.renderImmediate();
-        return;
-      }
-
-      // Then, try keybinding dispatch
-      const command = this.keybindingManager.resolve(event);
-      if (command) {
-        this.executeCommand(command);
-      }
-    } finally {
-      this._processingRawInput = false;
-    }
-  };
-
-  /**
-   * Execute a keybinding command.
-   */
-  private executeCommand(command: string): void {
+  private executeKeybindingCommand(command: string): void {
     switch (command) {
       case 'palette':
         this.openPalette();
@@ -919,25 +495,23 @@ export class App {
         this.messages = [];
         this.turnCount = 0;
         this.sidebarData.tools = [];
-        this.pendingDiffs = [];
-        this.activeDiffIndex = 0;
-        this.clearScreen();
+        this.diffManager.clear();
+        this.renderEngine.clearScreen();
         this.renderImmediate();
         break;
       case 'toggleSidebar':
         this.sidebarData.visible = !this.sidebarData.visible;
-        this.clearScreen();
+        this.renderEngine.clearScreen();
         this.renderImmediate();
         break;
       case 'toggleThinking': {
-        // Toggle fold/expand on the most recent thinking chain
         const lastChain = this._currentThinkingChain
           || (this._thinkingChains.size > 0
             ? Array.from(this._thinkingChains.values()).pop()
             : null);
         if (lastChain) {
           lastChain.folded = !lastChain.folded;
-          this.clearScreen();
+          this.renderEngine.clearScreen();
           this.renderImmediate();
         }
         break;
@@ -951,20 +525,60 @@ export class App {
         if (!this.overlayManager.isEmpty()) {
           this.overlayManager.pop();
           if (this.overlayManager.isEmpty()) {
-            this._restoreReadline();
-            this.prompt();
+            this.inputManager.restoreReadline();
+            this.inputManager.prompt();
           }
-          this.clearScreen();
+          this.renderEngine.clearScreen();
           this.renderImmediate();
         }
         break;
-      // Other commands are no-ops in raw mode
+      case 'sidebarUp':
+        sidebarMoveUp(this.sidebarData, this.sidebarSelection);
+        this.renderImmediate();
+        break;
+      case 'sidebarDown':
+        sidebarMoveDown(this.sidebarData, this.sidebarSelection);
+        this.renderImmediate();
+        break;
+      case 'sidebarLeft':
+        sidebarMoveLeft(this.sidebarData, this.sidebarSelection);
+        this.renderImmediate();
+        break;
+      case 'sidebarRight':
+        sidebarMoveRight(this.sidebarData, this.sidebarSelection);
+        this.renderImmediate();
+        break;
+      case 'autocompleteUp':
+        autocompleteMoveUp(this.autocompleteState);
+        this.renderImmediate();
+        break;
+      case 'autocompleteDown':
+        autocompleteMoveDown(this.autocompleteState);
+        this.renderImmediate();
+        break;
+      case 'autocompleteSelect': {
+        const selected = autocompleteGetSelected(this.autocompleteState);
+        if (selected) {
+          // Insert the selected item into the input text
+          const text = this.inputManager.getInputState().text;
+          const cursorPos = this.inputManager.getInputState().cursorPos;
+          // Find @ prefix and replace with selection
+          const lastAt = text.lastIndexOf('@', cursorPos - 1);
+          const suffix = text.slice(cursorPos);
+          const prefix = lastAt !== -1 ? text.slice(0, lastAt) : text;
+          const insertText = selected.type === 'file' || selected.type === 'agent' ? `@${selected.label} ` : selected.label;
+          // Close autocomplete
+          this.autocompleteState = createAutocompleteState();
+          this.renderEngine.clearScreen();
+          this.renderImmediate();
+        }
+        break;
+      }
     }
   }
 
-  /**
-   * Open the help panel via OverlayManager.
-   */
+  // ── Overlay lifecycle ──
+
   private openHelpPanel(): void {
     const commands = [
       { name: '/help', description: 'Show this help' },
@@ -983,14 +597,11 @@ export class App {
 
     const overlay = new HelpPanelOverlay(commands, this.keybindingManager.getAll());
     this.overlayManager.push(overlay);
-    this._enableRawInput();
-    this.clearScreen();
+    this.inputManager.enableRawInput();
+    this.renderEngine.clearScreen();
     this.renderImmediate();
   }
 
-  /**
-   * Open the command palette via OverlayManager.
-   */
   private openPalette(): void {
     this.paletteState.open = true;
     this.paletteState.query = '';
@@ -1006,14 +617,11 @@ export class App {
     );
 
     this.overlayManager.push(overlay);
-    this._enableRawInput();
-    this.clearScreen();
+    this.inputManager.enableRawInput();
+    this.renderEngine.clearScreen();
     this.renderImmediate();
   }
 
-  /**
-   * Open the model selector via OverlayManager.
-   */
   private openModelSelector(): void {
     const state = createModelSelectorState(this.provider, this.model);
     state.active = true;
@@ -1027,7 +635,7 @@ export class App {
         this.provider = providerId;
         this.model = modelId;
         this.overlayManager.remove('model-selector');
-        this._restoreReadline();
+        this.inputManager.restoreReadline();
         this.addMessage({
           id: `sys-${Date.now()}`,
           role: 'system',
@@ -1037,19 +645,18 @@ export class App {
             chalk.green.bold(`${providerId}/${modelId}`),
           timestamp: Date.now(),
         });
-        this.prompt();
+        this.inputManager.prompt();
       },
     );
 
     this.overlayManager.push(overlay);
-    this._enableRawInput();
-    this.clearScreen();
+    this.inputManager.enableRawInput();
+    this.renderEngine.clearScreen();
     this.renderImmediate();
   }
 
-  /**
-   * Execute a command selected from the palette.
-   */
+  // ── Palette command execution ──
+
   private executePaletteCommand(commandId: string): void {
     paletteClose(this.paletteState);
 
@@ -1063,7 +670,6 @@ export class App {
         break;
 
       case 'permission':
-        // Show permission modes as a system message
         this.addMessage({
           id: `sys-${Date.now()}`,
           role: 'system',
@@ -1085,8 +691,7 @@ export class App {
         this.messages = [];
         this.turnCount = 0;
         this.sidebarData.tools = [];
-        this.pendingDiffs = [];
-        this.activeDiffIndex = 0;
+        this.diffManager.clear();
         this.addMessage({
           id: `system-${Date.now()}`,
           role: 'system',
@@ -1124,51 +729,11 @@ export class App {
         break;
     }
 
-    this.clearScreen();
+    this.renderEngine.clearScreen();
     this.renderImmediate();
   }
 
-  /**
-   * Capture a diff from a tool result metadata.
-   * Called after FileWriteTool / FileEditTool complete.
-   */
-  private captureDiffFromToolResult(toolName: string, metadata: any): void {
-    if (!metadata) return;
-
-    if (!DIFF_TOOLS_SET.has(toolName)) return;
-
-    // FileWriteTool: metadata.oldContent / newContent
-    // FileEditTool: metadata.oldContent / newContent
-    const oldContent = metadata.oldContent ?? undefined;
-    const newContent = metadata.newContent ?? undefined;
-    const filePath = metadata.path || metadata.file_path;
-
-    if (!filePath || newContent === undefined) return;
-
-    // Check if we already have a diff for this file
-    const existingIdx = this.pendingDiffs.findIndex(
-      d => d.filePath === filePath && !d.accepted && !d.rejected
-    );
-
-    if (existingIdx >= 0) {
-      // Update existing diff
-      this.pendingDiffs[existingIdx] = {
-        filePath,
-        oldContent: oldContent ?? null,
-        newContent,
-        accepted: false,
-        rejected: false,
-      };
-    } else {
-      this.pendingDiffs.push({
-        filePath,
-        oldContent: oldContent ?? null,
-        newContent,
-        accepted: false,
-        rejected: false,
-      });
-    }
-  }
+  // ── Command handling ──
 
   private handleCommand(command: string): void {
     const parts = command.split(' ');
@@ -1186,13 +751,24 @@ export class App {
       case '/key': {
         const key = parts[1];
         if (key) {
-          this.queryEngine.setApiKey(key);
-          this.addMessage({
-            id: `sys-${Date.now()}`,
-            role: 'system',
-            content: chalk.green('API key updated.'),
-            timestamp: Date.now(),
-          });
+          const validationError = this.queryEngine.setApiKey(key);
+          if (validationError) {
+            this.notification = buildKeyInvalidNotification(validationError);
+            setTimeout(() => { this.notification = null; this.render(); }, 8000);
+            this.addMessage({
+              id: `sys-${Date.now()}`,
+              role: 'system',
+              content: chalk.red(`✗ Invalid API key: ${validationError}`),
+              timestamp: Date.now(),
+            });
+          } else {
+            this.addMessage({
+              id: `sys-${Date.now()}`,
+              role: 'system',
+              content: chalk.green('✓ API key updated.'),
+              timestamp: Date.now(),
+            });
+          }
         } else {
           this.addMessage({
             id: `sys-${Date.now()}`,
@@ -1208,8 +784,7 @@ export class App {
         this.messages = [];
         this.turnCount = 0;
         this.sidebarData.tools = [];
-        this.pendingDiffs = [];
-        this.activeDiffIndex = 0;
+        this.diffManager.clear();
         this.addMessage({
           id: `system-${Date.now()}`,
           role: 'system',
@@ -1225,7 +800,7 @@ export class App {
         } else {
           this.sidebarData.visible = !this.sidebarData.visible;
         }
-        this.clearScreen();
+        this.renderEngine.clearScreen();
         this.renderImmediate();
         break;
       }
@@ -1238,7 +813,7 @@ export class App {
             `Provider: ${this.provider}`,
             `Model: ${this.model}`,
             `Turns: ${this.turnCount}/${this.maxTurns}`,
-            `Pending diffs: ${this.pendingDiffs.filter(d => !d.accepted && !d.rejected).length}`,
+            `Pending diffs: ${this.diffManager.unprocessedCount()}`,
             `Sandbox: N/A`,
           ].join('\n'),
           timestamp: Date.now(),
@@ -1255,21 +830,20 @@ export class App {
         const arg = parts[1];
         if (arg !== undefined) {
           const num = parseInt(arg, 10);
-          if (!isNaN(num) && num >= 1 && num <= this.pendingDiffs.length) {
-            this.activeDiffIndex = num - 1;
+          if (!isNaN(num) && num >= 1) {
+            this.diffManager.setActiveDiffIndex(num - 1);
           }
         }
-        if (this.pendingDiffs.length > 0) {
-          this.addMessage({
-            id: `diff-${Date.now()}`,
-            role: 'system',
-            content: renderMultiFileDiff(
-              this.pendingDiffs,
-              this.activeDiffIndex,
-              { maxWidth: Math.min((process.stdout.columns || 80) - this.sidebarWidth - 6, 100), theme: this.theme }
-            ),
-            timestamp: Date.now(),
-          });
+        if (this.diffManager.unprocessedCount() > 0) {
+          const diffPreview = this.diffManager.renderDiffForDisplay(this.sidebarWidth, this.theme);
+          if (diffPreview) {
+            this.addMessage({
+              id: `diff-${Date.now()}`,
+              role: 'system',
+              content: diffPreview,
+              timestamp: Date.now(),
+            });
+          }
         } else {
           this.addMessage({
             id: `sys-${Date.now()}`,
@@ -1281,22 +855,18 @@ export class App {
         break;
       }
 
-      case '/accept':
-        if (this.pendingDiffs.length > 0) {
-          const diff = this.pendingDiffs[this.activeDiffIndex];
-          if (diff) {
-            diff.accepted = true;
-            this.addMessage({
-              id: `sys-${Date.now()}`,
-              role: 'system',
-              content: chalk.green(`✓ Accepted changes to ${diff.filePath}`),
-              timestamp: Date.now(),
-            });
-            // Advance to next unprocessed diff
-            this.advanceDiffIndex();
-          }
+      case '/accept': {
+        const result = this.diffManager.acceptCurrent();
+        if (result) {
+          this.addMessage({
+            id: `sys-${Date.now()}`,
+            role: 'system',
+            content: chalk.green(`✓ Accepted changes to ${result.filePath}`),
+            timestamp: Date.now(),
+          });
         }
         break;
+      }
 
       case '/palette':
         this.openPalette();
@@ -1309,7 +879,6 @@ export class App {
       case '/permission': {
         const mode = parts[1];
         if (mode && VALID_PERMISSION_MODES_SET.has(mode)) {
-          // Switch permission mode (runtime only, not persisted)
           this.addMessage({
             id: `sys-${Date.now()}`,
             role: 'system',
@@ -1336,22 +905,52 @@ export class App {
         break;
       }
 
-      case '/reject':
-        if (this.pendingDiffs.length > 0) {
-          const diff = this.pendingDiffs[this.activeDiffIndex];
-          if (diff) {
-            diff.rejected = true;
-            this.addMessage({
-              id: `sys-${Date.now()}`,
-              role: 'system',
-              content: chalk.red(`✗ Rejected changes to ${diff.filePath}`),
-              timestamp: Date.now(),
-            });
-            // Advance to next unprocessed diff
-            this.advanceDiffIndex();
-          }
+      case '/theme': {
+        const name = parts[1];
+        if (name && THEMES[name]) {
+          setTheme(name);
+          this.theme = getTheme(name);
+          this.addMessage({
+            id: `sys-${Date.now()}`,
+            role: 'system',
+            content: chalk.green(`Theme switched to: ${name}`),
+            timestamp: Date.now(),
+          });
+        } else if (name) {
+          this.addMessage({
+            id: `sys-${Date.now()}`,
+            role: 'system',
+            content: chalk.yellow(`Unknown theme: ${name}. Available: ${Object.keys(THEMES).join(', ')}`),
+            timestamp: Date.now(),
+          });
+        } else {
+          this.addMessage({
+            id: `sys-${Date.now()}`,
+            role: 'system',
+            content: [
+              chalk.cyan.bold('Available themes:'),
+              ...Object.keys(THEMES).map(t => `  ${t}`),
+              '',
+              chalk.dim('Usage: /theme <name>'),
+            ].join('\n'),
+            timestamp: Date.now(),
+          });
         }
         break;
+      }
+
+      case '/reject': {
+        const result = this.diffManager.rejectCurrent();
+        if (result) {
+          this.addMessage({
+            id: `sys-${Date.now()}`,
+            role: 'system',
+            content: chalk.red(`✗ Rejected changes to ${result.filePath}`),
+            timestamp: Date.now(),
+          });
+        }
+        break;
+      }
 
       default:
         this.addMessage({

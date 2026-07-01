@@ -214,7 +214,8 @@ describe('Steering — InputBox steer mode', () => {
     const { renderInputBox, createInputState } = await import('../../src/ui/components/InputBox.js');
 
     const steerState = { ...createInputState(), steerMode: true, text: 'redirect here' };
-    const result = renderInputBox(steerState);
+    const lines = renderInputBox(steerState);
+    const result = lines.join('');
     expect(result).toContain('steer>');
     expect(result).toContain('redirect here');
   });
@@ -223,7 +224,8 @@ describe('Steering — InputBox steer mode', () => {
     const { renderInputBox, createInputState } = await import('../../src/ui/components/InputBox.js');
 
     const state = { ...createInputState(), text: 'normal input' };
-    const result = renderInputBox(state);
+    const lines = renderInputBox(state);
+    const result = lines.join('');
     expect(result).toContain('kc>');
     expect(result).not.toContain('steer>');
   });
@@ -232,7 +234,8 @@ describe('Steering — InputBox steer mode', () => {
     const { renderInputBox } = await import('../../src/ui/components/InputBox.js');
 
     const state = { text: 'test', cursorPos: 0, historyIndex: -1 };
-    const result = renderInputBox(state);
+    const lines = renderInputBox(state);
+    const result = lines.join('');
     expect(result).toContain('kc>');
     expect(result).not.toContain('steer>');
   });

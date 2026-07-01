@@ -253,12 +253,102 @@ const draculaTheme: Theme = {
   resolve: null as unknown as () => ThemeTokens,
 };
 
+// Catppuccin Mocha theme
+const catppuccinTheme: Theme = {
+  name: 'catppuccin',
+  colors: {
+    primary: '#89b4fa',
+    secondary: '#cba6f7',
+    success: '#a6e3a1',
+    warning: '#f9e2af',
+    error: '#f38ba8',
+    muted: '#6c7086',
+    border: '#45475a',
+    background: '#1e1e2e',
+    highlight: '#89dceb',
+  },
+  syntax: {
+    keyword: '#cba6f7',
+    string: '#a6e3a1',
+    number: '#fab387',
+    comment: '#6c7086',
+    function: '#89b4fa',
+  },
+  diff: {
+    added: '#a6e3a1',
+    removed: '#f38ba8',
+    context: '#6c7086',
+  },
+  resolve: null as unknown as () => ThemeTokens,
+};
+
+// Gruvbox Dark theme
+const gruvboxTheme: Theme = {
+  name: 'gruvbox',
+  colors: {
+    primary: '#83a598',
+    secondary: '#d3869b',
+    success: '#b8bb26',
+    warning: '#fabd2f',
+    error: '#fb4934',
+    muted: '#928374',
+    border: '#504945',
+    background: '#282828',
+    highlight: '#fe8019',
+  },
+  syntax: {
+    keyword: '#fb4934',
+    string: '#b8bb26',
+    number: '#d3869b',
+    comment: '#928374',
+    function: '#83a598',
+  },
+  diff: {
+    added: '#b8bb26',
+    removed: '#fb4934',
+    context: '#928374',
+  },
+  resolve: null as unknown as () => ThemeTokens,
+};
+
+// Tokyonight theme (opencode default)
+const tokyonightTheme: Theme = {
+  name: 'tokyonight',
+  colors: {
+    primary: '#7aa2f7',
+    secondary: '#bb9af7',
+    success: '#9ece6a',
+    warning: '#e0af68',
+    error: '#f7768e',
+    muted: '#565f89',
+    border: '#3b4261',
+    background: '#1a1b26',
+    highlight: '#2ac3de',
+  },
+  syntax: {
+    keyword: '#bb9af7',
+    string: '#9ece6a',
+    number: '#ff9e64',
+    comment: '#565f89',
+    function: '#7aa2f7',
+  },
+  diff: {
+    added: '#9ece6a',
+    removed: '#f7768e',
+    context: '#565f89',
+  },
+  resolve: null as unknown as () => ThemeTokens,
+};
+
 // Patch resolve() onto each theme (deferred to avoid circular init)
 darkTheme.resolve = buildResolver(darkTheme);
 lightTheme.resolve = buildResolver(lightTheme);
 solarizedDarkTheme.resolve = buildResolver(solarizedDarkTheme);
 monokaiTheme.resolve = buildResolver(monokaiTheme);
 draculaTheme.resolve = buildResolver(draculaTheme);
+catppuccinTheme.resolve = buildResolver(catppuccinTheme);
+gruvboxTheme.resolve = buildResolver(gruvboxTheme);
+tokyonightTheme.resolve = buildResolver(tokyonightTheme);
 
 /**
  * All built-in themes.
@@ -269,13 +359,34 @@ export const THEMES: Record<string, Theme> = {
   'solarized-dark': solarizedDarkTheme,
   monokai: monokaiTheme,
   dracula: draculaTheme,
+  catppuccin: catppuccinTheme,
+  gruvbox: gruvboxTheme,
+  tokyonight: tokyonightTheme,
 };
+
+let _currentTheme: Theme = darkTheme;
 
 /**
  * Get a theme by name, falling back to 'dark'.
  */
 export function getTheme(name: string): Theme {
-  return THEMES[name] ?? THEMES['dark'];
+  return THEMES[name] ?? THEMES['dark']!;
+}
+
+/**
+ * Switch to a theme by name at runtime.
+ */
+export function setTheme(name: string): Theme {
+  const theme = THEMES[name];
+  if (theme) _currentTheme = theme;
+  return _currentTheme;
+}
+
+/**
+ * Get the currently active runtime theme.
+ */
+export function getCurrentTheme(): Theme {
+  return _currentTheme;
 }
 
 /**

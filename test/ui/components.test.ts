@@ -78,7 +78,9 @@ describe('StatusBar', () => {
         sessionStartTime: Date.now() - 60000,
       }, theme);
       expect(output).toContain('anthropic/claude-sonnet-4-20250514');
-      expect(output).toContain('3/50 turns');
+      // New format: turn count without "turns" suffix, separated by progress bar
+      expect(output).toContain('3/50');
+      expect(output).toContain('idle'); // mode indicator
     });
 
     it(`returns empty when no data with ${themeName} theme`, () => {
@@ -95,9 +97,11 @@ describe('InputBox', () => {
       const theme = getTheme(themeName);
       const state = createInputState();
       state.text = 'hello world';
-      const output = renderInputBox(state, 'kc>', theme);
-      expect(output).toContain('kc>');
-      expect(output).toContain('hello world');
+      const lines = renderInputBox(state, 'kc>', theme);
+      expect(Array.isArray(lines)).toBe(true);
+      const joined = lines.join('');
+      expect(joined).toContain('kc>');
+      expect(joined).toContain('hello world');
     });
 
     it(`renders steer mode with ${themeName} theme`, () => {
@@ -105,8 +109,9 @@ describe('InputBox', () => {
       const state = createInputState();
       state.steerMode = true;
       state.text = 'adjust output';
-      const output = renderInputBox(state, 'kc>', theme);
-      expect(output).toContain('steer>');
+      const lines = renderInputBox(state, 'kc>', theme);
+      const joined = lines.join('');
+      expect(joined).toContain('steer>');
     });
   }
 });

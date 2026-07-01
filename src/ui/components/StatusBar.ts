@@ -8,6 +8,8 @@ interface StatusBarData {
   maxTurns?: number;
   tokensUsed?: number;
   sessionStartTime?: number;
+  isStreaming?: boolean;
+  mode?: 'idle' | 'streaming' | 'overlay' | 'steer';
 }
 
 function formatTokenCount(count: number): string {
@@ -33,38 +35,72 @@ function renderProgressBar(percent: number, width: number = 10, theme?: Theme): 
   return fillColor('█'.repeat(filled)) + emptyColor('░'.repeat(empty));
 }
 
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+let spinnerFrame = 0;
+
 export function renderStatusBar(data: StatusBarData, theme?: Theme): string {
   const tokens = theme?.resolve();
-  const parts: string[] = [];
+  const leftParts: string[] = [];
+  const rightParts: string[] = [];
 
+  // Mode indicator
+  const mode = data.isStreaming ? 'streaming' : (data.mode || 'idle');
+  const modeLabels: Record<string, string> = {
+    idle: chalk.gray('○ idle'),
+    streaming: chalk.yellow('◉ streaming'),
+    overlay: chalk.magenta('◇ overlay'),
+    steer: chalk.blue('◆ steer'),
+  };
+  leftParts.push(modeLabels[mode] || modeLabels.idle);
+
+  // Streaming spinner
+  if (data.isStreaming) {
+    spinnerFrame = (spinnerFrame + 1) % SPINNER_FRAMES.length;
+    const spinnerColor = tokens ? tokens['status.tokens'] : chalk.yellow;
+    leftParts.push(spinnerColor(`${SPINNER_FRAMES[spinnerFrame]} Generating...`));
+  }
+
+  // Track whether we have any actual data (beyond mode indicator)
+  let hasData = false;
+
+  // Provider/Model
   if (data.provider && data.model) {
     const modelColor = tokens ? tokens['status.model'] : chalk.cyan;
-    parts.push(modelColor(`${data.provider}/${data.model}`));
+    leftParts.push(modelColor(`${data.provider}/${data.model}`));
+    hasData = true;
   }
 
+  // Turn progress
   if (data.turnCount !== undefined && data.maxTurns !== undefined) {
     const pct = Math.round((data.turnCount / data.maxTurns) * 100);
-    parts.push(`${renderProgressBar(pct, 10, theme)} ${data.turnCount}/${data.maxTurns} turns`);
+    leftParts.push(`${renderProgressBar(pct, 10, theme)} ${data.turnCount}/${data.maxTurns}`);
+    hasData = true;
   }
 
+  // Right-aligned: tokens
   if (data.tokensUsed !== undefined) {
     const tokenColor = tokens ? tokens['status.tokens'] : chalk.gray;
-    parts.push(tokenColor(`${formatTokenCount(data.tokensUsed)} tokens`));
+    rightParts.push(tokenColor(`${formatTokenCount(data.tokensUsed)} tokens`));
+    hasData = true;
   }
 
+  // Right-aligned: duration
   if (data.sessionStartTime) {
     const durationColor = tokens ? tokens['status.duration'] : chalk.gray;
-    parts.push(durationColor(formatDuration(Date.now() - data.sessionStartTime)));
+    rightParts.push(durationColor(formatDuration(Date.now() - data.sessionStartTime)));
+    hasData = true;
   }
 
-  if (parts.length === 0) return '';
+  if (!hasData) return '';
 
   const width = process.stdout.columns || 80;
   const separator = chalk.gray(' | ');
-  const content = parts.join(separator);
-  const plainLen = content.replace(/\x1B\[[0-9;]*m/g, '').length;
-  const padding = Math.max(0, width - plainLen - 4);
+  const leftContent = leftParts.join(separator);
+  const rightContent = rightParts.join(separator);
+  const leftPlainLen = leftContent.replace(/\x1B\[[0-9;]*m/g, '').length;
+  const rightPlainLen = rightContent.replace(/\x1B\[[0-9;]*m/g, '').length;
+  const middlePadding = Math.max(1, width - leftPlainLen - rightPlainLen - 6);
 
   return chalk.gray('─'.repeat(width)) + '\n' +
-    chalk.gray('│') + ' ' + content + ' '.repeat(padding) + ' ' + chalk.gray('│');
+    chalk.gray('│') + ' ' + leftContent + ' '.repeat(middlePadding) + rightContent + ' ' + chalk.gray('│');
 }

@@ -21,6 +21,7 @@ import { CachePrefixService, buildCacheStrategy } from '../services/cachePrefix'
 import { estimateTaskComplexity } from '../api/prompts/task-prompts';
 import { autoStageFile, autoCommitAll } from '../utils/git';
 import { KCError } from '../utils/errors';
+import { validateApiKey } from '../utils/api-key';
 import { spawn } from 'child_process';
 
 // Sub-modules
@@ -213,11 +214,20 @@ export class QueryEngine {
     });
   }
 
+  /** Get the current API key (for startup validation). */
+  getApiKey(): string {
+    return this.config.apiKey || '';
+  }
+
   /**
    * Update the API key at runtime (e.g., from /key command).
-   * Recreates the API client with the new key.
+   * Validates the key format and recreates the API client on success.
+   * Returns an error message if validation fails, or null on success.
    */
-  setApiKey(apiKey: string): void {
+  setApiKey(apiKey: string): string | null {
+    const validation = validateApiKey(apiKey, this.config.provider);
+    if (validation !== null) return validation;
+
     this.config.apiKey = apiKey;
     this.apiClient = createAPIClient({
       provider: this.config.provider,
@@ -225,6 +235,7 @@ export class QueryEngine {
       baseUrl: this.config.apiBaseUrl,
       model: this.config.model,
     });
+    return null;
   }
 
   /**

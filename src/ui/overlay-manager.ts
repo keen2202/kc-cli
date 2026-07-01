@@ -1,10 +1,4 @@
-/**
- * OverlayManager - Unified overlay system.
- *
- * Manages a stack of overlays with zIndex ordering.
- * Keypress dispatches top-down; first overlay that returns true consumes the event.
- */
-
+import chalk from 'chalk';
 import type { KeypressEvent } from './keypress';
 import type { Theme } from './theme';
 
@@ -23,14 +17,16 @@ export interface Overlay {
   onClose?(): void;
 }
 
+function stripAnsi(str: string): string {
+  return str.replace(/\x1B\[[0-9;]*m/g, '');
+}
+
 export class OverlayManager {
   private stack: Overlay[] = [];
 
   push(overlay: Overlay): void {
-    // Remove existing overlay with same id
     this.stack = this.stack.filter(o => o.id !== overlay.id);
     this.stack.push(overlay);
-    // Sort by zIndex
     this.stack.sort((a, b) => a.zIndex - b.zIndex);
   }
 
@@ -65,9 +61,6 @@ export class OverlayManager {
     return this.stack[this.stack.length - 1];
   }
 
-  /**
-   * Dispatch keypress top-down. First overlay returning true consumes the event.
-   */
   handleKeypress(key: KeypressEvent): boolean {
     for (let i = this.stack.length - 1; i >= 0; i--) {
       const overlay = this.stack[i]!;
@@ -79,17 +72,42 @@ export class OverlayManager {
   }
 
   /**
-   * Render all overlays in zIndex order, returning the composed output.
+   * Render all overlays centered with a dimmed backdrop.
    */
   render(width: number, height: number, theme: Theme): string {
     if (this.stack.length === 0) return '';
 
-    const results: string[] = [];
-    for (const overlay of this.stack) {
-      const result = overlay.render(width, height, theme);
-      results.push(result.lines.join('\n'));
+    const topOverlay = this.stack[this.stack.length - 1]!;
+    const result = topOverlay.render(width, height, theme);
+    const lines = result.lines;
+
+    if (lines.length === 0) return '';
+
+    // Calculate overlay dimensions
+    const overlayHeight = lines.length;
+    const overlayWidth = Math.max(1, ...lines.map(l => stripAnsi(l).length));
+    const startRow = Math.max(0, Math.floor((height - overlayHeight) / 2) - 1);
+    const startCol = Math.max(0, Math.floor((width - overlayWidth) / 2));
+
+    // Build backdrop: dimmed screen using muted color
+    const muted = theme ? chalk.hex(theme.colors.muted) : chalk.gray;
+    const backdropChar = muted('░');
+
+    // Compose: backdrop + centered overlay
+    const output: string[] = [];
+    for (let row = 0; row < height; row++) {
+      const overlayIdx = row - startRow;
+      if (overlayIdx >= 0 && overlayIdx < lines.length) {
+        const overlayLine = lines[overlayIdx]!;
+        const plainLen = stripAnsi(overlayLine).length;
+        const leftPad = ' '.repeat(Math.max(0, startCol + Math.floor((overlayWidth - plainLen) / 2)));
+        const rightPad = ' '.repeat(Math.max(0, width - startCol - overlayWidth));
+        output.push(backdropChar.repeat(startCol) + leftPad + overlayLine + rightPad + backdropChar.repeat(Math.max(0, width - startCol - leftPad.length - plainLen - rightPad.length)));
+      } else {
+        output.push(backdropChar.repeat(width));
+      }
     }
 
-    return results.join('\n');
+    return output.join('\n');
   }
 }

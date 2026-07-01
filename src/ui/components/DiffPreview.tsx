@@ -194,4 +194,3 @@ const DiffPreview: React.FC<DiffPreviewProps> = ({
 };
 
 export { DiffPreview as default, DiffLineRow, FileTab };
-export type { FileDiff };

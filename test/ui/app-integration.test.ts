@@ -9,13 +9,16 @@ import { MouseHandler } from '../../src/ui/mouse';
 
 describe('UI Full Integration', () => {
   describe('Theme System', () => {
-    it('should have 5 built-in themes', () => {
-      expect(Object.keys(THEMES)).toHaveLength(5);
+    it('should have 8 built-in themes', () => {
+      expect(Object.keys(THEMES)).toHaveLength(8);
       expect(THEMES['dark']).toBeDefined();
       expect(THEMES['light']).toBeDefined();
       expect(THEMES['solarized-dark']).toBeDefined();
       expect(THEMES['monokai']).toBeDefined();
       expect(THEMES['dracula']).toBeDefined();
+      expect(THEMES['catppuccin']).toBeDefined();
+      expect(THEMES['gruvbox']).toBeDefined();
+      expect(THEMES['tokyonight']).toBeDefined();
     });
 
     it('should get theme by name', () => {

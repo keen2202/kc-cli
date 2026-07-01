@@ -94,7 +94,7 @@ describe('OverlayManager', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it('should render all overlays', () => {
+  it('should render topmost overlay centered with backdrop', () => {
     const mgr = new OverlayManager();
     const theme = getTheme('dark');
 
@@ -102,8 +102,13 @@ describe('OverlayManager', () => {
     mgr.push(createMockOverlay('b', 2));
 
     const output = mgr.render(80, 24, theme);
-    expect(output).toContain('overlay:a');
+    // Only the topmost overlay (highest zIndex) is rendered
     expect(output).toContain('overlay:b');
+    // Output should be full terminal height (24 rows) with backdrop
+    const lines = output.split('\n');
+    expect(lines.length).toBe(24);
+    // Should contain backdrop character
+    expect(output).toContain('░');
   });
 
   it('should return empty string when no overlays', () => {

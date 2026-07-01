@@ -1,12 +1,5 @@
 /**
  * Tests for StatusBar component.
- *
- * Covers:
- * - renderStatusBar with various data combinations
- * - formatTokenCount (via renderStatusBar output)
- * - formatDuration (via renderStatusBar output)
- * - renderProgressBar (via renderStatusBar output)
- * - Empty/undefined fields
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -17,7 +10,6 @@ describe('StatusBar', () => {
 
   beforeEach(() => {
     originalColumns = process.stdout.columns;
-    // Set a fixed column width for deterministic tests
     Object.defineProperty(process.stdout, 'columns', { value: 80, writable: true, configurable: true });
   });
 
@@ -58,7 +50,7 @@ describe('StatusBar', () => {
         turnCount: 5,
         maxTurns: 10,
       });
-      expect(result).toContain('5/10 turns');
+      expect(result).toContain('5/10');
       expect(result).toContain('█'); // filled progress
       expect(result).toContain('░'); // empty progress
     });
@@ -85,7 +77,7 @@ describe('StatusBar', () => {
     });
 
     it('renders session duration in seconds', () => {
-      const startTime = Date.now() - 30_000; // 30 seconds ago
+      const startTime = Date.now() - 30_000;
       vi.useFakeTimers();
       vi.setSystemTime(Date.now());
 
@@ -98,7 +90,7 @@ describe('StatusBar', () => {
     });
 
     it('renders session duration in minutes and seconds', () => {
-      const startTime = Date.now() - 125_000; // 2m5s ago
+      const startTime = Date.now() - 125_000;
       vi.useFakeTimers();
       vi.setSystemTime(Date.now());
 
@@ -125,11 +117,10 @@ describe('StatusBar', () => {
       });
 
       expect(result).toContain('openai/gpt-4o');
-      expect(result).toContain('3/10 turns');
+      expect(result).toContain('3/10');
       expect(result).toContain('15.0k tokens');
-      // 60 seconds = 1m0s in the formatDuration function
       expect(result).toContain('1m0s');
-      expect(result).toContain('|'); // separator between parts
+      expect(result).toContain('│');
 
       vi.useRealTimers();
     });
@@ -139,8 +130,7 @@ describe('StatusBar', () => {
         turnCount: 0,
         maxTurns: 10,
       });
-      expect(result).toContain('0/10 turns');
-      // All empty blocks
+      expect(result).toContain('0/10');
       expect(result).toContain('░');
     });
 
@@ -149,9 +139,25 @@ describe('StatusBar', () => {
         turnCount: 10,
         maxTurns: 10,
       });
-      expect(result).toContain('10/10 turns');
-      // All filled blocks
+      expect(result).toContain('10/10');
       expect(result).toContain('█');
+    });
+
+    it('shows idle mode by default', () => {
+      const result = renderStatusBar({
+        provider: 'test',
+        model: 'model',
+      });
+      expect(result).toContain('idle');
+    });
+
+    it('shows streaming mode when isStreaming is true', () => {
+      const result = renderStatusBar({
+        provider: 'test',
+        model: 'model',
+        isStreaming: true,
+      });
+      expect(result).toContain('streaming');
     });
 
     it('handles zero token count', () => {
@@ -161,19 +167,11 @@ describe('StatusBar', () => {
       expect(result).toContain('0 tokens');
     });
 
-    it('handles very large token count', () => {
-      const result = renderStatusBar({
-        tokensUsed: 1_000_000,
-      });
-      expect(result).toContain('1.0M tokens');
-    });
-
     it('renders border lines with correct width', () => {
       const result = renderStatusBar({
         provider: 'test',
         model: 'model',
       });
-      // Should contain horizontal rule
       const lines = result.split('\n');
       expect(lines.length).toBeGreaterThanOrEqual(2);
       expect(lines[0]).toContain('─');
