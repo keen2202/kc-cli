@@ -5,7 +5,7 @@
 import type { ChatMessage } from '../../query/protocol';
 import type { CompactionEngine, CompactionContext, CompactionEngineResult } from './types';
 import type { BaseApiClient } from '../../api/BaseApiClient';
-import { ok, err } from '../../utils/result';
+import { ok, err } from './types';
 import { estimateMessageTokensArray, calculateTokensSaved } from '../../utils/tokenEstimation';
 import { classifyApiError, getRetryDelay } from '../error-classifier';
 import { logger } from '../logger';

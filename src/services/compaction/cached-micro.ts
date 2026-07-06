@@ -4,7 +4,7 @@
 
 import type { ChatMessage } from '../../query/protocol';
 import type { CompactionEngine, CompactionContext, CompactionEngineResult } from './types';
-import { ok, err } from '../../utils/result';
+import { ok, err } from './types';
 import { estimateMessageTokensArray } from '../../utils/tokenEstimation';
 
 /** Message to replace cleared tool results with */

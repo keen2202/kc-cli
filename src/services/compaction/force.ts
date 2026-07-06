@@ -4,7 +4,7 @@
 
 import type { ChatMessage } from '../../query/protocol';
 import type { CompactionEngine, CompactionContext, CompactionEngineResult } from './types';
-import { ok, err } from '../../utils/result';
+import { ok, err } from './types';
 import { estimateMessageTokens, estimateMessageTokensArray } from '../../utils/tokenEstimation';
 
 /** Absolute token limit for force truncation */

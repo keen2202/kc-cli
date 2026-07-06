@@ -2,7 +2,6 @@
 // Defines the interface for pluggable compaction strategies.
 
 import type { ChatMessage } from '../../query/protocol';
-import type { Result } from '../../utils/result';
 
 /**
  * Context passed to each compaction engine.
@@ -38,9 +37,40 @@ export interface CompactionEngineError {
 }
 
 /**
- * Type alias for compaction operation results.
+ * Success variant carrying a compaction result.
  */
-export type CompactionEngineResult = Result<CompactionResult, CompactionEngineError>;
+export interface CompactionOk {
+  readonly ok: true;
+  readonly value: CompactionResult;
+}
+
+/**
+ * Error variant carrying a compaction engine error.
+ */
+export interface CompactionErr {
+  readonly ok: false;
+  readonly error: CompactionEngineError;
+}
+
+/**
+ * Discriminated union representing either success or failure of a compaction operation.
+ * (Previously aliased from Result<T,E>; now self-contained per A4 dead-code removal.)
+ */
+export type CompactionEngineResult = CompactionOk | CompactionErr;
+
+/**
+ * Create a success result wrapping the given compaction result.
+ */
+export function ok(value: CompactionResult): CompactionOk {
+  return { ok: true, value };
+}
+
+/**
+ * Create an error result wrapping the given compaction engine error.
+ */
+export function err(error: CompactionEngineError): CompactionErr {
+  return { ok: false, error };
+}
 
 /**
  * Interface for a pluggable compaction engine.
