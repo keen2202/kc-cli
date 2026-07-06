@@ -61,12 +61,26 @@ function getDb(databasePath: string, readonly: boolean, timeoutMs: number = 30_0
 }
 
 /**
+ * Strip SQL comments and string literals before danger scanning to avoid
+ * false positives on keywords appearing inside literals or comments
+ * (e.g. `SELECT '; DROP TABLE x'` or `SELECT * FROM log WHERE msg = 'ATTACH failed'`).
+ * Replaces string content with empty quotes so detection never fires on literals.
+ */
+function stripSqlNoise(query: string): string {
+  return query
+    .replace(/--[^\n]*/g, ' ')                 // line comments
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')         // block comments
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''")       // single-quoted literals
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""');       // double-quoted literals
+}
+
+/**
  * Detect dangerous SQL patterns that bypass single-statement readonly protections.
  * Returns a reason string if dangerous, null if safe.
  * (S1 hardening: AC-S1.2 — block ATTACH / PRAGMA writable_schema / multi-statement)
  */
 export function rejectDangerousSql(query: string): string | null {
-  const norm = query.trim();
+  const norm = stripSqlNoise(query).trim();
   // Multi-statement: semicolon followed by another SQL keyword (case-insensitive)
   if (/;[\s\S]*(select|insert|update|delete|drop|attach|pragma|create|alter|truncate)/i.test(norm)) {
     return 'multi-statement';

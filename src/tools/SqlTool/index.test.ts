@@ -55,6 +55,12 @@ describe('[S1] rejectDangerousSql — AC-S1.2', () => {
   it('allows safe PRAGMA (not writable_schema)', () => {
     expect(rejectDangerousSql('PRAGMA journal_mode')).toBeNull();
   });
+
+  it('does not false-positive on keywords inside string literals', () => {
+    expect(rejectDangerousSql("SELECT '; DROP TABLE x'")).toBeNull();
+    expect(rejectDangerousSql("SELECT * FROM log WHERE msg = 'ATTACH failed'")).toBeNull();
+    expect(rejectDangerousSql("SELECT '-- ATTACH DATABASE'")).toBeNull();
+  });
 });
 
 describe('[S1] resolveAllowed — AC-S1.1', () => {
