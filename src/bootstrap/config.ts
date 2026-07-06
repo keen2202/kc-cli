@@ -39,6 +39,14 @@ export const ConfigSchema = z.object({
     readonly: z.boolean().optional(),
   })).default({}),
 
+  // SQL Tool Security Configuration (S1 hardening)
+  sql: z.object({
+    /** Whitelist of allowed database file paths. Ad-hoc paths outside this list are rejected. */
+    allowedPaths: z.array(z.string()).default([]),
+    /** When false (default), write queries (INSERT/UPDATE/DELETE/CREATE/DROP/ALTER) are rejected. */
+    allowWrite: z.boolean().default(false),
+  }).default({}),
+
   // Web Configuration
   searchProvider: z.enum(['tavily', 'google', 'bing', 'brave']).default('tavily'),
   searchApiKey: z.string().optional(),

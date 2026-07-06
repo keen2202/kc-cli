@@ -43,19 +43,57 @@ interface SqliteStatement {
   get(...params: unknown[]): Record<string, unknown> | undefined;
 }
 
-function getDb(databasePath: string): SqliteDatabase {
-  const cached = dbCache.get(databasePath);
+function getDb(databasePath: string, readonly: boolean, timeoutMs: number = 30_000): SqliteDatabase {
+  const cacheKey = `${databasePath}:${readonly}`;
+  const cached = dbCache.get(cacheKey);
   if (cached) return cached;
 
   try {
     const Database = require('better-sqlite3');
-    const db = new Database(databasePath, { readonly: false });
-    db.pragma('journal_mode = WAL');
-    dbCache.set(databasePath, db);
+    const db = new Database(databasePath, { readonly, timeout: timeoutMs });
+    // WAL mode only for writable connections
+    if (!readonly) db.pragma('journal_mode = WAL');
+    dbCache.set(cacheKey, db);
     return db;
   } catch (error) {
     throw new Error(`Failed to open database "${databasePath}": ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+/**
+ * Detect dangerous SQL patterns that bypass single-statement readonly protections.
+ * Returns a reason string if dangerous, null if safe.
+ * (S1 hardening: AC-S1.2 — block ATTACH / PRAGMA writable_schema / multi-statement)
+ */
+export function rejectDangerousSql(query: string): string | null {
+  const norm = query.trim();
+  // Multi-statement: semicolon followed by another SQL keyword (case-insensitive)
+  if (/;[\s\S]*(select|insert|update|delete|drop|attach|pragma|create|alter|truncate)/i.test(norm)) {
+    return 'multi-statement';
+  }
+  if (/\battach\b/i.test(norm)) return 'ATTACH';
+  if (/\bpragma\s+writable_schema\b/i.test(norm)) return 'PRAGMA writable_schema';
+  return null;
+}
+
+/**
+ * Resolve an ad-hoc database path against the sql.allowedPaths whitelist.
+ * Returns { path, readonly } if allowed, null if rejected.
+ * (S1 hardening: AC-S1.1 — reject :memory: and non-whitelisted paths)
+ */
+export function resolveAllowed(
+  state: ReturnType<typeof getState>,
+  database: string,
+  cwd: string,
+): { path: string; readonly: boolean } | null {
+  const sqlConfig = state.config?.sql;
+  if (!sqlConfig?.allowedPaths?.length) return null; // No whitelist → deny all ad-hoc
+  const allowed = sqlConfig.allowedPaths;
+  // :memory: bypasses filesystem isolation — always reject for ad-hoc use
+  if (database === ':memory:') return null;
+  const target = database.startsWith('/') ? database : `${cwd}/${database}`;
+  if (!allowed.some(p => target.startsWith(p))) return null;
+  return { path: target, readonly: sqlConfig.allowWrite !== true };
 }
 
 function isReadOnlyQuery(query: string): boolean {
@@ -98,14 +136,22 @@ export const tool = buildTool<SqlInput, string>({
 
   call: async (input, context): Promise<ToolResultType<string>> => {
     try {
-      // Resolve named connection from config
-      let dbPath: string;
-      let enforceReadonly = false;
-
       const state = getState();
+
+      // S1: Block dangerous SQL patterns (ATTACH / PRAGMA writable_schema / multi-statement)
+      const danger = rejectDangerousSql(input.query);
+      if (danger) {
+        return toolError(`Rejected dangerous SQL (${danger})`);
+      }
+
+      // Resolve database path and readonly flag
+      let dbPath: string;
+      let enforceReadonly: boolean;
+
       const namedConn = state.config?.databaseConnections?.[input.database];
 
       if (namedConn) {
+        // Named connection from config — explicitly configured, trusted path
         if (namedConn.type !== 'sqlite') {
           return toolError(`Database type "${namedConn.type}" is not yet supported. Only SQLite is currently available.`);
         }
@@ -115,19 +161,23 @@ export const tool = buildTool<SqlInput, string>({
           dbPath = `${context.cwd}/${dbPath}`;
         }
       } else {
-        dbPath = input.database === ':memory:'
-          ? ':memory:'
-          : input.database.startsWith('/')
-            ? input.database
-            : `${context.cwd}/${input.database}`;
+        // Ad-hoc path — must be in sql.allowedPaths whitelist (S1: AC-S1.1)
+        const allowed = resolveAllowed(state, input.database, context.cwd);
+        if (!allowed) {
+          return toolError('SqlTool: database not in sql.allowedPaths whitelist (or :memory: rejected). Configure sql.allowedPaths to allow specific database files.');
+        }
+        dbPath = allowed.path;
+        enforceReadonly = allowed.readonly;
       }
 
-      // Enforce read-only mode for connections marked as readonly
+      // S1: Enforce readonly — write queries require sql.allowWrite=true (AC-S1.3)
       if (enforceReadonly && !isReadOnlyQuery(input.query)) {
-        return toolError(`Connection "${input.database}" is configured as read-only. Only SELECT queries are allowed.`);
+        return toolError(`Write queries require sql.allowWrite=true or connection readonly=false. Blocked query: ${input.query.slice(0, 60)}...`);
       }
 
-      const db = getDb(dbPath);
+      // S1: Pass timeout to better-sqlite3 for busy_timeout enforcement (AC-S1.4)
+      const timeoutMs = (input.timeout ?? 30) * 1000;
+      const db = getDb(dbPath, enforceReadonly, timeoutMs);
 
       const queryUpper = input.query.trim().toUpperCase();
 
