@@ -116,21 +116,23 @@ export class SandboxManager {
     const rawAvailable = this.backend.isAvailable();
     this._isAvailable = rawAvailable && this.backend.name !== 'noop';
 
-    // If no real sandbox backend is available, check failIfNoSandbox before downgrading
+    // If no real sandbox backend is available, decide between fail and warn
     if (!this._isAvailable) {
-      // Don't throw if user explicitly chose noop — they intentionally opted out
-      if (this.options.failIfNoSandbox && this.options.backend !== 'noop') {
+      // Explicit noop means the user intentionally opted out — silent no-op, no warning
+      if (this.options.backend === 'noop') {
+        // already a NoopSandbox; nothing further to do
+      } else if (this.options.failIfNoSandbox) {
+        // Hard fail instead of silently running commands on the host (S2: AC-S2.2)
         throw new Error(
           `Sandbox is required but no sandbox backend is available. ` +
             `Requested backend: "${this.options.backend}". ` +
             'Install bubblewrap (bwrap), seccomp, or docker, or disable failIfNoSandbox.'
         );
-      }
-      // If the resolved backend is already noop (requested or ultimate fallback), don't double-warn
-      if (this.backend.name !== 'noop') {
+      } else {
+        // Default-deny posture: warn loudly about missing isolation before degrading (S2: AC-S2.1)
         logger.services.warn(
-          `[sandbox] Requested backend "${this.options.backend}" is not available, ` +
-            `falling back to noop — commands will run without isolation.`
+          `[sandbox] ⚠ NO ISOLATION — requested backend "${this.options.backend}" unavailable, ` +
+            `falling back to noop; commands will run on the host WITHOUT isolation.`
         );
       }
       this.backend = new NoopSandbox();

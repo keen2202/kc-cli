@@ -5,7 +5,7 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 ## v3.2 Highlights
 
 - 🧬 **Autogenesis Protocol (AGP)**: Self-evolving multi-agent system with SEPL pipeline (reflect→select→improve→evaluate→commit), version management, and audit logging
-- 🔒 **Sandbox Security**: All shell commands run in isolated sandboxes (Docker/Bubblewrap/seccomp) with network isolation, resource limits, and escape detection
+- 🔒 **Sandbox Security**: Shell commands run in isolated sandboxes (Docker/Bubblewrap/seccomp) when a backend is available, with network isolation, resource limits, and escape detection. If no backend is available, a loud `NO ISOLATION` warning is emitted and commands run on the host; set `sandbox.failIfNoSandbox` to hard-fail instead.
 - 🎨 **Redesigned UI**: Sidebar with file tree (LSP markers), diff preview, command palette, model selector, theme system, mouse support, multi-panel layout
 - 🔌 **LSP Integration**: Code completions, diagnostics, go-to-definition, find references, rename, quick fixes for 9 languages
 - 🧠 **Smart Model Adaptation**: Provider-specific prompts, dynamic parameter tuning, tiktoken-based token estimation
