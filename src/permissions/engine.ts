@@ -13,6 +13,7 @@ import { parseRuleString } from './rules';
 import { splitSubCommands } from './commandNormalizer';
 import { classifier } from './classifier';
 import { getCacheManager } from '../services/cache';
+import { logger } from '../services/logger';
 
 export interface PermissionEngineConfig {
   alwaysDenyRules?: string[];
@@ -91,6 +92,17 @@ export async function hasPermissionsToUseTool(
     bypassPermissions: state.permissionMode === 'bypassPermissions',
   };
 
+  // S3: bypassPermissions requires explicit KC_ALLOW_BYPASS=1 opt-in.
+  // Without the env flag, bypass is denied (not silently allowed).
+  const bypassArmed = context.bypassPermissions && process.env.KC_ALLOW_BYPASS === '1';
+  if (context.bypassPermissions && !bypassArmed) {
+    logger.permissions.warn('[perm] bypassPermissions requested but KC_ALLOW_BYPASS != 1 — denying');
+    return {
+      behavior: 'deny',
+      message: 'bypass requires KC_ALLOW_BYPASS=1',
+    };
+  }
+
   // Step 1: Check global deny rules
   const denyMatch = matchRules(context.alwaysDenyRules, toolName, options.content);
   if (denyMatch) {
@@ -112,12 +124,13 @@ export async function hasPermissionsToUseTool(
     }
     if (toolResult.behavior === 'ask' && toolResult.decisionReason?.type !== 'passthrough') {
       // Tool asks for permission, but continue to check if bypass applies
-      if (context.bypassPermissions) {
+      if (bypassArmed) {
         // In bypass mode, allow unless it's a security-critical operation
         const securityCheck = checkSecurityCritical(toolName, input);
         if (securityCheck) {
           return securityCheck;
         }
+        logger.permissions.info('[perm] bypass engaged', { ts: Date.now(), session: state.sessionId });
         return {
           behavior: 'allow',
           updatedInput: input,
@@ -156,7 +169,8 @@ export async function hasPermissionsToUseTool(
   if (securityResult) return securityResult;
 
   // Step 4: Bypass permission mode
-  if (context.bypassPermissions) {
+  if (bypassArmed) {
+    logger.permissions.info('[perm] bypass engaged', { ts: Date.now(), session: state.sessionId });
     return {
       behavior: 'allow',
       updatedInput: input,

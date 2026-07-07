@@ -1,11 +1,16 @@
 // Tests for permission engine - 6-step decision flow
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { hasPermissionsToUseTool } from '../../src/permissions/engine';
 import { initializeState } from '../../src/bootstrap/state';
+import { logger } from '../../src/services/logger';
 
 beforeEach(() => {
   initializeState();
+});
+
+afterEach(() => {
+  delete process.env.KC_ALLOW_BYPASS;
 });
 
 describe('PermissionEngine', () => {
@@ -88,6 +93,10 @@ describe('PermissionEngine', () => {
   });
 
   describe('Step 4: bypass permission mode', () => {
+    beforeEach(() => {
+      process.env.KC_ALLOW_BYPASS = '1';
+    });
+
     it('should allow non-security-critical tools in bypass mode', async () => {
       initializeState({ permissionMode: 'bypassPermissions' });
       const result = await hasPermissionsToUseTool('FileRead', { path: '/project/src/index.ts' });
@@ -98,6 +107,57 @@ describe('PermissionEngine', () => {
       initializeState({ permissionMode: 'bypassPermissions' });
       const result = await hasPermissionsToUseTool('FileRead', { path: '/etc/passwd' });
       expect(result.behavior).toBe('ask');
+    });
+  });
+
+  describe('[S3] bypassPermissions requires KC_ALLOW_BYPASS=1 + audit', () => {
+    it('[S3] bypass without KC_ALLOW_BYPASS is denied, not allowed', async () => {
+      delete process.env.KC_ALLOW_BYPASS;
+      initializeState({ permissionMode: 'bypassPermissions' });
+      const r = await hasPermissionsToUseTool('Bash', { command: 'rm -rf /' }, {});
+      // Bypass not armed → must NOT be allowed; security path still runs.
+      expect(r.behavior).not.toBe('allow');
+      expect(r.behavior).toBe('deny');
+      expect(r.message).toContain('KC_ALLOW_BYPASS');
+    });
+
+    it('[S3] bypass with KC_ALLOW_BYPASS=1 engages and allows non-critical tools', async () => {
+      process.env.KC_ALLOW_BYPASS = '1';
+      initializeState({ permissionMode: 'bypassPermissions' });
+      const r = await hasPermissionsToUseTool('Bash', { command: 'ls' }, {});
+      expect(r.behavior).toBe('allow');
+    });
+
+    it('[S3] bypass engaged writes audit log with timestamp and session', async () => {
+      process.env.KC_ALLOW_BYPASS = '1';
+      initializeState({ permissionMode: 'bypassPermissions' });
+      const state = (await import('../../src/bootstrap/state')).getState();
+      const infoSpy = vi.spyOn(logger.permissions, 'info');
+
+      await hasPermissionsToUseTool('Bash', { command: 'ls' }, {});
+
+      expect(infoSpy).toHaveBeenCalledWith(
+        '[perm] bypass engaged',
+        expect.objectContaining({
+          ts: expect.any(Number),
+          session: state.sessionId,
+        }),
+      );
+      infoSpy.mockRestore();
+    });
+
+    it('[S3] bypass denied writes warning audit log', async () => {
+      delete process.env.KC_ALLOW_BYPASS;
+      initializeState({ permissionMode: 'bypassPermissions' });
+      const warnSpy = vi.spyOn(logger.permissions, 'warn');
+
+      const r = await hasPermissionsToUseTool('Bash', { command: 'ls' }, {});
+
+      expect(r.behavior).toBe('deny');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('bypassPermissions requested but KC_ALLOW_BYPASS'),
+      );
+      warnSpy.mockRestore();
     });
   });
 

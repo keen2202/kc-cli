@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ToolExecutor, SANDBOX_WRAPPED_MARKER } from '../../src/executors/toolExecutor';
 import { initializeState } from '../../src/bootstrap/state';
 import type { ToolDefinition, ToolUseContext } from '../../src/types/tools';
@@ -34,7 +34,13 @@ function makeContext(): ToolUseContext {
 
 describe('ToolExecutor timeout result fix', () => {
   beforeEach(() => {
+    // S3: bypassPermissions now requires KC_ALLOW_BYPASS=1 to engage.
+    process.env.KC_ALLOW_BYPASS = '1';
     initializeState({ cwd: '/tmp', apiKey: 'test', permissionMode: 'bypassPermissions' as any });
+  });
+
+  afterEach(() => {
+    delete process.env.KC_ALLOW_BYPASS;
   });
   it('should propagate toolCallId in timeout result', async () => {
     // Tool with a very short timeout (1 second) that never resolves
