@@ -1,4 +1,4 @@
-import { normalizeCommand } from './commandNormalizer';
+import { normalizeCommand, splitSubCommands } from './commandNormalizer';
 
 // Centralized read-only and low-risk command patterns
 // Single source of truth used by BashTool, GitTool, and PermissionClassifier
@@ -102,4 +102,66 @@ export function isReadOnlyBashCommand(command: string): boolean {
 export function isReadOnlyGitCommand(command: string): boolean {
   const baseCommand = command.split(' ')[0];
   return READONLY_GIT_COMMANDS.has(baseCommand) || READONLY_GIT_COMMANDS.has(command);
+}
+
+/**
+ * Detect whether a command carries recursive+force removal flags, regardless
+ * of how the flags are arranged (combined `-rf`/`-fr`/`-rvf`, separate `-r -f`,
+ * or long `--recursive --force`).
+ */
+function hasRecursiveForceFlags(c: string): boolean {
+  // Combined short flags containing both r and f: -rf, -fr, -rvf, -Rf, ...
+  if (/(?:^|\s)-\w*[rR]\w*[fF]\w*/.test(c)) return true;
+  if (/(?:^|\s)-\w*[fF]\w*[rR]\w*/.test(c)) return true;
+  // Separate -r/-R and -f flags
+  if (/(?:^|\s)-[rR]\b/.test(c) && /(?:^|\s)-[fF]\b/.test(c)) return true;
+  // Long flags
+  if (/--recursive\b/i.test(c) && /--force\b/i.test(c)) return true;
+  return false;
+}
+
+/**
+ * Detect dangerous bash commands using bypass-resistant normalization.
+ *
+ * Defeats obfuscation vectors that plain `DANGEROUS_BASH_PATTERNS` regex misses:
+ *   - Trailing/multiple whitespace (via `normalizeCommand`)
+ *   - Variable assignments (`a=rm; $a -rf /`) — `rm` still appears literally in the assignment
+ *   - Command substitution (`$(echo rm) -rf /`) — keyword still appears literally
+ *   - base64 decode piping (`echo ... | base64 -d | sh`) — hidden payload vector
+ *   - Pipe-to-shell (`... | sh` / `... | bash`) — executes arbitrary content
+ *
+ * High-risk primitives are matched regardless of argument arrangement.
+ * Existing `DANGEROUS_BASH_PATTERNS` are kept as a fallback so no previously
+ * blocked form regresses.
+ *
+ * @param command Raw or pre-normalized command string
+ * @returns true if the command should be treated as dangerous
+ */
+export function isDangerousBashCommand(command: string): boolean {
+  if (!command) return false;
+  const normalized = normalizeCommand(command);
+  const subs = splitSubCommands(normalized);
+  // Check both the full command (cross-sub-command vectors) and each sub-command.
+  const candidates = [normalized, ...subs];
+
+  // 1. Pipe-to-shell executes arbitrary content → dangerous.
+  if (/\|\s*(?:sh|bash)\b/.test(normalized)) return true;
+  // 2. base64 decode is a hidden-payload vector.
+  if (/\bbase64\b/.test(normalized) && /(?:-d\b|--decode\b)/.test(normalized)) return true;
+
+  // 3. High-risk primitives regardless of argument form.
+  for (const c of candidates) {
+    if (/\brm\b/.test(c) && hasRecursiveForceFlags(c)) return true;
+    if (/\bmkfs\b/.test(c)) return true;
+    if (/\bdd\b/.test(c) && /of=\/dev\//.test(c)) return true;
+    if (/\bchmod\b/.test(c) && /\b777\b/.test(c)) return true;
+    if (/\bshutdown\b/.test(c)) return true;
+    if (/\bFormat\b/.test(c) && /\/Q/i.test(c)) return true;
+  }
+
+  // 4. Fallback: existing enumerated patterns (preserves prior coverage).
+  for (const pattern of DANGEROUS_BASH_PATTERNS) {
+    if (pattern.test(normalized)) return true;
+  }
+  return false;
 }

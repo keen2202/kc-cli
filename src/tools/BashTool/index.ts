@@ -5,7 +5,7 @@ import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolUseContext, ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import { hasPermissionsToUseTool } from '../../permissions/engine';
-import { DANGEROUS_BASH_PATTERNS, isReadOnlyBashCommand } from '../../permissions/readonlyCommands';
+import { isReadOnlyBashCommand, isDangerousBashCommand } from '../../permissions/readonlyCommands';
 import { normalizeCommand } from '../../permissions/commandNormalizer';
 import { isAlreadySandboxWrapped } from '../../executors/toolExecutor';
 import { isExecError, getErrorMessage } from '../../utils/errors';
@@ -127,18 +127,16 @@ export const tool = buildTool<BashInput, string>({
   checkPermissions: (input, context): PermissionResult => {
     const command = normalizeCommand(input.command.trim());
 
-    // Check for dangerous commands
-    for (const pattern of DANGEROUS_BASH_PATTERNS) {
-      if (pattern.test(command)) {
-        return {
-          behavior: 'deny',
-          message: `Dangerous command detected: ${command}`,
-          decisionReason: {
-            type: 'dangerous_command',
-            reason: 'Command matches dangerous pattern',
-          },
-        };
-      }
+    // Check for dangerous commands (bypass-resistant: handles var/$(...)/base64/|sh)
+    if (isDangerousBashCommand(command)) {
+      return {
+        behavior: 'deny',
+        message: `Dangerous command detected: ${command}`,
+        decisionReason: {
+          type: 'dangerous_command',
+          reason: 'Command matches dangerous pattern',
+        },
+      };
     }
 
     // Check for read-only commands

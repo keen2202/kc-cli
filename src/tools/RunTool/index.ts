@@ -8,7 +8,7 @@ import { isAlreadySandboxWrapped } from '../../executors/toolExecutor';
 import { isExecError, getErrorMessage } from '../../utils/errors';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { DANGEROUS_BASH_PATTERNS } from '../../permissions/readonlyCommands';
+import { isDangerousBashCommand } from '../../permissions/readonlyCommands';
 import { logger } from '../../services/logger';
 import { LARGE_MAX_BUFFER } from '../../constants';
 
@@ -163,14 +163,12 @@ export const tool = buildTool<RunInput, string>({
   checkPermissions: (input, context): PermissionResult => {
     const command = input.command.trim();
 
-    // Block dangerous commands using shared pattern system
-    for (const pattern of DANGEROUS_BASH_PATTERNS) {
-      if (pattern.test(command)) {
-        return {
-          behavior: 'deny',
-          message: `Dangerous command blocked: ${pattern.source}`,
-        };
-      }
+    // Block dangerous commands (bypass-resistant: handles var/$(...)/base64/|sh)
+    if (isDangerousBashCommand(command)) {
+      return {
+        behavior: 'deny',
+        message: `Dangerous command blocked: ${command}`,
+      };
     }
 
     return {
