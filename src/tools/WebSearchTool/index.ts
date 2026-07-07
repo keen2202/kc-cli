@@ -5,6 +5,7 @@ import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import { getState } from '../../bootstrap/state';
+import { wrapIfUntrustedSource } from '../../utils/toolResultBoundary';
 
 const WebSearchInputSchema = z.object({
   query: z.string().describe('Search query'),
@@ -183,7 +184,8 @@ export const tool = buildTool<WebSearchInput, string>({
         })
         .join('\n\n');
 
-      return toolResult(formatted, {
+      // S7: web search snippets are untrusted — wrap with an injection boundary.
+      return toolResult(wrapIfUntrustedSource(formatted, 'WebSearch') as string, {
         metadata: {
           query: input.query,
           resultCount: results.length,

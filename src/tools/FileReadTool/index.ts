@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import { createReadStream } from 'fs';
 import { createInterface } from 'readline';
 import { assertPathWithinWorkspace } from '../../utils/path';
+import { wrapIfUntrustedSource } from '../../utils/toolResultBoundary';
 
 const FileReadInputSchema = z.object({
   path: z.string().describe('File path to read'),
@@ -117,14 +118,18 @@ export const tool = buildTool<FileReadInput, string>({
       // Note: preview uses streaming which is hard to abstract, fall back to direct fs
       if (fileStat.size > input.maxSize) {
         const preview = await readLargeFilePreview(filePath, fileStat.size, input.maxSize);
-        return toolResult(preview, {
-          metadata: {
-            path: filePath,
-            size: fileStat.size,
-            lines: PREVIEW_LINES * 2,
-            previewOnly: true,
-          },
-        });
+        // S7: file content is untrusted — wrap with an injection boundary.
+        return toolResult(
+          wrapIfUntrustedSource(preview, 'FileRead') as string,
+          {
+            metadata: {
+              path: filePath,
+              size: fileStat.size,
+              lines: PREVIEW_LINES * 2,
+              previewOnly: true,
+            },
+          }
+        );
       }
 
       // Read file
@@ -148,13 +153,17 @@ export const tool = buildTool<FileReadInput, string>({
         }
       }
 
-      return toolResult(content, {
-        metadata: {
-          path: filePath,
-          size: fileStat.size,
-          lines: lineCount,
-        },
-      });
+      return toolResult(
+        // S7: file content is untrusted — wrap with an injection boundary.
+        wrapIfUntrustedSource(content, 'FileRead') as string,
+        {
+          metadata: {
+            path: filePath,
+            size: fileStat.size,
+            lines: lineCount,
+          },
+        }
+      );
     } catch (error) {
       return toolError(`Failed to read file: ${error instanceof Error ? error.message : String(error)}`);
     }

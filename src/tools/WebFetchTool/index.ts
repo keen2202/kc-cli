@@ -6,6 +6,7 @@ import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import { secondsToMs } from '../../utils/timeout';
 import { isInternalUrl } from '../../utils/ssrf';
+import { wrapIfUntrustedSource } from '../../utils/toolResultBoundary';
 import * as https from 'https';
 import * as http from 'http';
 
@@ -97,8 +98,13 @@ export const tool = buildTool<WebFetchInput, string>({
 
             res.on('end', () => {
               clearTimeout(globalTimeout);
-              resolve(toolResult(
+              // S7: web content is untrusted — wrap with an injection boundary.
+              const body = wrapIfUntrustedSource(
                 `HTTP ${res.statusCode}\n\n${data.slice(0, input.max_size)}`,
+                'WebFetch'
+              ) as string;
+              resolve(toolResult(
+                body,
                 {
                   metadata: {
                     status_code: res.statusCode,
