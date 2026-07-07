@@ -5,6 +5,7 @@ import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import { secondsToMs } from '../../utils/timeout';
+import { isInternalUrl } from '../../utils/ssrf';
 import * as https from 'https';
 import * as http from 'http';
 
@@ -59,6 +60,21 @@ export const tool = buildTool<WebFetchInput, string>({
             // Handle redirects
             if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
               clearTimeout(globalTimeout);
+              // S6: validate every redirect hop against the same SSRF guard as
+              // the initial URL. A redirect to an internal/private range is rejected.
+              let redirectUrl: URL;
+              try {
+                redirectUrl = new URL(res.headers.location, url);
+              } catch {
+                resolve(toolError(`Invalid redirect Location: ${res.headers.location}`));
+                return;
+              }
+              if (isInternalUrl(redirectUrl)) {
+                resolve(toolError(
+                  `SSRF blocked: redirect to internal network ${redirectUrl.hostname} is not allowed`
+                ));
+                return;
+              }
               resolve(toolResult(`Redirect to: ${res.headers.location}`, {
                 metadata: { status_code: res.statusCode, redirect: res.headers.location },
               }));
@@ -122,35 +138,12 @@ export const tool = buildTool<WebFetchInput, string>({
   },
 
   checkPermissions: (input, context): PermissionResult => {
-    // Block internal/private URLs (RFC 1918 private ranges)
+    // Block internal/private URLs (SSRF) — same guard applied to redirect hops in call().
     const url = new URL(input.url);
-    const hostname = url.hostname.toLowerCase();
-
-    // Parse IP address for range checks
-    const ipMatch = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-
-    if (
-      hostname === 'localhost' ||
-      hostname === '0.0.0.0' ||
-      hostname === '[::1]' ||
-      hostname === '::1' ||
-      hostname === '127.0.0.1' ||
-      hostname.startsWith('127.') ||
-      hostname.startsWith('192.168.') ||
-      hostname.startsWith('10.') ||
-      hostname.startsWith('169.254.') ||
-      hostname.startsWith('fd00:') ||
-      hostname.startsWith('fe80:') ||
-      (ipMatch && (() => {
-        // Check 172.16.0.0/12 range (172.16.0.0 - 172.31.255.255)
-        const octet1 = parseInt(ipMatch[1], 10);
-        const octet2 = parseInt(ipMatch[2], 10);
-        return octet1 === 172 && octet2 >= 16 && octet2 <= 31;
-      })())
-    ) {
+    if (isInternalUrl(url)) {
       return {
         behavior: 'deny',
-        message: `Access to internal URLs is blocked: ${hostname}`,
+        message: `Access to internal URLs is blocked: ${url.hostname}`,
       };
     }
 
