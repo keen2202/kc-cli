@@ -61,3 +61,6 @@ evaluation/
 # Generated reports (one-off review/audit documents)
 REVIEW-REPORT.md
 *-REPORT.md
+
+# Duplicate nested project (D1)
+kc-cli/kc-cli/
