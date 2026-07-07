@@ -14,6 +14,7 @@ import { splitSubCommands } from './commandNormalizer';
 import { classifier } from './classifier';
 import { getCacheManager } from '../services/cache';
 import { logger } from '../services/logger';
+import { isInternalUrl } from '../utils/ssrf';
 
 export interface PermissionEngineConfig {
   alwaysDenyRules?: string[];
@@ -144,9 +145,10 @@ export async function hasPermissionsToUseTool(
     }
     if (toolResult.behavior === 'allow') {
       // Tool says allow, but still check security-critical paths (Step 3)
-      // This prevents tools from accidentally bypassing protected path checks
+      // This prevents tools from accidentally bypassing protected path checks.
+      // S4: also covers Sql db/query (protected path) and WebFetch url (SSRF).
       const securityCheck = checkSecurityCritical(toolName, input);
-      if (securityCheck && securityCheck.behavior === 'ask') {
+      if (securityCheck && (securityCheck.behavior === 'ask' || securityCheck.behavior === 'deny')) {
         return securityCheck; // Security-critical overrides tool allow
       }
       return toolResult;
@@ -305,6 +307,8 @@ const WRITE_CAPABLE_TOOLS = new Set([
  * Walks ALL string-valued input properties recursively to catch
  * protected paths in non-standard field names (source, target, files[], etc.)
  * Also splits compound commands (&&, ;, |, ||) and checks each sub-command.
+ * Covers tool-specific inputs — Sql database/query (protected paths),
+ * WebFetch url (SSRF internal-network) — in addition to path/command.
  */
 function checkSecurityCritical(
   toolName: string,
@@ -346,6 +350,37 @@ function checkSecurityCritical(
         decisionReason: {
           type: 'security_critical',
           reason: `Protected path access detected: ${value}`,
+        },
+      };
+    }
+  }
+
+  // S4: Sql — database path or query referencing a protected path → ask
+  if (toolName === 'Sql') {
+    const database = (input.database as string) || '';
+    const query = (input.query as string) || '';
+    if (containsProtectedPath(database) || containsProtectedPath(query)) {
+      return {
+        behavior: 'ask',
+        message: `SQL access referencing a protected path requires explicit permission`,
+        decisionReason: {
+          type: 'security_critical',
+          reason: `Protected path in Sql database/query`,
+        },
+      };
+    }
+  }
+
+  // S4: WebFetch — url targeting an internal/private network → deny (SSRF)
+  if (toolName === 'WebFetch') {
+    const urlStr = (input.url as string) || '';
+    if (urlStr && isInternalUrl(urlStr)) {
+      return {
+        behavior: 'deny',
+        message: `SSRF blocked: access to internal network URL is denied`,
+        decisionReason: {
+          type: 'security_critical',
+          reason: `Internal network URL detected`,
         },
       };
     }

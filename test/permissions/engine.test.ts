@@ -161,6 +161,50 @@ describe('PermissionEngine', () => {
     });
   });
 
+  describe('[S4] security-critical check covers db/url inputs', () => {
+    it('[S4.1] Sql db hitting protected path → ask', async () => {
+      const r = await hasPermissionsToUseTool('Sql', { database: '~/.ssh/keys.db', query: 'SELECT 1' }, {});
+      expect(r.behavior).toBe('ask');
+    });
+
+    it('[S4.1] Sql query referencing protected path → ask', async () => {
+      const r = await hasPermissionsToUseTool('Sql', { database: '/tmp/ok.db', query: "ATTACH '/etc/.ssh/x'" }, {});
+      expect(r.behavior).toBe('ask');
+    });
+
+    it('[S4.1] Sql with safe db/query is not blocked by security check', async () => {
+      const r = await hasPermissionsToUseTool('Sql', { database: '/tmp/ok.db', query: 'SELECT 1' }, {});
+      // No protected path, no internal url → reaches default mode → ask (not security-critical)
+      expect(r.behavior).not.toBe('deny');
+    });
+
+    it('[S4.2] WebFetch internal IP → deny', async () => {
+      const r = await hasPermissionsToUseTool('WebFetch', { url: 'http://127.0.0.1/' }, {});
+      expect(r.behavior).toBe('deny');
+    });
+
+    it('[S4.2] WebFetch internal 169.254 metadata → deny', async () => {
+      const r = await hasPermissionsToUseTool('WebFetch', { url: 'http://169.254.169.254/' }, {});
+      expect(r.behavior).toBe('deny');
+    });
+
+    it('[S4.2] WebFetch public URL not blocked by SSRF check', async () => {
+      const r = await hasPermissionsToUseTool('WebFetch', { url: 'https://example.com/' }, {});
+      expect(r.behavior).not.toBe('deny');
+    });
+
+    it('[S4.3] security deny overrides tool allow', async () => {
+      // Tool says allow, but WebFetch url is internal → engine must still deny.
+      const allowTool = vi.fn().mockReturnValue({ behavior: 'allow', updatedInput: {} });
+      const r = await hasPermissionsToUseTool(
+        'WebFetch',
+        { url: 'http://10.0.0.5/' },
+        { toolCheckPermissions: allowTool as any }
+      );
+      expect(r.behavior).toBe('deny');
+    });
+  });
+
   describe('Step 5: allow rules', () => {
     it('should allow tool matching alwaysAllowRules', async () => {
       const result = await hasPermissionsToUseTool('FileRead', {}, {
