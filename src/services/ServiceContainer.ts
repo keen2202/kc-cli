@@ -73,3 +73,11 @@ export function getServiceContainer(): ServiceContainer {
 export function setServiceContainer(container: ServiceContainer): void {
   _container = container;
 }
+
+/**
+ * Convenience helper to resolve a service by name from the global container.
+ * Throws if the service is not registered.
+ */
+export function resolveService<T>(name: string): T {
+  return getServiceContainer().resolve<T>(name);
+}
