@@ -1,7 +1,7 @@
 // QueryEngine conversation state management
 
 import type { ChatMessage, TurnTag, MessageWithTag } from '../query/protocol';
-import { estimateMessageTokensArray } from '../utils/tokenEstimation';
+import { estimateMessageTokens, estimateMessageTokensArray } from '../utils/tokenEstimation';
 import { SessionTree, type SessionNode } from '../state/session-tree';
 
 /**
@@ -12,7 +12,7 @@ export interface ConversationStateConfig {
   maxMessages?: number;
 }
 
-const DEFAULT_MAX_MESSAGES = 1000;
+const DEFAULT_MAX_MESSAGES = 200;
 
 /**
  * Manages conversation state for QueryEngine.
@@ -29,7 +29,8 @@ export class ConversationState {
    */
   messages: ChatMessage[] = [];
   private tree: SessionTree;
-  private cachedTokenEstimate: number | null = null;
+  private runningTokenTotal: number = 0;
+  private recomputed: boolean = true;
   private maxMessages: number;
   private turnTags = new Map<string, TurnTag>();
 
@@ -37,6 +38,8 @@ export class ConversationState {
     this.maxMessages = config.maxMessages ?? DEFAULT_MAX_MESSAGES;
     this.tree = new SessionTree();
     this.messages = this.getActiveNodeMessages();
+    this.runningTokenTotal = estimateMessageTokensArray(this.messages);
+    this.recomputed = true;
   }
 
   /** Get the messages array of the active tree node */
@@ -53,7 +56,8 @@ export class ConversationState {
   /** Add a message to the conversation (appends to active branch) */
   addMessage(msg: ChatMessage): void {
     this.messages.push(msg);
-    this.cachedTokenEstimate = null;
+    this.runningTokenTotal += estimateMessageTokens(msg);
+    this.recomputed = false;
   }
 
   /** Get all messages for the active branch */
@@ -73,7 +77,8 @@ export class ConversationState {
       activeNode.messages = messages;
     }
     this.messages = messages;
-    this.cachedTokenEstimate = null;
+    this.runningTokenTotal = estimateMessageTokensArray(this.messages);
+    this.recomputed = true;
   }
 
   /** Get the last message in the active branch */
@@ -85,7 +90,8 @@ export class ConversationState {
   clear(): void {
     this.tree = new SessionTree();
     this.messages = this.getActiveNodeMessages();
-    this.cachedTokenEstimate = null;
+    this.runningTokenTotal = 0;
+    this.recomputed = true;
   }
 
   /** Get the number of messages in the active branch */
@@ -95,15 +101,13 @@ export class ConversationState {
 
   /** Get or compute the token estimate (cached) */
   getTokenEstimate(): number {
-    if (this.cachedTokenEstimate === null) {
-      this.cachedTokenEstimate = estimateMessageTokensArray(this.messages);
-    }
-    return this.cachedTokenEstimate;
+    return this.runningTokenTotal;
   }
 
   /** Invalidate the cached token estimate */
   invalidateTokenEstimate(): void {
-    this.cachedTokenEstimate = null;
+    this.runningTokenTotal = estimateMessageTokensArray(this.messages);
+    this.recomputed = true;
   }
 
   /** Find the last user message in the active branch */
@@ -180,7 +184,8 @@ export class ConversationState {
       activeNode.messages = this.messages;
     }
 
-    this.cachedTokenEstimate = null;
+    this.runningTokenTotal = estimateMessageTokensArray(this.messages);
+    this.recomputed = true;
     return excess;
   }
 
@@ -188,17 +193,19 @@ export class ConversationState {
 
   /** Create a new branch from the active node. Returns the new branch node ID. */
   branch(): string {
-    this.cachedTokenEstimate = null;
     const nodeId = this.tree.branch();
     this.syncMessagesRef();
+    this.runningTokenTotal = estimateMessageTokensArray(this.messages);
+    this.recomputed = true;
     return nodeId;
   }
 
   /** Switch to a different branch by node ID. */
   checkout(nodeId: string): void {
-    this.cachedTokenEstimate = null;
     this.tree.checkout(nodeId);
     this.syncMessagesRef();
+    this.runningTokenTotal = estimateMessageTokensArray(this.messages);
+    this.recomputed = true;
   }
 
   /** Get the full tree structure. */
