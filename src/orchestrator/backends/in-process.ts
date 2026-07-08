@@ -23,6 +23,7 @@ import {
   createChildPermissionContext,
 } from '../permission-cascader.js';
 import { ResultAggregator } from '../result-aggregator.js';
+import { createScopedState, runWithScopedState, getState } from '../../bootstrap/state';
 
 // Async context store for sub-agent isolation
 const agentContextStore = new AsyncLocalStorage<SubAgentRuntime>();
@@ -86,6 +87,15 @@ export class InProcessBackend implements SubAgentBackend {
         config.permissions
       );
 
+      // Determine child working directory
+      const childCwd = config.cwd || this.parentCwd;
+
+      // Create scoped state for per-agent isolation
+      const scopedState = createScopedState(getState(), {
+        cwd: childCwd,
+        permissionMode: childPermissionMode,
+      });
+
       // Build allowed tool list
       const parentTools = Array.from(this.allTools.keys()) as ToolName[];
       const allowedToolNames = buildChildToolAllowList(parentTools, {
@@ -148,38 +158,46 @@ export class InProcessBackend implements SubAgentBackend {
       }
       const QueryEngineClass = CachedQueryEngine!;
 
-      const queryEngine = new QueryEngineClass(
-        {
-          model: config.model || 'claude-sonnet-4-20250514',
-          provider: 'anthropic',
-          maxTurns: config.maxTurns || 15,
-          maxBudgetUsd: null,
-          systemPrompt: config.systemPrompt,
-        },
-        childTools
-      );
+      // Create QueryEngine and run agent loop inside scoped state context
+      // so that getState() returns the isolated child state for all operations
+      // within the child agent's async execution chain.
+      const queryEngine = runWithScopedState(scopedState, () => {
+        const qe = new QueryEngineClass(
+          {
+            model: config.model || 'claude-sonnet-4-20250514',
+            provider: 'anthropic',
+            maxTurns: config.maxTurns || 15,
+            maxBudgetUsd: null,
+            systemPrompt: config.systemPrompt,
+          },
+          childTools
+        );
 
-      runtime.queryEngine = queryEngine;
+        runtime.queryEngine = qe;
 
-      // Start agent loop asynchronously
-      this.runAgentLoop(runtime, parentContext, queryEngine).catch((error) => {
-        logger.orchestrator.error(`Agent ${agentId} loop error:`, error);
-        runtime.status = 'failed';
-        runtime.error = error;
-        runtime.completedAt = Date.now();
+        // Start agent loop asynchronously — the ALS context from runWithScopedState
+        // propagates through the entire promise chain, keeping getState() scoped.
+        this.runAgentLoop(runtime, parentContext, qe).catch((error) => {
+          logger.orchestrator.error(`Agent ${agentId} loop error:`, error);
+          runtime.status = 'failed';
+          runtime.error = error;
+          runtime.completedAt = Date.now();
 
-        this.eventBus.emit(agentId, {
-          type: 'agent:subagent_failed',
-          agentId,
-          error: error.message || String(error),
-          timestamp: Date.now(),
+          this.eventBus.emit(agentId, {
+            type: 'agent:subagent_failed',
+            agentId,
+            error: error.message || String(error),
+            timestamp: Date.now(),
+          });
         });
-      });
 
-      // Wire up abort controller to query engine
-      abortController.signal.addEventListener('abort', () => {
-        queryEngine.abort('Sub-agent timeout or cancellation requested');
-      }, { once: true });
+        // Wire up abort controller to query engine
+        abortController.signal.addEventListener('abort', () => {
+          qe.abort('Sub-agent timeout or cancellation requested');
+        }, { once: true });
+
+        return qe;
+      });
 
       return {
         agentId,
