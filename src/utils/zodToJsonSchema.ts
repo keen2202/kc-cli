@@ -159,15 +159,12 @@ function convertArray(schema: z.ZodArray<any>): Record<string, unknown> {
   };
 
   // Add min/max length constraints
-  const def = schema._def as any;
-  const checks = def.checks || [];
-  for (const check of checks) {
-    if (check.kind === 'min') {
-      result.minItems = check.value;
-    }
-    if (check.kind === 'max') {
-      result.maxItems = check.value;
-    }
+  const def = schema._def;
+  if (def.minLength !== null) {
+    result.minItems = def.minLength.value;
+  }
+  if (def.maxLength !== null) {
+    result.maxItems = def.maxLength.value;
   }
 
   return result;
