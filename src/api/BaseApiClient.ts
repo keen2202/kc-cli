@@ -20,6 +20,20 @@ export abstract class BaseApiClient {
   protected baseUrl: string;
   protected model: string;
 
+  // ── Formatted-message cache (appends-only) ──────────────────────────
+  // Caches individual message formatting by message id.
+  // A single ChatMessage can produce multiple output entries (e.g. tool results),
+  // so each entry is an array.
+  private _msgFormatCache = new Map<string, Array<Record<string, unknown>>>();
+
+  // Full-array cache for reference equality on repeated calls with the same messages.
+  // Key: concatenation of message ids.
+  private _msgFullCache: { ids: string; result: Array<Record<string, unknown>> } | null = null;
+
+  // ── Formatted-tools cache ───────────────────────────────────────────
+  // Composite key: tool name + JSON of the input schema.
+  private _toolsFormatCache: { key: string; result: Array<Record<string, unknown>> } | null = null;
+
   constructor(config: { apiKey: string; baseUrl: string; model: string }) {
     this.apiKey = config.apiKey;
     this.baseUrl = config.baseUrl;
@@ -85,32 +99,53 @@ export abstract class BaseApiClient {
 
   /**
    * Format messages for API request
-   * Subclasses can override for provider-specific formatting
+   * Subclasses can override for provider-specific formatting.
+   * Messages are cached by their `id` so that appending new messages to
+   * a conversation only re-formats the new/changed entries.
    */
   protected formatMessages(messages: ChatMessage[]): Array<Record<string, unknown>> {
+    // Full-array cache hit: same set of messages (ids) as last call
+    const idsKey = messages.map(m => m.id).join('\x00');
+    if (this._msgFullCache && this._msgFullCache.ids === idsKey) {
+      return this._msgFullCache.result;
+    }
+
     const result: Array<Record<string, unknown>> = [];
 
     for (const msg of messages) {
+      // Per-message cache hit: individual entry already formatted
+      const cached = this._msgFormatCache.get(msg.id);
+      if (cached) {
+        result.push(...cached);
+        continue;
+      }
+
+      const entries: Array<Record<string, unknown>> = [];
+
       if (msg.role === 'tool') {
         // Pre-formatted tool message (from buildApiMessages) - pass through
         const toolMsg = msg as ChatMessage & { tool_call_id?: string };
         if (toolMsg.tool_call_id) {
-          result.push({
+          entries.push({
             role: 'tool',
             tool_call_id: toolMsg.tool_call_id,
             content: msg.content ?? '',
           });
+          this._msgFormatCache.set(msg.id, entries);
+          result.push(...entries);
           continue;
         }
         // ChatMessage with toolResults - expand each result
         if (msg.toolResults && msg.toolResults.length > 0) {
           for (const tr of msg.toolResults) {
-            result.push({
+            entries.push({
               role: 'tool',
               tool_call_id: tr.toolCallId,
               content: tr.output ?? '',
             });
           }
+          this._msgFormatCache.set(msg.id, entries);
+          result.push(...entries);
           continue;
         }
       }
@@ -157,18 +192,39 @@ export abstract class BaseApiClient {
         formatted.content = '(no response)';
       }
 
-      result.push(formatted);
+      entries.push(formatted);
+      this._msgFormatCache.set(msg.id, entries);
+      result.push(...entries);
     }
 
+    // Cache the full result array for reference equality on next call
+    this._msgFullCache = { ids: idsKey, result };
     return result;
   }
 
   /**
    * Format tools for API request
-   * Subclasses can override for provider-specific formatting
+   * Subclasses can override for provider-specific formatting.
+   * Caches the result keyed by tool names + schema JSON so that
+   * repeated calls with the same tool set return the cached array.
    */
   protected formatTools(tools: ToolDefinition[]): Array<Record<string, unknown>> {
-    return tools.map(tool => ({
+    // Build composite key: tool name + JSON of schema
+    const key = tools.map(t => {
+      let schemaStr: string;
+      try {
+        schemaStr = JSON.stringify(t.inputSchema);
+      } catch {
+        schemaStr = '<unserializable>';
+      }
+      return `${t.name}:${schemaStr}`;
+    }).join('||');
+
+    if (this._toolsFormatCache && this._toolsFormatCache.key === key) {
+      return this._toolsFormatCache.result;
+    }
+
+    const result = tools.map(tool => ({
       type: 'function',
       function: {
         name: tool.name,
@@ -176,6 +232,9 @@ export abstract class BaseApiClient {
         parameters: this.extractSchemaParameters(tool.inputSchema),
       },
     }));
+
+    this._toolsFormatCache = { key, result };
+    return result;
   }
 
   /**
