@@ -168,7 +168,7 @@ export class AgentOrchestrator {
         const elapsed = timeoutMs / 1000;
         for (const agentId of activeAgents) {
           this.aggregator.recordTimeout(agentId, elapsed);
-          this.backend.shutdown(agentId, true).catch(() => {});
+          this.backend.shutdown(agentId, true).catch(err => { logger.orchestrator.error('[AgentOrchestrator] Failed to shutdown agent', err); });
         }
         resolve(); // Continue to get results (with timeouts recorded)
       }, timeoutMs);

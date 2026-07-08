@@ -154,7 +154,7 @@ export class IMBridge {
       }
     } catch (err) {
       logger.services.error(`[IMBridge] Processing error: ${err instanceof Error ? err.message : String(err)}`);
-      await this.sendReply(message, '[Error] Failed to process your message').catch(() => {});
+      await this.sendReply(message, '[Error] Failed to process your message').catch(err => { logger.services.error('[IMBridge] Failed to send reply', err); });
     }
 
     sessionState.processing = false;

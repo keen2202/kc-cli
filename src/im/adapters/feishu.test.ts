@@ -169,7 +169,7 @@ describe('FeishuAdapter', () => {
 
       // Fail 5 times to open circuit breaker
       for (let i = 0; i < 5; i++) {
-        await adapter.sendMessage(message).catch(() => {});
+        await adapter.sendMessage(message).catch(err => { console.error('[FeishuAdapter test] sendMessage failed', err); });
       }
 
       // Now circuit should be open

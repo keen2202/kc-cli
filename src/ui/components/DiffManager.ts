@@ -77,7 +77,7 @@ export class DiffManager {
 
   terminateWorker(): void {
     if (this.diffWorker) {
-      this.diffWorker.terminate().catch(() => {});
+      this.diffWorker.terminate().catch(err => { console.error('[DiffManager] Failed to terminate worker', err); });
       this.diffWorker = null;
     }
   }
