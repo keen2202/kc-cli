@@ -4,8 +4,12 @@ import type { MemoryManifestEntry, MemoryEntry } from './types';
 import { getAgeText } from '../utils/format';
 import { getCacheManager } from '../services/cache';
 
-// Feedback tracking: maps memory fileName to reference count
-const feedbackMap = new Map<string, { loaded: number; referenced: number }>();
+// Feedback tracking: maps memory fileName to reference count, bounded by LRU cache
+const feedbackMap = getCacheManager().getOrCreate<{ loaded: number; referenced: number }>(
+  'memory-feedback',
+  'memory',
+  { maxSize: 2000, defaultTtlMs: 24 * 60 * 60 * 1000 }
+);
 
 // Score cache with TieredCache for LRU eviction and hit rate tracking
 const scoreCache = getCacheManager().getOrCreate<number>('memory-relevance', 'memory', { maxSize: 1000 });
@@ -262,6 +266,13 @@ export function getScoreCacheHitRate(): number {
  */
 export function getFeedbackStats(fileName: string): { loaded: number; referenced: number } | null {
   return feedbackMap.get(fileName) || null;
+}
+
+/**
+ * Get the current feedback map size (for testing)
+ */
+export function getFeedbackMapSize(): number {
+  return feedbackMap.size;
 }
 
 /**
