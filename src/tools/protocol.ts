@@ -18,8 +18,8 @@ export interface ToolUseContext {
   permissions: PermissionContext;
   /** Sandbox manager for command isolation. May be undefined if sandboxing is disabled. */
   sandbox?: SandboxManagerLike;
-  /** Execution environment abstraction for filesystem and shell access. Optional for backward compatibility. */
-  env?: ExecutionEnv;
+  /** Execution environment abstraction for filesystem and shell access. */
+  env: ExecutionEnv;
   onProgress?: (progress: ToolCallProgress) => void;
   appendSystemMessage?: (message: string) => void;
 }

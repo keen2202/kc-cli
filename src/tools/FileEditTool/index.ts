@@ -5,7 +5,6 @@ import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import * as path from 'path';
-import * as fs from 'fs';
 import { assertPathWithinWorkspace } from '../../utils/path';
 import { isExecError, getErrorMessage, getErrorStack } from '../../utils/errors';
 
@@ -32,21 +31,13 @@ export const tool = buildTool<FileEditInput, string>({
       const filePath = path.resolve(context.cwd, input.file_path);
       assertPathWithinWorkspace(input.file_path, context.cwd);
 
-      // Check file exists - prefer ExecutionEnv abstraction when available
-      if (context.env) {
-        if (!(await context.env.fs.exists(filePath))) {
-          return toolError(`File not found: ${filePath}`);
-        }
-      } else {
-        if (!fs.existsSync(filePath)) {
-          return toolError(`File not found: ${filePath}`);
-        }
+      // Check file exists via ExecutionEnv abstraction
+      if (!(await context.env.fs.exists(filePath))) {
+        return toolError(`File not found: ${filePath}`);
       }
 
-      // Read file
-      let content = context.env
-        ? await context.env.fs.readFile(filePath, 'utf-8')
-        : await fs.promises.readFile(filePath, 'utf-8');
+      // Read file via ExecutionEnv abstraction
+      let content = await context.env.fs.readFile(filePath, 'utf-8');
       const originalContent = content;
       const changes: string[] = [];
 
@@ -74,12 +65,8 @@ export const tool = buildTool<FileEditInput, string>({
         });
       }
 
-      // Write file
-      if (context.env) {
-        await context.env.fs.writeFile(filePath, content);
-      } else {
-        await fs.promises.writeFile(filePath, content, 'utf-8');
-      }
+      // Write file via ExecutionEnv abstraction
+      await context.env.fs.writeFile(filePath, content);
 
       return toolResult(
         `Applied ${changes.length} edit(s) to ${input.file_path}:\n${changes.join('\n')}`,

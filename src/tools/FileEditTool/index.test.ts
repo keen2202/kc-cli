@@ -18,9 +18,10 @@ describe('FileEditTool error handling', () => {
   it('returns structured error with stack for path traversal (catch block)', async () => {
     // Absolute path outside workspace triggers assertPathWithinWorkspace throw,
     // exercising the catch block with getErrorMessage + getErrorStack.
+    const env = createMockExecutionEnv('/tmp');
     const result = await tool.call(
       { file_path: '/etc/passwd', edits: [{ old_string: 'foo', new_string: 'bar', replace_all: false }], dry_run: false },
-      { cwd: '/tmp' } as any,
+      { cwd: '/tmp', env } as any,
     );
     expect(result.isError).toBe(true);
     expect(result.message).toContain('File edit failed');

@@ -5,7 +5,6 @@ import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import * as path from 'path';
-import * as fs from 'fs';
 import { createReadStream } from 'fs';
 import { createInterface } from 'readline';
 import { assertPathWithinWorkspace } from '../../utils/path';
@@ -96,23 +95,13 @@ export const tool = buildTool<FileReadInput, string>({
       const filePath = path.resolve(context.cwd, input.path);
       assertPathWithinWorkspace(input.path, context.cwd);
 
-      // Check file exists - prefer ExecutionEnv abstraction when available
-      if (context.env) {
-        if (!(await context.env.fs.exists(filePath))) {
-          return toolError(`File not found: ${filePath}`);
-        }
-      } else {
-        try {
-          await fs.promises.access(filePath);
-        } catch {
-          return toolError(`File not found: ${filePath}`);
-        }
+      // Check file exists via ExecutionEnv abstraction
+      if (!(await context.env.fs.exists(filePath))) {
+        return toolError(`File not found: ${filePath}`);
       }
 
       // Check file size
-      const fileStat = context.env
-        ? await context.env.fs.stat(filePath)
-        : await fs.promises.stat(filePath);
+      const fileStat = await context.env.fs.stat(filePath);
 
       // For files exceeding maxSize, stream a head+tail preview
       // Note: preview uses streaming which is hard to abstract, fall back to direct fs
@@ -132,10 +121,8 @@ export const tool = buildTool<FileReadInput, string>({
         );
       }
 
-      // Read file
-      let content = context.env
-        ? await context.env.fs.readFile(filePath, 'utf-8')
-        : await fs.promises.readFile(filePath, 'utf-8');
+      // Read file via ExecutionEnv abstraction
+      let content = await context.env.fs.readFile(filePath, 'utf-8');
       let lineCount: number;
 
       // Apply range if specified

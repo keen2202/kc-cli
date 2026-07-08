@@ -5,14 +5,9 @@ import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import { isAlreadySandboxWrapped } from '../../executors/toolExecutor';
-import { isExecError, getErrorMessage } from '../../utils/errors';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { getErrorMessage } from '../../utils/errors';
 import { isDangerousBashCommand } from '../../permissions/readonlyCommands';
 import { logger } from '../../services/logger';
-import { LARGE_MAX_BUFFER } from '../../constants';
-
-const execAsync = promisify(exec);
 
 /**
  * Environment variables that can lead to code injection or privilege escalation
@@ -99,7 +94,7 @@ export const tool = buildTool<RunInput, string>({
       const env = {
         ...process.env,
         ...filterEnvVars(input.env || {}),
-      };
+      } as Record<string, string>;
 
       // The ToolExecutor pre-wraps commands for 'Run' tool at the executor level
       // (the authoritative sandbox enforcement point). Check for the executor's
@@ -128,15 +123,22 @@ export const tool = buildTool<RunInput, string>({
         }
       }
 
-      const { stdout, stderr } = await execAsync(wrappedCmd, {
+      const result = await context.env.shell.exec(wrappedCmd, {
         cwd: workingDir,
         timeout,
         env,
-        shell: input.shell,
-        maxBuffer: LARGE_MAX_BUFFER,
+        signal: context.abortController?.signal,
       });
 
-      const output = stdout || stderr;
+      if (result.exitCode !== 0) {
+        const output = (result.stdout || result.stderr || '').trim();
+        return toolError(`Command failed: ${output}`, {
+          command: input.command,
+          exitCode: result.exitCode,
+        });
+      }
+
+      const output = result.stdout || result.stderr;
       return toolResult(output, {
         metadata: {
           command: input.command,
@@ -147,13 +149,6 @@ export const tool = buildTool<RunInput, string>({
         },
       });
     } catch (error) {
-      if (isExecError(error)) {
-        const output = String(error.stdout || error.stderr || error.message || '').trim();
-        return toolError(`Command failed: ${output}`, {
-          command: input.command,
-          exitCode: error.code,
-        });
-      }
       return toolError(`Command failed: ${getErrorMessage(error)}`, {
         command: input.command,
       });

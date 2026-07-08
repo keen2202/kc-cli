@@ -1077,6 +1077,7 @@ export class QueryEngine {
       abortController: this.abortController,
       permissions: buildPermissionContext(),
       sandbox: this.toolExecutor.getSandboxManager(),
+      env: this.toolExecutor.getExecutionEnv(),
     };
   }
 

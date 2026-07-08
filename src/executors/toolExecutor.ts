@@ -583,6 +583,13 @@ export class ToolExecutor {
   }
 
   /**
+   * Get the execution environment for filesystem and shell access.
+   */
+  getExecutionEnv(): ExecutionEnv {
+    return this.executionEnv;
+  }
+
+  /**
    * Get the sandbox manager for inspecting sandbox state.
    */
   getSandboxManager(): SandboxManager {

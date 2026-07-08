@@ -9,11 +9,6 @@ import { isReadOnlyBashCommand, isDangerousBashCommand } from '../../permissions
 import { normalizeCommand } from '../../permissions/commandNormalizer';
 import { isAlreadySandboxWrapped } from '../../executors/toolExecutor';
 import { isExecError, getErrorMessage } from '../../utils/errors';
-import { DEFAULT_MAX_BUFFER } from '../../constants';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
 
 const BashInputSchema = z.object({
   command: z.string().describe('The bash command to execute'),
@@ -68,45 +63,26 @@ export const tool = buildTool<BashInput, string>({
         }
       }
 
-      // Execute wrapped command - prefer ExecutionEnv abstraction when available
-      if (context.env) {
-        const result = await context.env.shell.exec(wrappedCmd, {
-          cwd: workingDir,
-          timeout,
-          signal: context.abortController?.signal,
-        });
+      // Execute wrapped command via ExecutionEnv abstraction
+      const result = await context.env.shell.exec(wrappedCmd, {
+        cwd: workingDir,
+        timeout,
+        signal: context.abortController?.signal,
+      });
 
-        if (result.exitCode !== 0) {
-          return toolResult(result.stdout, {
-            isError: true,
-            message: `Command failed: ${result.stderr || 'non-zero exit code'}`,
-            metadata: { exitCode: result.exitCode, stderr: result.stderr },
-          });
-        }
-
+      if (result.exitCode !== 0) {
         return toolResult(result.stdout, {
-          isError: false,
-          metadata: {
-            exitCode: 0,
-            stderr: result.stderr.trim() || undefined,
-            sandboxed,
-            sandboxBackend,
-          },
+          isError: true,
+          message: `Command failed: ${result.stderr || 'non-zero exit code'}`,
+          metadata: { exitCode: result.exitCode, stderr: result.stderr },
         });
       }
 
-      // Fallback: direct child_process exec
-      const { stdout, stderr } = await execAsync(wrappedCmd, {
-        cwd: workingDir,
-        timeout,
-        maxBuffer: DEFAULT_MAX_BUFFER,
-      });
-
-      return toolResult(stdout, {
+      return toolResult(result.stdout, {
         isError: false,
         metadata: {
           exitCode: 0,
-          stderr: stderr.trim() || undefined,
+          stderr: result.stderr.trim() || undefined,
           sandboxed,
           sandboxBackend,
         },
