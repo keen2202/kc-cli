@@ -1,6 +1,7 @@
 // Tool executor - handles single and parallel tool execution with permission checks
 
 import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
+import * as os from 'node:os';
 import type { ToolCall, ToolResult } from '../query/protocol';
 import type { ToolDefinition, ToolUseContext } from '../tools/protocol';
 import type { PermissionResult } from '../permissions/protocol';
@@ -91,6 +92,26 @@ const COMMAND_EXECUTING_TOOLS = new Set(['Bash', 'Run']);
  * Can be overridden via config.
  */
 const DEFAULT_MAX_CONCURRENT_TOOLS = 5;
+
+/**
+ * Tool names that spawn OS processes or make network calls.
+ * These share a process-wide concurrency cap to prevent resource exhaustion
+ * when multiple sub-agents (each with their own ToolExecutor) execute them.
+ */
+export const OS_NETWORK_TOOLS = new Set<string>(['Bash', 'Run', 'WebFetch', 'Sql']);
+
+/**
+ * Default maximum concurrent OS/network tool executions across the entire process.
+ * Based on CPU count with a minimum of 4.
+ */
+const DEFAULT_GLOBAL_TOOL_CONCURRENCY = Math.max(4, os.cpus().length);
+
+/**
+ * Process-wide semaphore for OS/network tools shared across ALL ToolExecutor instances.
+ * Prevents N sub-agents from collectively exceeding the global OS/network limit.
+ * This is separate from the per-executor concurrencySemaphore.
+ */
+export const GLOBAL_TOOL_SEMAPHORE = new Semaphore(DEFAULT_GLOBAL_TOOL_CONCURRENCY);
 
 /**
  * Tool executor that supports both sequential and parallel tool execution
@@ -291,9 +312,19 @@ export class ToolExecutor {
 
       // 4. Execute tool with concurrency limit and timeout
       const timeoutMs = this.getToolTimeout(tool);
-      const result = await this.concurrencySemaphore.withPermit(async () => {
-        return this.executeWithTimeout(tool, effectiveInputWithWrap, context, timeoutMs, toolCall.toolName, toolCall.id);
-      });
+
+      // Inner execution function scoped to this executor's concurrency limiter.
+      const runWithExecutorPermit = () =>
+        this.concurrencySemaphore.withPermit(async () =>
+          this.executeWithTimeout(tool, effectiveInputWithWrap, context, timeoutMs, toolCall.toolName, toolCall.id)
+        );
+
+      // OS/network tools also acquire the process-wide global semaphore.
+      // The global cap is acquired first, then the per-executor cap,
+      // ensuring N sub-agents don't collectively exceed the global limit.
+      const result = OS_NETWORK_TOOLS.has(toolCall.toolName)
+        ? await GLOBAL_TOOL_SEMAPHORE.withPermit(runWithExecutorPermit)
+        : await runWithExecutorPermit();
 
       // 4b. Add sandbox metadata to result
       if (result.metadata) {

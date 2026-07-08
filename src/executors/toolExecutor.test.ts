@@ -5,7 +5,12 @@ import {
   SANDBOX_WRAPPED_MARKER,
   SANDBOX_SIGNATURE_KEY,
   ToolExecutor,
+  GLOBAL_TOOL_SEMAPHORE,
+  OS_NETWORK_TOOLS,
 } from './toolExecutor';
+import { Semaphore } from '../utils/semaphore';
+import { initializeState, resetState } from '../bootstrap/state';
+import { createLocalExecutionEnv } from '../services/execution-env-local';
 
 describe('Sandbox HMAC Signature', () => {
   it('creates a valid HMAC signature for a tool ID', () => {
@@ -128,5 +133,189 @@ describe('ToolExecutor.verifySandboxInput', () => {
       [SANDBOX_SIGNATURE_KEY]: 12345,
     };
     expect(ToolExecutor.verifySandboxInput(input, 'Bash')).toBe(false);
+  });
+});
+
+describe('Global OS/Network tool semaphore', () => {
+  // Shared mutable counters tracked by the mock Bash tool
+  let currentConcurrent = 0;
+  let peakConcurrent = 0;
+  const counterLock = new Semaphore(1);
+
+  const mockBashTool = {
+    name: 'Bash',
+    description: 'Mock Bash tool for concurrency testing',
+    inputSchema: { safeParse: () => ({ success: true, data: {} }) },
+    call: async () => {
+      await counterLock.acquire();
+      currentConcurrent++;
+      peakConcurrent = Math.max(peakConcurrent, currentConcurrent);
+      counterLock.release();
+
+      // Hold execution long enough for other concurrent calls to queue up
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      await counterLock.acquire();
+      currentConcurrent--;
+      counterLock.release();
+
+      return { output: 'done', isError: false, toolCallId: '' };
+    },
+  };
+
+  const mockNonOsTool = {
+    name: 'FileRead',
+    description: 'Mock FileRead (non-OS/network)',
+    inputSchema: { safeParse: () => ({ success: true, data: {} }) },
+    call: async () => {
+      await counterLock.acquire();
+      currentConcurrent++;
+      peakConcurrent = Math.max(peakConcurrent, currentConcurrent);
+      counterLock.release();
+
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      await counterLock.acquire();
+      currentConcurrent--;
+      counterLock.release();
+
+      return { output: 'content', isError: false, toolCallId: '' };
+    },
+  };
+
+  beforeEach(() => {
+    initializeState({ permissionMode: 'default' });
+    currentConcurrent = 0;
+    peakConcurrent = 0;
+    GLOBAL_TOOL_SEMAPHORE.reset();
+  });
+
+  afterEach(() => {
+    resetState();
+  });
+
+  it('exports OS_NETWORK_TOOLS with expected tool names', () => {
+    expect(OS_NETWORK_TOOLS.has('Bash')).toBe(true);
+    expect(OS_NETWORK_TOOLS.has('Run')).toBe(true);
+    expect(OS_NETWORK_TOOLS.has('WebFetch')).toBe(true);
+    expect(OS_NETWORK_TOOLS.has('Sql')).toBe(true);
+    expect(OS_NETWORK_TOOLS.has('FileRead')).toBe(false);
+  });
+
+  it('exports GLOBAL_TOOL_SEMAPHORE as a Semaphore with positive permits', () => {
+    expect(GLOBAL_TOOL_SEMAPHORE).toBeInstanceOf(Semaphore);
+    expect(GLOBAL_TOOL_SEMAPHORE.total).toBeGreaterThan(0);
+  });
+
+  it('limits concurrent OS/network tool execution to global cap', async () => {
+    const cap = GLOBAL_TOOL_SEMAPHORE.total;
+    const executor = new ToolExecutor(
+      [mockBashTool] as any,
+      '/tmp',
+      undefined,
+      undefined,
+      { enabled: false },
+      { maxConcurrentTools: 50 }
+    );
+
+    const calls = Array.from({ length: 30 }, (_, i) => ({
+      id: `call-${i}`,
+      toolName: 'Bash',
+      input: { command: 'echo hi' },
+      status: 'pending' as const,
+    }));
+
+    const context = {
+      cwd: '/tmp',
+      abortController: new AbortController(),
+      permissions: {} as any,
+      env: createLocalExecutionEnv('/tmp'),
+    };
+
+    await executor.executeParallel(calls, context);
+
+    expect(peakConcurrent).toBeLessThanOrEqual(cap);
+    expect(peakConcurrent).toBeGreaterThan(0);
+  });
+
+  it('global cap enforced across multiple ToolExecutor instances', async () => {
+    const cap = GLOBAL_TOOL_SEMAPHORE.total;
+    const executor1 = new ToolExecutor(
+      [mockBashTool] as any,
+      '/tmp',
+      undefined,
+      undefined,
+      { enabled: false },
+      { maxConcurrentTools: 50 }
+    );
+    const executor2 = new ToolExecutor(
+      [mockBashTool] as any,
+      '/tmp',
+      undefined,
+      undefined,
+      { enabled: false },
+      { maxConcurrentTools: 50 }
+    );
+
+    const calls1 = Array.from({ length: 15 }, (_, i) => ({
+      id: `call-a-${i}`,
+      toolName: 'Bash',
+      input: { command: 'echo hi' },
+      status: 'pending' as const,
+    }));
+    const calls2 = Array.from({ length: 15 }, (_, i) => ({
+      id: `call-b-${i}`,
+      toolName: 'Bash',
+      input: { command: 'echo hi' },
+      status: 'pending' as const,
+    }));
+
+    const context = {
+      cwd: '/tmp',
+      abortController: new AbortController(),
+      permissions: {} as any,
+      env: createLocalExecutionEnv('/tmp'),
+    };
+
+    await Promise.all([
+      executor1.executeParallel(calls1, context),
+      executor2.executeParallel(calls2, context),
+    ]);
+
+    expect(peakConcurrent).toBeLessThanOrEqual(cap);
+    expect(peakConcurrent).toBeGreaterThan(0);
+  });
+
+  it('non-OS/network tools are not throttled by the global semaphore', async () => {
+    // FileRead should not go through GLOBAL_TOOL_SEMAPHORE
+    const executor = new ToolExecutor(
+      [mockNonOsTool] as any,
+      '/tmp',
+      undefined,
+      undefined,
+      { enabled: false },
+      { maxConcurrentTools: 50 }
+    );
+
+    const calls = Array.from({ length: 20 }, (_, i) => ({
+      id: `read-${i}`,
+      toolName: 'FileRead',
+      input: { path: '/tmp/test.txt' },
+      status: 'pending' as const,
+    }));
+
+    const context = {
+      cwd: '/tmp',
+      abortController: new AbortController(),
+      permissions: {} as any,
+      env: createLocalExecutionEnv('/tmp'),
+    };
+
+    await executor.executeParallel(calls, context);
+
+    // With per-executor cap of 50 and no global cap on FileRead,
+    // all 20 calls should be able to run concurrently (limited only by
+    // the per-executor semaphore, which is set to 50).
+    expect(peakConcurrent).toBe(20);
   });
 });
