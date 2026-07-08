@@ -29,6 +29,16 @@ export class CompactionHandler {
   private stateValidator = new StateValidator();
   private maxConsecutiveFailures = MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES;
 
+  // ── Async (fire-and-forget) compaction state ──
+  /** Promise for a pending async full-compact operation */
+  private pendingCompactPromise: Promise<void> | null = null;
+  /** Compacted messages from a completed async compaction */
+  private pendingCompactMessages: ChatMessage[] | null = null;
+  /** Whether the pending async compaction has finished */
+  private pendingCompactDone = false;
+  /** Number of messages at the time the async compaction was triggered */
+  private pendingCompactMsgCount = 0;
+
   constructor(maxFailures?: number) {
     if (maxFailures !== undefined) {
       this.maxConsecutiveFailures = maxFailures;
@@ -226,8 +236,131 @@ export class CompactionHandler {
     });
   }
 
-  /** Reset failure count */
+  /** Reset failure count and clear pending async compaction */
   reset(): void {
     this.compactFailureCount = 0;
+    this.pendingCompactPromise = null;
+    this.pendingCompactMessages = null;
+    this.pendingCompactDone = false;
+    this.pendingCompactMsgCount = 0;
+  }
+
+  // ── Async (fire-and-forget) Entry Points ──
+
+  /**
+   * Trigger full compaction asynchronously (fire-and-forget).
+   * The LLM-based summarization runs in the background; the result can be
+   * retrieved later via {@link drainPendingCompactResult} (e.g. on the next
+   * streaming cycle).
+   *
+   * Caches the promise: redundant triggers before completion are no-ops.
+   * Always returns immediately (< 50 ms) — no LLM call is awaited.
+   *
+   * @param messages  Conversation messages to compact.
+   * @param apiClient API client for the LLM summarization call.
+   * @param config    Compaction configuration (context window, model, etc.).
+   */
+  triggerFullCompactAsync(
+    messages: ChatMessage[],
+    apiClient: BaseApiClient,
+    config: CompactionConfig
+  ): void {
+    // Cache: don't start a second compaction while one is in flight
+    if (this.pendingCompactPromise !== null) return;
+
+    const compactConfig = {
+      contextWindow: config.contextWindow,
+      model: config.model,
+    };
+
+    // Snapshot the message count so we can correctly merge any messages that
+    // are added while the async compaction is in flight.
+    this.pendingCompactMsgCount = messages.length;
+
+    // Fire-and-forget: run the full compact (including microcompact internally)
+    // in the background without blocking the caller.
+    this.pendingCompactPromise = this.#runFullCompactAsync(
+      messages, apiClient, compactConfig, config,
+    ).then(messages => {
+      this.pendingCompactMessages = messages;
+      this.pendingCompactDone = true;
+    }).catch(() => {
+      this.pendingCompactDone = true;
+    });
+  }
+
+  /**
+   * Drain a completed async compaction result.
+   *
+   * @param currentMessages  The current conversation messages (may include
+   *                         messages added after the async compaction was
+   *                         triggered).  These are appended after the
+   *                         compacted message slice so that nothing is lost.
+   * @returns The merged compacted message list with method name, or `null` if
+   *          no compaction has finished yet (still pending / never triggered).
+   *
+   * Clears the pending state after draining so a future trigger can start
+   * a new compaction cycle.
+   */
+  drainPendingCompactResult(
+    currentMessages: ChatMessage[],
+  ): { messages: ChatMessage[]; method: string } | null {
+    if (this.pendingCompactPromise === null || !this.pendingCompactDone) {
+      return null;
+    }
+
+    this.pendingCompactPromise = null;
+    this.pendingCompactDone = false;
+
+    const compactedMessages = this.pendingCompactMessages;
+    this.pendingCompactMessages = null;
+
+    if (compactedMessages === null) {
+      this.pendingCompactMsgCount = 0;
+      return null;
+    }
+
+    // Merge: replace the trigger-time messages with the compacted version,
+    // preserving any messages that were added while compaction was running.
+    const triggerCount = this.pendingCompactMsgCount;
+    this.pendingCompactMsgCount = 0;
+
+    const newMessages = currentMessages.slice(triggerCount);
+    const merged = [...compactedMessages, ...newMessages];
+
+    return { messages: merged, method: 'fullcompact' as const };
+  }
+
+  /**
+   * Internal async runner for LLM-based full compaction.
+   * Delegates to the standalone `fullCompact` function which already includes
+   * a microcompact pass as its first step.
+   */
+  async #runFullCompactAsync(
+    messages: ChatMessage[],
+    apiClient: BaseApiClient,
+    compactConfig: { contextWindow: number; model: string },
+    config: CompactionConfig,
+  ): Promise<ChatMessage[] | null> {
+    try {
+      const result = await fullCompact(
+        messages,
+        apiClient,
+        compactConfig,
+        config.systemPrompt,
+        config.modifiedFiles,
+      );
+
+      if (result.wasCompacted) {
+        this.compactFailureCount = 0;
+        return result.messages;
+      }
+
+      this.compactFailureCount = 0;
+      return null;
+    } catch {
+      this.compactFailureCount++;
+      return null;
+    }
   }
 }

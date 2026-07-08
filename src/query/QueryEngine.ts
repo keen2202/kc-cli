@@ -367,6 +367,18 @@ export class QueryEngine {
             break;
 
           case 'streaming':
+            // Apply any completed async compaction result before streaming.
+            // This picks up the result of a fire-and-forget triggerFullCompactAsync()
+            // call that finished during the previous executing / deciding phases.
+            // We pass the current messages so that any messages added after the
+            // compaction was triggered are preserved in the merge.
+            const asyncCompactResult = this.compaction.drainPendingCompactResult(
+              this.conversation.getMessages()
+            );
+            if (asyncCompactResult) {
+              this.conversation.setMessages(asyncCompactResult.messages);
+            }
+
             yield* this.streamingPhase();
             turnCount++;
 
@@ -589,6 +601,11 @@ export class QueryEngine {
   /**
    * Phase 1: Auto-compaction check
    * Delegates to CompactionHandler for the actual compaction logic.
+   *
+   * The LLM-based summarization path is fire-and-forget (async, non-blocking).
+   * Compacted results are applied before the next streaming phase via the
+   * drain check in the main state-machine loop.  Only the cheap synchronous
+   * compaction steps (force truncation, microcompact) run inline here.
    */
   private async *compactingPhase(): AsyncGenerator<StreamEvent | AgentEvent> {
     const config = {
@@ -602,16 +619,15 @@ export class QueryEngine {
       return;
     }
 
-    const result = yield* this.compaction.compact(
+    // Fire-and-forget: start compaction in the background.
+    // The result will be picked up by drainPendingCompactResult() before the
+    // next streaming phase (see the `case 'streaming':` branch in the loop).
+    this.compaction.triggerFullCompactAsync(
       this.conversation.getMessages(),
       this.apiClient,
       config
     );
-
-    // If compaction modified messages, update conversation state
-    if ('messages' in result) {
-      this.conversation.setMessages(result.messages);
-    }
+    // Return immediately — no LLM call is awaited.
   }
 
   /**
