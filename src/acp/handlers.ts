@@ -69,7 +69,10 @@ export async function handleAgentRun(request: ACPRequest, state: ACPHandlerState
   state.sendResult(request.id, { sessionId, status: 'started' });
 
   // Run in background
-  runAgent(sessionId, engine, prompt, state).catch(err => { console.error('[ACP] Failed to run agent', err); });
+  runAgent(sessionId, engine, prompt, state).catch(err => {
+    console.error('[ACP] Failed to run agent', err);
+    state.sendNotification('agent/error', { sessionId, error: getErrorMessage(err) });
+  });
 }
 
 async function runAgent(
