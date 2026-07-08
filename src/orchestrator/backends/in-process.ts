@@ -314,11 +314,8 @@ export class InProcessBackend implements SubAgentBackend {
           timestamp: Date.now(),
         });
       } finally {
-        // Clean up completed/failed agents from active map to prevent memory leak
-        // Keep in map briefly for any pending queries, then remove
-        setTimeout(() => {
-          this.activeAgents.delete(agentId);
-        }, 5000);
+        // Clean up completed/failed agents from active map immediately
+        this.activeAgents.delete(agentId);
       }
     });
   }

@@ -11,6 +11,7 @@ import type { AgentEvent } from '../state/types.js';
 import type { MultiAgentEvent } from '../state/events.js';
 import type { ToolUseContext, ToolDefinition, ToolName } from '../tools/protocol.js';
 import type { PermissionMode } from '../permissions/protocol.js';
+import { Semaphore } from '../utils/semaphore.js';
 import { EventBus, type EvolutionEvent } from './event-bus.js';
 import { InProcessBackend } from './backends/in-process.js';
 import { ResultAggregator } from './result-aggregator.js';
@@ -28,8 +29,10 @@ export class AgentOrchestrator {
   private aggregator: ResultAggregator;
   private allTools: ToolDefinition[];
   private parentPermissionMode: PermissionMode;
+  private semaphore: Semaphore;
 
-  constructor(allTools: ToolDefinition[]) {
+  constructor(allTools: ToolDefinition[], maxConcurrentAgents: number = 8) {
+    this.semaphore = new Semaphore(maxConcurrentAgents);
     this.eventBus = new EventBus();
     this.allTools = allTools;
     this.parentPermissionMode = getState().permissionMode;
@@ -55,18 +58,48 @@ export class AgentOrchestrator {
   ): Promise<string> {
     const agentId = `${config.name}@default`;
 
-    // Register with aggregator
-    this.aggregator.register(agentId, config);
+    // Acquire semaphore permit — bounds concurrent sub-agents
+    await this.semaphore.acquire();
 
-    // Spawn via backend
-    const spawnResult = await this.backend.spawn(config, parentContext);
+    // Register listener to release permit when agent reaches terminal state
+    const releaseOnTerminal = (event: AgentEvent | MultiAgentEvent): void => {
+      if (
+        event.type === 'agent:subagent_completed' ||
+        event.type === 'agent:subagent_failed' ||
+        event.type === 'agent:subagent_timed_out' ||
+        event.type === 'agent:subagent_cancelled'
+      ) {
+        this.semaphore.release();
+        unsubscribe();
+      }
+    };
+    const unsubscribe = this.eventBus.on(agentId, releaseOnTerminal);
 
-    if (!spawnResult.success) {
-      this.aggregator.recordFailure(agentId, spawnResult.error || 'Spawn failed');
-      throw new Error(`Failed to spawn agent ${agentId}: ${spawnResult.error}`);
+    let released = false;
+
+    try {
+      // Register with aggregator
+      this.aggregator.register(agentId, config);
+
+      // Spawn via backend
+      const spawnResult = await this.backend.spawn(config, parentContext);
+
+      if (!spawnResult.success) {
+        this.semaphore.release();
+        unsubscribe();
+        released = true;
+        this.aggregator.recordFailure(agentId, spawnResult.error || 'Spawn failed');
+        throw new Error(`Failed to spawn agent ${agentId}: ${spawnResult.error}`);
+      }
+
+      return agentId;
+    } catch (error) {
+      if (!released) {
+        this.semaphore.release();
+        unsubscribe();
+      }
+      throw error;
     }
-
-    return agentId;
   }
 
   /**
@@ -240,6 +273,13 @@ export class AgentOrchestrator {
       name: id.split('@')[0] || id,
       status: this.backend.getStatus(id) || 'unknown' as SubAgentStatus,
     }));
+  }
+
+  /**
+   * Get the number of currently active (running) sub-agents.
+   */
+  activeCount(): number {
+    return this.backend.listActive().length;
   }
 
   /**

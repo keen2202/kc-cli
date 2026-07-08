@@ -425,6 +425,13 @@ describe('AgentOrchestrator - waitForAll', () => {
 
 describe('AgentOrchestrator - sendMessage', () => {
   it('should delegate to backend sendMessage', async () => {
+    // Keep agent running so it stays in the active map
+    let resolveBlock: () => void;
+    const blocked = new Promise<void>((r) => { resolveBlock = r; });
+    submitMessageImpl = async function* () {
+      await blocked;
+    };
+
     const { AgentOrchestrator, resetOrchestrator } = await import(
       '../../src/orchestrator/agent-orchestrator'
     );
@@ -439,6 +446,11 @@ describe('AgentOrchestrator - sendMessage', () => {
     );
 
     await orchestrator.sendMessage('agent@default', 'hello');
+
+    // Cleanup
+    resolveBlock!();
+    await orchestrator.cancel('agent@default');
+    await new Promise((r) => setTimeout(r, 50));
 
     // sendMessage should not throw for an existing agent
     expect(true).toBe(true);
@@ -477,6 +489,18 @@ describe('AgentOrchestrator - cancel', () => {
 
 describe('AgentOrchestrator - listAgents', () => {
   it('should list active agents', async () => {
+    // Keep agents running so they stay in the active map
+    let resolveBlock1: () => void;
+    let resolveBlock2: () => void;
+    const blocked1 = new Promise<void>((r) => { resolveBlock1 = r; });
+    const blocked2 = new Promise<void>((r) => { resolveBlock2 = r; });
+    let callCount = 0;
+    submitMessageImpl = async function* () {
+      callCount++;
+      if (callCount === 1) await blocked1;
+      else await blocked2;
+    };
+
     const { AgentOrchestrator, resetOrchestrator } = await import(
       '../../src/orchestrator/agent-orchestrator'
     );
@@ -499,6 +523,12 @@ describe('AgentOrchestrator - listAgents', () => {
     expect(agents.map(a => a.agentId)).toContain('agent-y@default');
     expect(agents[0].name).toBeDefined();
     expect(agents[0].status).toBeDefined();
+
+    // Cleanup
+    resolveBlock1!();
+    resolveBlock2!();
+    await orchestrator.shutdownAll();
+    await new Promise((r) => setTimeout(r, 50));
   });
 });
 

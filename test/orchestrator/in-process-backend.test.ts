@@ -96,6 +96,13 @@ describe('InProcessBackend - spawn', () => {
   });
 
   it('should store runtime in active agents map', async () => {
+    // Keep agent running so it stays in the active map
+    let resolveBlock: () => void;
+    const blocked = new Promise<void>((r) => { resolveBlock = r; });
+    submitMessageImpl = async function* () {
+      await blocked;
+    };
+
     const { InProcessBackend } = await import('../../src/orchestrator/backends/in-process');
     const bus = new EventBus();
     const tools = [createMockTool('FileRead')];
@@ -108,6 +115,11 @@ describe('InProcessBackend - spawn', () => {
 
     const active = backend.listActive();
     expect(active).toContain('my-agent@default');
+
+    // Cleanup
+    resolveBlock!();
+    await backend.shutdown('my-agent@default', true);
+    await new Promise((r) => setTimeout(r, 50));
   });
 
   it('should emit spawned event', async () => {
@@ -280,9 +292,6 @@ describe('InProcessBackend - agent loop behavior', () => {
     const failedEvent = events.find((e) => e.type === 'agent:subagent_failed');
     expect(failedEvent).toBeDefined();
     expect(failedEvent.error).toContain('LLM connection lost');
-
-    const status = backend.getStatus('agent@default');
-    expect(status).toBe('failed');
   });
 
   it('should handle timeout by aborting agent', async () => {
@@ -317,8 +326,11 @@ describe('InProcessBackend - agent loop behavior', () => {
   });
 
   it('should use default timeout when not specified', async () => {
+    // Keep agent running so it stays in the active map
+    let resolveBlock: () => void;
+    const blocked = new Promise<void>((r) => { resolveBlock = r; });
     submitMessageImpl = async function* () {
-      yield { type: 'agent:text_delta', text: 'ok', timestamp: Date.now() };
+      await blocked;
     };
 
     const { InProcessBackend } = await import('../../src/orchestrator/backends/in-process');
@@ -333,6 +345,11 @@ describe('InProcessBackend - agent loop behavior', () => {
     expect(result.success).toBe(true);
     // Agent should be active
     expect(backend.listActive()).toContain('agent@default');
+
+    // Cleanup
+    resolveBlock!();
+    await backend.shutdown('agent@default', true);
+    await new Promise((r) => setTimeout(r, 50));
   });
 });
 
@@ -386,6 +403,18 @@ describe('InProcessBackend - listActive', () => {
   });
 
   it('should list spawned agents', async () => {
+    // Keep agents running so they stay in the active map
+    let resolveBlock1: () => void;
+    let resolveBlock2: () => void;
+    const blocked1 = new Promise<void>((r) => { resolveBlock1 = r; });
+    const blocked2 = new Promise<void>((r) => { resolveBlock2 = r; });
+    let callCount = 0;
+    submitMessageImpl = async function* () {
+      callCount++;
+      if (callCount === 1) await blocked1;
+      else await blocked2;
+    };
+
     const { InProcessBackend } = await import('../../src/orchestrator/backends/in-process');
     const bus = new EventBus();
     const tools = [createMockTool('FileRead')];
@@ -404,11 +433,24 @@ describe('InProcessBackend - listActive', () => {
     expect(active).toContain('agent-a@default');
     expect(active).toContain('agent-b@default');
     expect(active).toHaveLength(2);
+
+    // Cleanup
+    resolveBlock1!();
+    resolveBlock2!();
+    await backend.shutdownAll();
+    await new Promise((r) => setTimeout(r, 50));
   });
 });
 
 describe('InProcessBackend - sendMessage', () => {
   it('should send message to existing agent', async () => {
+    // Keep agent running so it stays in the active map
+    let resolveBlock: () => void;
+    const blocked = new Promise<void>((r) => { resolveBlock = r; });
+    submitMessageImpl = async function* () {
+      await blocked;
+    };
+
     const { InProcessBackend } = await import('../../src/orchestrator/backends/in-process');
     const bus = new EventBus();
     const tools = [createMockTool('FileRead')];
@@ -424,6 +466,10 @@ describe('InProcessBackend - sendMessage', () => {
       from: 'parent',
       payload: { message: 'hello' },
     });
+
+    // Cleanup
+    resolveBlock!();
+    await backend.shutdown('agent@default', true);
 
     // sendMessage should not throw for an existing agent
     expect(true).toBe(true);
@@ -447,6 +493,13 @@ describe('InProcessBackend - sendMessage', () => {
 
 describe('InProcessBackend - shutdown', () => {
   it('should force shutdown existing agent', async () => {
+    // Keep agent running so it stays in the active map
+    let resolveBlock: () => void;
+    const blocked = new Promise<void>((r) => { resolveBlock = r; });
+    submitMessageImpl = async function* () {
+      await blocked;
+    };
+
     const { InProcessBackend } = await import('../../src/orchestrator/backends/in-process');
     const bus = new EventBus();
     const tools = [createMockTool('FileRead')];
@@ -464,9 +517,19 @@ describe('InProcessBackend - shutdown', () => {
     expect(result).toBe(true);
     expect(backend.listActive()).not.toContain('agent@default');
     expect(events.some((e) => e.type === 'agent:subagent_cancelled')).toBe(true);
+
+    resolveBlock!();
+    await new Promise((r) => setTimeout(r, 50));
   });
 
   it('should graceful shutdown existing agent', async () => {
+    // Keep agent running so it stays in the active map
+    let resolveBlock: () => void;
+    const blocked = new Promise<void>((r) => { resolveBlock = r; });
+    submitMessageImpl = async function* () {
+      await blocked;
+    };
+
     const { InProcessBackend } = await import('../../src/orchestrator/backends/in-process');
     const bus = new EventBus();
     const tools = [createMockTool('FileRead')];
@@ -479,6 +542,9 @@ describe('InProcessBackend - shutdown', () => {
 
     const result = await backend.shutdown('agent@default', false);
     expect(result).toBe(true);
+
+    resolveBlock!();
+    await new Promise((r) => setTimeout(r, 50));
   });
 
   it('should return false for unknown agent', async () => {
@@ -494,6 +560,18 @@ describe('InProcessBackend - shutdown', () => {
 
 describe('InProcessBackend - shutdownAll', () => {
   it('should shutdown all active agents', async () => {
+    // Keep agents running so they stay in the active map
+    let resolveBlock1: () => void;
+    let resolveBlock2: () => void;
+    const blocked1 = new Promise<void>((r) => { resolveBlock1 = r; });
+    const blocked2 = new Promise<void>((r) => { resolveBlock2 = r; });
+    let callCount = 0;
+    submitMessageImpl = async function* () {
+      callCount++;
+      if (callCount === 1) await blocked1;
+      else await blocked2;
+    };
+
     const { InProcessBackend } = await import('../../src/orchestrator/backends/in-process');
     const bus = new EventBus();
     const tools = [createMockTool('FileRead')];
@@ -513,6 +591,10 @@ describe('InProcessBackend - shutdownAll', () => {
     await backend.shutdownAll();
 
     expect(backend.listActive()).toEqual([]);
+
+    resolveBlock1!();
+    resolveBlock2!();
+    await new Promise((r) => setTimeout(r, 50));
   });
 
   it('should handle shutdownAll with no agents', async () => {
@@ -565,8 +647,10 @@ describe('getCurrentAgentContext', () => {
 
 describe('InProcessBackend - concurrent execution', () => {
   it('should handle multiple agents running concurrently', async () => {
+    // Keep agents running so they stay in the active map
+    const blocks: Array<() => void> = [];
     submitMessageImpl = async function* () {
-      yield { type: 'agent:text_delta', text: 'done', timestamp: Date.now() };
+      await new Promise<void>((r) => blocks.push(r));
     };
 
     const { InProcessBackend } = await import('../../src/orchestrator/backends/in-process');
@@ -593,10 +677,15 @@ describe('InProcessBackend - concurrent execution', () => {
     // At least the spawn itself should succeed (even if the loop fails)
     expect(results.every((r) => r.agentId)).toBe(true);
 
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, 100));
 
     const active = backend.listActive();
     expect(active).toHaveLength(3);
+
+    // Cleanup
+    for (const resolve of blocks) resolve();
+    await backend.shutdownAll();
+    await new Promise((r) => setTimeout(r, 50));
   });
 });
 
