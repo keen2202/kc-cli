@@ -39,13 +39,13 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 - **ExecutionEnv**: Swappable FileSystem/Shell abstraction; MockExecutionEnv for testing without real I/O
 - **Session Management**: Session persistence, archival, pruning, and recovery with configurable retention
 - **Interactive REPL**: Terminal UI with sidebar, diff preview, command palette, model selector, and steer mode
-- **Node.js Compatible**: Works with Node.js 16+ (no Bun required)
+- **Node.js Compatible**: Requires Node.js 20+ (no Bun required)
 
 ## Quick Start
 
 ### Prerequisites
 
-- Node.js 16.20.2 or higher
+- Node.js 20 or higher
 - npm or yarn
 - API key for your chosen LLM provider
 
