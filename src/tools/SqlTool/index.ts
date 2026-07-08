@@ -1,6 +1,9 @@
 // SQL Tool - Real database queries via better-sqlite3
 
 import { z } from 'zod';
+import { Worker } from 'node:worker_threads';
+import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
@@ -142,6 +145,137 @@ function sanitizeError(error: unknown): string {
   );
 }
 
+/**
+ * WorkerUnavailableError — thrown when worker_threads cannot be initialised,
+ * signalling the caller to fall back to direct better-sqlite3 execution.
+ */
+class WorkerUnavailableError extends Error {
+  constructor() {
+    super('Worker unavailable');
+    this.name = 'WorkerUnavailableError';
+  }
+}
+
+/**
+ * Try to guess the path to the compiled (or source) worker file.
+ * In dev (tsx) the .ts file exists; in production the .js file exists.
+ */
+function resolveWorkerPath(): string {
+  const tsPath = fileURLToPath(new URL('worker.ts', import.meta.url));
+  const jsPath = fileURLToPath(new URL('worker.js', import.meta.url));
+  return existsSync(tsPath) ? tsPath : jsPath;
+}
+
+/**
+ * Execute a SQL query inside a worker_thread for event-loop isolation
+ * and wall-clock timeout support.
+ *
+ * Returns a normalised result object (type: 'select' | 'write') on
+ * success; rejects on timeout, worker error, or query error.
+ */
+async function executeInWorker(
+  params: { query: string; path: string; readonly: boolean; params: unknown[] },
+  timeoutMs: number,
+): Promise<
+  | { type: 'select'; rows: Record<string, unknown>[] }
+  | { type: 'write'; changes: number; lastInsertRowid: number | bigint }
+> {
+  const workerPath = resolveWorkerPath();
+
+  let worker: Worker;
+  try {
+    worker = new Worker(workerPath);
+  } catch {
+    // Worker constructor failed — likely an environment without workers
+    throw new WorkerUnavailableError();
+  }
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      worker.terminate();
+      reject(new Error('SqlTool query timeout'));
+    }, timeoutMs);
+
+    worker.on('message', (msg: { type: string; data?: any; error?: string }) => {
+      clearTimeout(timer);
+      if (msg.type === 'error') {
+        reject(new Error(msg.error ?? 'Unknown worker error'));
+      } else if (msg.type === 'result') {
+        // Normalise to the same shape as executeDirect() so the caller
+        // can dispatch on result.type === 'select' | 'write'.
+        if ('rows' in msg.data) {
+          resolve({ type: 'select', rows: msg.data.rows });
+        } else {
+          resolve({ type: 'write', changes: msg.data.changes, lastInsertRowid: msg.data.lastInsertRowid });
+        }
+      }
+    });
+
+    worker.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+
+    worker.on('exit', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(`Worker exited with code ${code}`));
+      }
+    });
+
+    worker.postMessage({
+      query: params.query,
+      path: params.path,
+      readonly: params.readonly,
+      params: params.params,
+    });
+  });
+}
+
+/**
+ * Execute a SQL query directly (same-process, fallback path).
+ * Used when worker_threads is unavailable.
+ */
+function executeDirect(
+  params: { query: string; path: string; readonly: boolean; params: unknown[] },
+  timeoutMs: number,
+): { type: 'select'; rows: Record<string, unknown>[] } | { type: 'write'; changes: number; lastInsertRowid: number | bigint } {
+  const db = getDb(params.path, params.readonly, timeoutMs);
+  const stmt = db.prepare(params.query);
+  const queryParams = params.params;
+
+  if (isReadOnlyQuery(params.query)) {
+    const rows = stmt.all(...queryParams) as Record<string, unknown>[];
+    return { type: 'select', rows };
+  }
+  const result = stmt.run(...queryParams) as {
+    changes: number;
+    lastInsertRowid: number | bigint;
+  };
+  return { type: 'write', changes: result.changes, lastInsertRowid: result.lastInsertRowid };
+}
+
+/**
+ * Execute a SQL query, preferring the worker_threads path with
+ * automatic fallback to direct execution.
+ */
+async function executeQuery(
+  params: { query: string; path: string; readonly: boolean; params: unknown[] },
+  timeoutMs: number,
+): Promise<
+  | { type: 'select'; rows: Record<string, unknown>[] }
+  | { type: 'write'; changes: number; lastInsertRowid: number | bigint }
+> {
+  try {
+    return await executeInWorker(params, timeoutMs);
+  } catch (err) {
+    if (err instanceof WorkerUnavailableError) {
+      return executeDirect(params, timeoutMs);
+    }
+    throw err;
+  }
+}
+
 export const tool = buildTool<SqlInput, string>({
   name: 'Sql',
   description: 'Execute SQL database queries (SQLite via better-sqlite3)',
@@ -191,21 +325,20 @@ export const tool = buildTool<SqlInput, string>({
 
       // S1: Pass timeout to better-sqlite3 for busy_timeout enforcement (AC-S1.4)
       const timeoutMs = (input.timeout ?? 30) * 1000;
-      const db = getDb(dbPath, enforceReadonly, timeoutMs);
+
+      // Execute query via worker_threads (with fallback to direct)
+      const queryResult = await executeQuery({
+        query: input.query,
+        path: dbPath,
+        readonly: enforceReadonly,
+        params: input.params ?? [],
+      }, timeoutMs);
 
       const queryUpper = input.query.trim().toUpperCase();
 
-      if (isReadOnlyQuery(input.query)) {
+      if (queryResult.type === 'select') {
         // SELECT / PRAGMA / EXPLAIN — return rows
-        const params = input.params || [];
-        const stmt = db.prepare(input.query);
-
-        let rows: unknown[];
-        try {
-          rows = stmt.all(...params);
-        } catch (e) {
-          return toolError(`Query error: ${sanitizeError(e)}`);
-        }
+        const rows = queryResult.rows;
 
         if (rows.length === 0) {
           return toolResult('Query returned 0 rows.', {
@@ -218,13 +351,12 @@ export const tool = buildTool<SqlInput, string>({
         const displayRows = truncated ? rows.slice(0, MAX_ROWS) : rows;
 
         // Format as table-like output
-        const columns = displayRows.length > 0 ? Object.keys(displayRows[0] as Record<string, unknown>) : [];
+        const columns = displayRows.length > 0 ? Object.keys(displayRows[0]) : [];
         const header = columns.join(' | ');
         const separator = columns.map(() => '---').join(' | ');
         const body = displayRows.map(row => {
-          const r = row as Record<string, unknown>;
           return columns.map(c => {
-            const v = r[c];
+            const v = row[c];
             return v === null ? 'NULL' : String(v).slice(0, 200);
           }).join(' | ');
         }).join('\n');
@@ -242,27 +374,17 @@ export const tool = buildTool<SqlInput, string>({
         });
       } else {
         // INSERT / UPDATE / DELETE / CREATE — execute and return changes
-        const params = input.params || [];
-        const stmt = db.prepare(input.query);
-
-        let result: { changes: number; lastInsertRowid: number | bigint };
-        try {
-          result = stmt.run(...params);
-        } catch (e) {
-          return toolError(`Query error: ${sanitizeError(e)}`);
-        }
-
         const info = [
           `Query executed successfully.`,
-          `Changes: ${result.changes ?? 0} row(s) affected`,
-          result.lastInsertRowid !== undefined ? `Last insert rowid: ${result.lastInsertRowid}` : '',
+          `Changes: ${queryResult.changes ?? 0} row(s) affected`,
+          queryResult.lastInsertRowid !== undefined ? `Last insert rowid: ${queryResult.lastInsertRowid}` : '',
         ].filter(Boolean).join('\n');
 
         return toolResult(info, {
           metadata: {
             database: input.database,
-            changes: result.changes ?? 0,
-            lastInsertRowid: result.lastInsertRowid,
+            changes: queryResult.changes ?? 0,
+            lastInsertRowid: queryResult.lastInsertRowid,
             queryType: queryUpper.split(' ')[0],
           },
         });

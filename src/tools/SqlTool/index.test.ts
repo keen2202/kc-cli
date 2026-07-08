@@ -1,6 +1,56 @@
 // Tests for SqlTool S1 hardening: readonly-by-default, path whitelist, block ATTACH/multi-statement
+// and P2 worker_threads isolation with wall-clock timeout
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// ── Hoisted mock for worker_threads so tests can control Worker behaviour ──
+const { workerMock } = vi.hoisted(() => {
+  // Shared mutable state that each test can arrange
+  const mockWorker = {
+    on: vi.fn(),
+    postMessage: vi.fn(),
+    terminate: vi.fn(),
+    _handlers: new Map<string, (...args: any[]) => void>(),
+    _receiveMessage(data: any) {
+      mockWorker._handlers.get('message')?.(data);
+    },
+    _receiveError(err: Error) {
+      mockWorker._handlers.get('error')?.(err);
+    },
+    _receiveExit(code: number) {
+      mockWorker._handlers.get('exit')?.(code);
+    },
+  };
+  mockWorker.on = vi.fn((event: string, handler: (...args: any[]) => void) => {
+    mockWorker._handlers.set(event, handler);
+  });
+
+  // Must use `function` keyword (not arrow) so `new Worker()` works:
+  // vitest / Node rejects arrow-based mocks for constructor calls.
+  const Worker = vi.fn(function workerFactory() {
+    return mockWorker;
+  });
+
+  return {
+    workerMock: {
+      Worker,
+      mockWorker,
+      reset() {
+        mockWorker._handlers.clear();
+        vi.clearAllMocks();
+        Worker.mockClear();
+        // Re-bind the factory after clearAllMocks resets implementation
+        Worker.mockImplementation(function workerFactory() {
+          return mockWorker;
+        });
+      },
+    },
+  };
+});
+
+vi.mock('node:worker_threads', () => ({
+  Worker: workerMock.Worker,
+}));
 
 // Mock cache manager to avoid real cache side effects
 vi.mock('../../services/cache', () => ({
@@ -171,5 +221,108 @@ describe('[S1] tool.call rejection paths — AC-S1.1/S1.2/S1.3', () => {
       baseCtx(),
     );
     expect(r.isError).toBe(true);
+  });
+});
+
+// ── P2: worker_threads execution with wall-clock timeout ──────────────
+
+describe('[P2] worker_threads execution', () => {
+  beforeEach(() => {
+    workerMock.reset();
+  });
+
+  // Named connection so security checks pass and the query reaches the worker
+  const namedConnState = () => ({
+    databaseConnections: {
+      testdb: { type: 'sqlite', path: '/tmp/test.db', readonly: false },
+    },
+  });
+
+  it('returns SELECT results from worker (AC-P2.1)', async () => {
+    mockState(namedConnState());
+
+    const promise = tool.call(
+      { query: 'SELECT 1 AS val', database: 'testdb', timeout: 30 },
+      baseCtx(),
+    );
+
+    workerMock.mockWorker._receiveMessage({
+      type: 'result',
+      data: { rows: [{ val: 1 }] },
+    });
+
+    const r = await promise;
+    expect(r.isError).toBe(false);
+    expect(r.output).toContain('val');
+    expect(r.output).toContain('1');
+  });
+
+  it('returns write query result from worker (AC-P2.1)', async () => {
+    mockState(namedConnState());
+
+    const promise = tool.call(
+      { query: 'INSERT INTO t VALUES (1)', database: 'testdb', timeout: 30 },
+      baseCtx(),
+    );
+
+    workerMock.mockWorker._receiveMessage({
+      type: 'result',
+      data: { changes: 1, lastInsertRowid: 42 },
+    });
+
+    const r = await promise;
+    expect(r.isError).toBe(false);
+    expect(r.output).toContain('Changes: 1');
+    expect(r.output).toContain('rowid: 42');
+  });
+
+  it('returns empty SELECT results from worker', async () => {
+    mockState(namedConnState());
+
+    const promise = tool.call(
+      { query: 'SELECT * FROM empty', database: 'testdb', timeout: 30 },
+      baseCtx(),
+    );
+
+    workerMock.mockWorker._receiveMessage({
+      type: 'result',
+      data: { rows: [] },
+    });
+
+    const r = await promise;
+    expect(r.isError).toBe(false);
+    expect(r.output).toContain('0 rows');
+  });
+
+  it('triggers timeout when worker does not respond (AC-P2.1/AC-P2.2)', async () => {
+    mockState(namedConnState());
+
+    // Very short timeout (10ms) so the test completes quickly; the mock worker
+    // never posts a message, so the timer fires and terminates the worker.
+    const r = await tool.call(
+      { query: 'SELECT 1', database: 'testdb', timeout: 0.01 },
+      baseCtx(),
+    );
+
+    expect(r.isError).toBe(true);
+    expect(r.message).toContain('timeout');
+  });
+
+  it('propagates error from worker', async () => {
+    mockState(namedConnState());
+
+    const promise = tool.call(
+      { query: 'SELECT invalid', database: 'testdb', timeout: 30 },
+      baseCtx(),
+    );
+
+    workerMock.mockWorker._receiveMessage({
+      type: 'error',
+      error: 'no such table: invalid',
+    });
+
+    const r = await promise;
+    expect(r.isError).toBe(true);
+    expect(r.message).toContain('no such table');
   });
 });
