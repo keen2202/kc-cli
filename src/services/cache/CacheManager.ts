@@ -2,7 +2,7 @@
 // Manages all TieredCache instances, provides unified metrics and adaptive tuning
 
 import { TieredCache, type CacheStats, type TieredCacheOptions } from './TieredCache';
-import { globalCacheMetrics } from '../../metrics/cacheMetrics';
+import { globalKVCacheMetrics } from '../../metrics/cacheMetrics';
 
 export type CacheCategory =
   | 'token'       // Token estimation cache
@@ -78,7 +78,7 @@ export class CacheManager {
 
   /**
    * Create or get a named cache with category-based defaults.
-   * Automatically records metrics via globalCacheMetrics.
+   * Automatically records metrics via globalKVCacheMetrics.
    */
   getOrCreate<V>(
     name: string,
@@ -89,7 +89,7 @@ export class CacheManager {
     if (existing) {
       // Record metrics for cache access
       const stats = existing.cache.getStats();
-      globalCacheMetrics.updateSize(name, stats.size, stats.maxSize);
+      globalKVCacheMetrics.updateSize(name, stats.size, stats.maxSize);
       return existing.cache as TieredCache<V>;
     }
 
@@ -107,7 +107,7 @@ export class CacheManager {
     this.caches.set(name, { name, category, cache });
 
     // Initialize metrics for this cache
-    globalCacheMetrics.updateSize(name, 0, maxSize);
+    globalKVCacheMetrics.updateSize(name, 0, maxSize);
 
     return cache;
   }
@@ -130,7 +130,7 @@ export class CacheManager {
   }
 
   /**
-   * Get global cache statistics. Also syncs metrics to globalCacheMetrics.
+   * Get global cache statistics. Also syncs metrics to globalKVCacheMetrics.
    */
   getGlobalStats(): GlobalCacheStats {
     let totalHits = 0;
@@ -144,7 +144,7 @@ export class CacheManager {
       totalMisses += stats.misses;
 
       // Sync to global cache metrics
-      globalCacheMetrics.updateSize(name, stats.size, stats.maxSize);
+      globalKVCacheMetrics.updateSize(name, stats.size, stats.maxSize);
     }
 
     const globalHitRate = totalHits + totalMisses > 0
@@ -168,20 +168,20 @@ export class CacheManager {
     for (const [name, reg] of this.caches) {
       const stats = reg.cache.getStats();
       // Record hits and misses based on stats diff
-      const existing = globalCacheMetrics.getMetrics(name);
+      const existing = globalKVCacheMetrics.getMetrics(name);
       const prevHits = existing?.hits ?? 0;
       const prevMisses = existing?.misses ?? 0;
 
       const newHits = stats.hits - prevHits;
       const newMisses = stats.misses - prevMisses;
 
-      for (let i = 0; i < newHits; i++) globalCacheMetrics.recordHit(name);
-      for (let i = 0; i < newMisses; i++) globalCacheMetrics.recordMiss(name);
+      for (let i = 0; i < newHits; i++) globalKVCacheMetrics.recordHit(name);
+      for (let i = 0; i < newMisses; i++) globalKVCacheMetrics.recordMiss(name);
       for (let i = 0; i < stats.evictions - (existing?.evictions ?? 0); i++) {
-        globalCacheMetrics.recordEviction(name);
+        globalKVCacheMetrics.recordEviction(name);
       }
 
-      globalCacheMetrics.updateSize(name, stats.size, stats.maxSize);
+      globalKVCacheMetrics.updateSize(name, stats.size, stats.maxSize);
     }
   }
 
@@ -189,7 +189,7 @@ export class CacheManager {
    * Get the global cache metrics collector for external reporting.
    */
   getMetricsCollector() {
-    return globalCacheMetrics;
+    return globalKVCacheMetrics;
   }
 
   /**

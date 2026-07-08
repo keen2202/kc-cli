@@ -4,7 +4,7 @@ import { logger } from '../services/logger';
 /**
  * Cache metrics data structure.
  */
-export interface CacheMetrics {
+export interface KVCacheMetrics {
   /** Number of cache hits */
   hits: number;
   /** Number of cache misses */
@@ -25,7 +25,7 @@ export interface CacheMetrics {
  * Cache metrics collector for monitoring cache performance.
  */
 export class CacheMetricsCollector {
-  private metrics: Map<string, CacheMetrics> = new Map();
+  private metrics: Map<string, KVCacheMetrics> = new Map();
   private alertThreshold: number = 0.5; // 50% hit rate threshold
   private alertCallbacks: Array<(cacheName: string, hitRate: number) => void> = [];
 
@@ -69,14 +69,14 @@ export class CacheMetricsCollector {
   /**
    * Get metrics for a specific cache.
    */
-  getMetrics(cacheName: string): CacheMetrics | null {
+  getMetrics(cacheName: string): KVCacheMetrics | null {
     return this.metrics.get(cacheName) || null;
   }
 
   /**
    * Get all cache metrics.
    */
-  getAllMetrics(): Map<string, CacheMetrics> {
+  getAllMetrics(): Map<string, KVCacheMetrics> {
     return new Map(this.metrics);
   }
 
@@ -145,7 +145,7 @@ export class CacheMetricsCollector {
    * Export metrics as JSON.
    */
   exportJSON(): string {
-    const data: Record<string, CacheMetrics> = {};
+    const data: Record<string, KVCacheMetrics> = {};
     for (const [name, metrics] of this.metrics.entries()) {
       data[name] = { ...metrics };
     }
@@ -181,7 +181,7 @@ export class CacheMetricsCollector {
   /**
    * Get or create metrics for a cache.
    */
-  private getOrCreateMetrics(cacheName: string): CacheMetrics {
+  private getOrCreateMetrics(cacheName: string): KVCacheMetrics {
     let metrics = this.metrics.get(cacheName);
     if (!metrics) {
       metrics = {
@@ -201,7 +201,7 @@ export class CacheMetricsCollector {
   /**
    * Update hit rate calculation.
    */
-  private updateHitRate(metrics: CacheMetrics): void {
+  private updateHitRate(metrics: KVCacheMetrics): void {
     const total = metrics.hits + metrics.misses;
     metrics.hitRate = total > 0 ? metrics.hits / total : 0;
     metrics.timestamp = Date.now();
@@ -210,7 +210,7 @@ export class CacheMetricsCollector {
   /**
    * Check if hit rate is below threshold and trigger alert.
    */
-  private checkAlert(cacheName: string, metrics: CacheMetrics): void {
+  private checkAlert(cacheName: string, metrics: KVCacheMetrics): void {
     const total = metrics.hits + metrics.misses;
     if (total >= 10 && metrics.hitRate < this.alertThreshold) {
       for (const callback of this.alertCallbacks) {
@@ -223,7 +223,7 @@ export class CacheMetricsCollector {
 /**
  * Global cache metrics collector instance.
  */
-export const globalCacheMetrics = new CacheMetricsCollector();
+export const globalKVCacheMetrics = new CacheMetricsCollector();
 
 /**
  * Create a cache metrics wrapper for a cache instance.
@@ -238,7 +238,7 @@ export function withCacheMetrics<T>(
     clear(): void;
     size: number;
   },
-  metricsCollector: CacheMetricsCollector = globalCacheMetrics
+  metricsCollector: CacheMetricsCollector = globalKVCacheMetrics
 ): typeof cache {
   return {
     get(key: string): T | undefined {

@@ -16,7 +16,7 @@ import { createAPIClient, LLMProvider } from '../api';
 import type { BaseApiClient, LLMStreamEvent as APIStreamEvent, LLMRequestConfig } from '../api';
 import { UserProfileService } from '../services/userProfile';
 import { getSystemPromptAdaptation } from '../services/behavioralAdapter';
-import { CacheMetrics } from '../services/cacheMetrics';
+import { PromptCacheMetrics } from '../services/cacheMetrics';
 import { CachePrefixService, buildCacheStrategy } from '../services/cachePrefix';
 import { estimateTaskComplexity } from '../api/prompts/task-prompts';
 import { autoStageFile, autoCommitAll } from '../utils/git';
@@ -121,7 +121,7 @@ export class QueryEngine {
   private abortController: AbortController;
 
   // Cache metrics tracking
-  private cacheMetrics = new CacheMetrics();
+  private cacheMetrics = new PromptCacheMetrics();
 
   // Cache prefix service for byte-stable prompt prefixes
   private cachePrefix: CachePrefixService;

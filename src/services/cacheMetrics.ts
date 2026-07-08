@@ -31,7 +31,7 @@ export interface CacheCallRecord {
  * Supports Anthropic's prompt caching (cache_read_input_tokens / cache_creation_input_tokens).
  * Can be extended for other providers that expose cache metrics.
  */
-export class CacheMetrics {
+export class PromptCacheMetrics {
   private records: CacheCallRecord[] = [];
   private maxRecords: number;
 
@@ -234,7 +234,7 @@ export function formatCacheMetrics(snapshot: CacheSnapshot): string {
 /**
  * Format a session-end cache summary with per-provider breakdown.
  */
-export function formatCacheSummary(metrics: CacheMetrics): string {
+export function formatCacheSummary(metrics: PromptCacheMetrics): string {
   const snapshot = metrics.getSnapshot();
   if (snapshot.callCount === 0) return '';
 

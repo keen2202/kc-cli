@@ -1,13 +1,13 @@
 // Tests for CacheMetrics service
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { CacheMetrics, formatCacheMetrics, formatCacheSummary } from './cacheMetrics';
+import { PromptCacheMetrics, formatCacheMetrics, formatCacheSummary } from './cacheMetrics';
 
-describe('CacheMetrics', () => {
-  let metrics: CacheMetrics;
+describe('PromptCacheMetrics', () => {
+  let metrics: PromptCacheMetrics;
 
   beforeEach(() => {
-    metrics = new CacheMetrics();
+    metrics = new PromptCacheMetrics();
   });
 
   describe('record()', () => {
@@ -33,7 +33,7 @@ describe('CacheMetrics', () => {
     });
 
     it('should evict old records beyond maxRecords', () => {
-      const smallMetrics = new CacheMetrics(3);
+      const smallMetrics = new PromptCacheMetrics(3);
       smallMetrics.record('model', 100, 50, 0);
       smallMetrics.record('model', 200, 100, 0);
       smallMetrics.record('model', 300, 150, 0);
@@ -178,12 +178,12 @@ describe('CacheMetrics', () => {
 
 describe('formatCacheMetrics()', () => {
   it('should format empty snapshot', () => {
-    const metrics = new CacheMetrics();
+    const metrics = new PromptCacheMetrics();
     expect(formatCacheMetrics(metrics.getSnapshot())).toBe('No cache data available');
   });
 
   it('should format snapshot with data', () => {
-    const metrics = new CacheMetrics();
+    const metrics = new PromptCacheMetrics();
     metrics.record('model', 10000, 8000, 500);
 
     const formatted = formatCacheMetrics(metrics.getSnapshot());
@@ -197,7 +197,7 @@ describe('formatCacheMetrics()', () => {
 
 describe('getProviderBreakdown()', () => {
   it('should group by provider field', () => {
-    const metrics = new CacheMetrics();
+    const metrics = new PromptCacheMetrics();
     metrics.record('deepseek-v4-pro', 1000, 800, 0, 'deepseek');
     metrics.record('claude-sonnet-4-20250514', 1000, 500, 0, 'anthropic');
     metrics.record('deepseek-v4-flash', 500, 400, 0, 'deepseek');
@@ -216,7 +216,7 @@ describe('getProviderBreakdown()', () => {
   });
 
   it('should fallback to model prefix when no provider', () => {
-    const metrics = new CacheMetrics();
+    const metrics = new PromptCacheMetrics();
     metrics.record('gpt-4o', 1000, 500, 0);
 
     const breakdown = metrics.getProviderBreakdown();
@@ -226,12 +226,12 @@ describe('getProviderBreakdown()', () => {
 
 describe('formatCacheSummary()', () => {
   it('should return empty string for no records', () => {
-    const metrics = new CacheMetrics();
+    const metrics = new PromptCacheMetrics();
     expect(formatCacheSummary(metrics)).toBe('');
   });
 
   it('should format single provider summary', () => {
-    const metrics = new CacheMetrics();
+    const metrics = new PromptCacheMetrics();
     metrics.record('deepseek-v4-pro', 10000, 8000, 0, 'deepseek');
 
     const summary = formatCacheSummary(metrics);
@@ -241,7 +241,7 @@ describe('formatCacheSummary()', () => {
   });
 
   it('should include per-provider breakdown for multiple providers', () => {
-    const metrics = new CacheMetrics();
+    const metrics = new PromptCacheMetrics();
     metrics.record('deepseek-v4-pro', 1000, 800, 0, 'deepseek');
     metrics.record('claude-sonnet-4-20250514', 1000, 500, 0, 'anthropic');
 

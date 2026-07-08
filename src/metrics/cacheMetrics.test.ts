@@ -1,7 +1,7 @@
 // Tests for cache metrics collection
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { CacheMetricsCollector, globalCacheMetrics, withCacheMetrics } from './cacheMetrics';
+import { CacheMetricsCollector, globalKVCacheMetrics, withCacheMetrics } from './cacheMetrics';
 
 describe('CacheMetricsCollector', () => {
   let collector: CacheMetricsCollector;
