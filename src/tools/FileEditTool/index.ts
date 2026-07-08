@@ -7,6 +7,7 @@ import type { PermissionResult } from '../../permissions/protocol';
 import * as path from 'path';
 import * as fs from 'fs';
 import { assertPathWithinWorkspace } from '../../utils/path';
+import { isExecError, getErrorMessage, getErrorStack } from '../../utils/errors';
 
 const FileEditInputSchema = z.object({
   file_path: z.string().describe('Path to file to edit'),
@@ -94,7 +95,23 @@ export const tool = buildTool<FileEditInput, string>({
         }
       );
     } catch (error) {
-      return toolError(`File edit failed: ${error instanceof Error ? error.message : String(error)}`);
+      const errorMessage = getErrorMessage(error);
+      const metadata: Record<string, unknown> = {};
+
+      // Preserve stack trace information
+      const errorStack = getErrorStack(error);
+      if (errorStack) {
+        metadata.stack = errorStack;
+      }
+
+      // Preserve exec error info (exitCode, signal, stderr) when applicable
+      if (isExecError(error)) {
+        if (error.code !== undefined) metadata.exitCode = error.code;
+        if (error.signal !== undefined) metadata.signal = error.signal;
+        if (error.stderr !== undefined) metadata.stderr = error.stderr;
+      }
+
+      return toolError(`File edit failed: ${errorMessage}`, metadata);
     }
   },
 
