@@ -81,8 +81,8 @@ describe('ResultAggregator', () => {
     expect(agg.isAllDone()).toBe(true);
   });
 
-  it('should report not done when empty', () => {
-    expect(agg.isAllDone()).toBe(false);
+  it('should report done when empty (all done when nothing to wait for)', () => {
+    expect(agg.isAllDone()).toBe(true);
   });
 
   it('should generate summary with results', () => {
@@ -130,7 +130,7 @@ describe('ResultAggregator', () => {
     agg.register('a1', { name: 'a1', prompt: '', systemPromptMode: 'default' });
     agg.reset();
     expect(agg.getStatus()).toEqual({});
-    expect(agg.isAllDone()).toBe(false);
+    expect(agg.isAllDone()).toBe(true);
   });
 
   it('should compute totalDuration as max', () => {

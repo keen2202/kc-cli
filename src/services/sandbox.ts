@@ -1,6 +1,8 @@
 // Sandbox isolation layer for command execution
 
 import { BubblewrapSandbox, SeccompSandbox, NoopSandbox } from './sandbox-profiles';
+import { DockerSandbox } from './sandbox-docker';
+import { WindowsSandbox } from './sandbox-windows';
 import type { SandboxPolicy } from './sandbox-policy';
 import { DEFAULT_SANDBOX_POLICY, getToolPolicy, shouldSandbox, mergeSandboxPolicy } from './sandbox-policy';
 import { SandboxProbe, type ProbeResult } from './sandbox-probe';
@@ -50,7 +52,6 @@ const BACKEND_REGISTRY: Record<string, () => SandboxBackend> = {
   seccomp: () => new SeccompSandbox(),
   docker: () => {
     try {
-      const { DockerSandbox } = require('./sandbox-docker');
       return new DockerSandbox();
     } catch {
       return new NoopSandbox();
@@ -58,7 +59,6 @@ const BACKEND_REGISTRY: Record<string, () => SandboxBackend> = {
   },
   'windows-sandbox': () => {
     try {
-      const { WindowsSandbox } = require('./sandbox-windows');
       return new WindowsSandbox();
     } catch {
       return new NoopSandbox();

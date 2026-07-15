@@ -75,7 +75,7 @@ describe('AgentOrchestrator - spawn', () => {
       createParentContext()
     );
 
-    expect(agentId).toBe('test-agent@default');
+    expect(agentId).toBe('test-agent@0');
   });
 
   it('should register agent with aggregator on spawn', async () => {
@@ -93,7 +93,7 @@ describe('AgentOrchestrator - spawn', () => {
       createParentContext()
     );
 
-    expect(registerSpy).toHaveBeenCalledWith('my-agent@default', expect.objectContaining({
+    expect(registerSpy).toHaveBeenCalledWith('my-agent@0', expect.objectContaining({
       name: 'my-agent',
       prompt: 'task',
     }));
@@ -118,9 +118,9 @@ describe('AgentOrchestrator - spawnBatch', () => {
     );
 
     expect(ids).toHaveLength(3);
-    expect(ids).toContain('agent-a@default');
-    expect(ids).toContain('agent-b@default');
-    expect(ids).toContain('agent-c@default');
+    expect(ids).toContain('agent-a@0');
+    expect(ids).toContain('agent-b@1');
+    expect(ids).toContain('agent-c@2');
   });
 
   it('should continue spawning other agents when one fails', async () => {
@@ -169,7 +169,7 @@ describe('AgentOrchestrator - waitForCompletion', () => {
     const bus = orchestrator.getEventBus();
 
     const result = {
-      agentId: 'agent-1@default',
+      agentId: 'agent-1@0',
       name: 'agent-1',
       success: true,
       output: 'done',
@@ -179,15 +179,15 @@ describe('AgentOrchestrator - waitForCompletion', () => {
     };
 
     setTimeout(() => {
-      bus.emit('agent-1@default', {
+      bus.emit('agent-1@0', {
         type: 'agent:subagent_completed',
-        agentId: 'agent-1@default',
+        agentId: 'agent-1@0',
         result,
         timestamp: Date.now(),
       } as any);
     }, 50);
 
-    const agentResult = await orchestrator.waitForCompletion('agent-1@default', 5000);
+    const agentResult = await orchestrator.waitForCompletion('agent-1@0', 5000);
     expect(agentResult).toEqual(result);
   });
 
@@ -201,17 +201,17 @@ describe('AgentOrchestrator - waitForCompletion', () => {
     const bus = orchestrator.getEventBus();
 
     setTimeout(() => {
-      bus.emit('agent-1@default', {
+      bus.emit('agent-1@0', {
         type: 'agent:subagent_failed',
-        agentId: 'agent-1@default',
+        agentId: 'agent-1@0',
         error: 'LLM crashed',
         timestamp: Date.now(),
       } as any);
     }, 50);
 
     await expect(
-      orchestrator.waitForCompletion('agent-1@default', 5000)
-    ).rejects.toThrow('Agent agent-1@default failed: LLM crashed');
+      orchestrator.waitForCompletion('agent-1@0', 5000)
+    ).rejects.toThrow('Agent agent-1@0 failed: LLM crashed');
   });
 
   it('should reject when agent times out via event', async () => {
@@ -224,17 +224,17 @@ describe('AgentOrchestrator - waitForCompletion', () => {
     const bus = orchestrator.getEventBus();
 
     setTimeout(() => {
-      bus.emit('agent-1@default', {
+      bus.emit('agent-1@0', {
         type: 'agent:subagent_timed_out',
-        agentId: 'agent-1@default',
+        agentId: 'agent-1@0',
         elapsed: 60,
         timestamp: Date.now(),
       } as any);
     }, 50);
 
     await expect(
-      orchestrator.waitForCompletion('agent-1@default', 5000)
-    ).rejects.toThrow('Agent agent-1@default timed out after 60s');
+      orchestrator.waitForCompletion('agent-1@0', 5000)
+    ).rejects.toThrow('Agent agent-1@0 timed out after 60s');
   });
 
   it('should reject when agent is cancelled', async () => {
@@ -247,16 +247,16 @@ describe('AgentOrchestrator - waitForCompletion', () => {
     const bus = orchestrator.getEventBus();
 
     setTimeout(() => {
-      bus.emit('agent-1@default', {
+      bus.emit('agent-1@0', {
         type: 'agent:subagent_cancelled',
-        agentId: 'agent-1@default',
+        agentId: 'agent-1@0',
         timestamp: Date.now(),
       } as any);
     }, 50);
 
     await expect(
-      orchestrator.waitForCompletion('agent-1@default', 5000)
-    ).rejects.toThrow('Agent agent-1@default was cancelled');
+      orchestrator.waitForCompletion('agent-1@0', 5000)
+    ).rejects.toThrow('Agent agent-1@0 was cancelled');
   });
 
   it('should reject on timeout when no event arrives', async () => {
@@ -268,8 +268,8 @@ describe('AgentOrchestrator - waitForCompletion', () => {
     const orchestrator = new AgentOrchestrator([]);
 
     await expect(
-      orchestrator.waitForCompletion('agent-1@default', 200)
-    ).rejects.toThrow('Agent agent-1@default timed out after 0.2s');
+      orchestrator.waitForCompletion('agent-1@0', 200)
+    ).rejects.toThrow('Agent agent-1@0 timed out after 0.2s');
   });
 
   it('should record timeout in aggregator on timeout', async () => {
@@ -283,12 +283,12 @@ describe('AgentOrchestrator - waitForCompletion', () => {
     const timeoutSpy = vi.spyOn(aggregator, 'recordTimeout');
 
     try {
-      await orchestrator.waitForCompletion('agent-1@default', 100);
+      await orchestrator.waitForCompletion('agent-1@0', 100);
     } catch {
       // expected
     }
 
-    expect(timeoutSpy).toHaveBeenCalledWith('agent-1@default', 0.1);
+    expect(timeoutSpy).toHaveBeenCalledWith('agent-1@0', 0.1);
   });
 
   it('should record failure in aggregator on agent failure', async () => {
@@ -303,21 +303,21 @@ describe('AgentOrchestrator - waitForCompletion', () => {
     const failSpy = vi.spyOn(aggregator, 'recordFailure');
 
     setTimeout(() => {
-      bus.emit('agent-1@default', {
+      bus.emit('agent-1@0', {
         type: 'agent:subagent_failed',
-        agentId: 'agent-1@default',
+        agentId: 'agent-1@0',
         error: 'crash',
         timestamp: Date.now(),
       } as any);
     }, 50);
 
     try {
-      await orchestrator.waitForCompletion('agent-1@default', 5000);
+      await orchestrator.waitForCompletion('agent-1@0', 5000);
     } catch {
       // expected
     }
 
-    expect(failSpy).toHaveBeenCalledWith('agent-1@default', 'crash');
+    expect(failSpy).toHaveBeenCalledWith('agent-1@0', 'crash');
   });
 
   it('should record timeout in aggregator on timed_out event', async () => {
@@ -332,21 +332,21 @@ describe('AgentOrchestrator - waitForCompletion', () => {
     const timeoutSpy = vi.spyOn(aggregator, 'recordTimeout');
 
     setTimeout(() => {
-      bus.emit('agent-1@default', {
+      bus.emit('agent-1@0', {
         type: 'agent:subagent_timed_out',
-        agentId: 'agent-1@default',
+        agentId: 'agent-1@0',
         elapsed: 45,
         timestamp: Date.now(),
       } as any);
     }, 50);
 
     try {
-      await orchestrator.waitForCompletion('agent-1@default', 5000);
+      await orchestrator.waitForCompletion('agent-1@0', 5000);
     } catch {
       // expected
     }
 
-    expect(timeoutSpy).toHaveBeenCalledWith('agent-1@default', 45);
+    expect(timeoutSpy).toHaveBeenCalledWith('agent-1@0', 45);
   });
 
   it('should record cancellation in aggregator on cancelled event', async () => {
@@ -361,20 +361,20 @@ describe('AgentOrchestrator - waitForCompletion', () => {
     const cancelSpy = vi.spyOn(aggregator, 'recordCancellation');
 
     setTimeout(() => {
-      bus.emit('agent-1@default', {
+      bus.emit('agent-1@0', {
         type: 'agent:subagent_cancelled',
-        agentId: 'agent-1@default',
+        agentId: 'agent-1@0',
         timestamp: Date.now(),
       } as any);
     }, 50);
 
     try {
-      await orchestrator.waitForCompletion('agent-1@default', 5000);
+      await orchestrator.waitForCompletion('agent-1@0', 5000);
     } catch {
       // expected
     }
 
-    expect(cancelSpy).toHaveBeenCalledWith('agent-1@default');
+    expect(cancelSpy).toHaveBeenCalledWith('agent-1@0');
   });
 });
 
@@ -388,14 +388,14 @@ describe('AgentOrchestrator - waitForAll', () => {
     const orchestrator = new AgentOrchestrator([]);
     const aggregator = orchestrator.getAggregator();
 
-    aggregator.register('a@default', { name: 'a', prompt: 'x', systemPromptMode: 'default' });
-    aggregator.register('b@default', { name: 'b', prompt: 'y', systemPromptMode: 'default' });
+    aggregator.register('a@0', { name: 'a', prompt: 'x', systemPromptMode: 'default' });
+    aggregator.register('b@0', { name: 'b', prompt: 'y', systemPromptMode: 'default' });
     aggregator.recordResult({
-      agentId: 'a@default', name: 'a', success: true, output: 'done a',
+      agentId: 'a@0', name: 'a', success: true, output: 'done a',
       toolUseCount: 1, totalTokensUsed: 50, duration: 200,
     });
     aggregator.recordResult({
-      agentId: 'b@default', name: 'b', success: true, output: 'done b',
+      agentId: 'b@0', name: 'b', success: true, output: 'done b',
       toolUseCount: 2, totalTokensUsed: 100, duration: 300,
     });
 
@@ -415,7 +415,7 @@ describe('AgentOrchestrator - waitForAll', () => {
     const aggregator = orchestrator.getAggregator();
 
     // Register agent but never complete it
-    aggregator.register('stuck@default', { name: 'stuck', prompt: 'x', systemPromptMode: 'default' });
+    aggregator.register('stuck@0', { name: 'stuck', prompt: 'x', systemPromptMode: 'default' });
 
     // Use very short timeout
     const aggregated = await orchestrator.waitForAll(200);
@@ -445,11 +445,11 @@ describe('AgentOrchestrator - sendMessage', () => {
       createParentContext()
     );
 
-    await orchestrator.sendMessage('agent@default', 'hello');
+    await orchestrator.sendMessage('agent@0', 'hello');
 
     // Cleanup
     resolveBlock!();
-    await orchestrator.cancel('agent@default');
+    await orchestrator.cancel('agent@0');
     await new Promise((r) => setTimeout(r, 50));
 
     // sendMessage should not throw for an existing agent
@@ -465,8 +465,8 @@ describe('AgentOrchestrator - sendMessage', () => {
     const orchestrator = new AgentOrchestrator([]);
 
     await expect(
-      orchestrator.sendMessage('nonexistent@default', 'hello')
-    ).rejects.toThrow('Agent nonexistent@default not found');
+      orchestrator.sendMessage('nonexistent@0', 'hello')
+    ).rejects.toThrow('Agent nonexistent@0 not found');
   });
 });
 
@@ -479,11 +479,11 @@ describe('AgentOrchestrator - cancel', () => {
 
     const orchestrator = new AgentOrchestrator([]);
     const aggregator = orchestrator.getAggregator();
-    aggregator.register('cancel-me@default', { name: 'cancel-me', prompt: 'x', systemPromptMode: 'default' });
+    aggregator.register('cancel-me@0', { name: 'cancel-me', prompt: 'x', systemPromptMode: 'default' });
     const cancelSpy = vi.spyOn(aggregator, 'recordCancellation');
 
-    await orchestrator.cancel('cancel-me@default');
-    expect(cancelSpy).toHaveBeenCalledWith('cancel-me@default');
+    await orchestrator.cancel('cancel-me@0');
+    expect(cancelSpy).toHaveBeenCalledWith('cancel-me@0');
   });
 });
 
@@ -519,8 +519,8 @@ describe('AgentOrchestrator - listAgents', () => {
 
     const agents = orchestrator.listAgents();
     expect(agents).toHaveLength(2);
-    expect(agents.map(a => a.agentId)).toContain('agent-x@default');
-    expect(agents.map(a => a.agentId)).toContain('agent-y@default');
+    expect(agents.map(a => a.agentId)).toContain('agent-x@0');
+    expect(agents.map(a => a.agentId)).toContain('agent-y@1');
     expect(agents[0].name).toBeDefined();
     expect(agents[0].status).toBeDefined();
 
@@ -637,11 +637,11 @@ describe('AgentOrchestrator - getStatus', () => {
       createParentContext()
     );
 
-    const status = orchestrator.getStatus('agent@default');
+    const status = orchestrator.getStatus('agent@0');
     expect(status).toBe('running');
 
     // Cleanup
-    await orchestrator.cancel('agent@default');
+    await orchestrator.cancel('agent@0');
     resolveBlock!();
     await new Promise((r) => setTimeout(r, 100));
   });

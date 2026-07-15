@@ -1,5 +1,9 @@
 // Sandbox backend implementations
 
+import { execSync } from 'child_process';
+import * as path from 'path';
+import * as fs from 'fs';
+import { fileURLToPath } from 'url';
 import type { SandboxBackend, SandboxOptions } from './sandbox';
 import { createLogger } from './logger';
 
@@ -31,7 +35,6 @@ export class BubblewrapSandbox implements SandboxBackend {
       return this._supportsRlimit;
     }
     try {
-      const { execSync } = require('child_process');
       // Test with a harmless dry-run to check option recognition
       execSync('bwrap --bind / / --rlimit-cpu 1 -- /bin/true 2>/dev/null', {
         stdio: 'ignore',
@@ -47,8 +50,6 @@ export class BubblewrapSandbox implements SandboxBackend {
 
   isAvailable(): boolean {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { execSync } = require('child_process') as typeof import('child_process');
       execSync('which bwrap', { stdio: 'ignore' });
       return true;
     } catch {
@@ -154,7 +155,6 @@ export class SeccompSandbox implements SandboxBackend {
   isAvailable(): boolean {
     // Available on Linux with seccomp support
     try {
-      const { execSync } = require('child_process');
       execSync('which timeout', { stdio: 'ignore' });
       // Check for seccomp support in kernel
       execSync('grep -q CONFIG_SECCOMP=y /boot/config-$(uname -r) 2>/dev/null || true', { stdio: 'ignore' });
@@ -170,10 +170,8 @@ export class SeccompSandbox implements SandboxBackend {
    */
   private getSeccompProfilePath(): string | null {
     try {
-      const path = require('path');
       // The seccomp profile is in the same directory as this file
-      const profilePath = path.join(__dirname, 'seccomp-profile.json');
-      const fs = require('fs');
+      const profilePath = fileURLToPath(new URL('./seccomp-profile.json', import.meta.url));
       if (fs.existsSync(profilePath)) {
         return profilePath;
       }

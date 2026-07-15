@@ -9,6 +9,7 @@ import { isReadOnlyBashCommand, isDangerousBashCommand } from '../../permissions
 import { normalizeCommand } from '../../permissions/commandNormalizer';
 import { isAlreadySandboxWrapped } from '../../executors/toolExecutor';
 import { isExecError, getErrorMessage } from '../../utils/errors';
+import { buildSafeEnv } from '../RunTool/secrets';
 
 const BashInputSchema = z.object({
   command: z.string().describe('The bash command to execute'),
@@ -64,9 +65,11 @@ export const tool = buildTool<BashInput, string>({
       }
 
       // Execute wrapped command via ExecutionEnv abstraction
+      // Pass filtered env to prevent KC_* secrets leak (SEC-03)
       const result = await context.env.shell.exec(wrappedCmd, {
         cwd: workingDir,
         timeout,
+        env: buildSafeEnv(),
         signal: context.abortController?.signal,
       });
 

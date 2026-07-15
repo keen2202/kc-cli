@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useMemo, type ReactNode } from 're
 import {
   getTheme,
   setTheme as setGlobalTheme,
+  DEFAULT_THEME,
   type Theme,
   type ThemeTokens,
 } from '../theme';
@@ -15,7 +16,7 @@ interface ThemeContextValue {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children, initialTheme }: { children: ReactNode; initialTheme?: string }) {
-  const [theme, setThemeState] = useState<Theme>(() => getTheme(initialTheme || 'dark'));
+  const [theme, setThemeState] = useState<Theme>(() => getTheme(initialTheme || DEFAULT_THEME));
 
   const value = useMemo<ThemeContextValue>(() => ({
     theme,

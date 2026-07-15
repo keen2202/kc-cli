@@ -16,6 +16,7 @@ export interface StreamingState {
   sidebarData: SidebarData;
   isStreaming: boolean;
   errors: string[];
+  totalTokensUsed: number;
 }
 
 export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
@@ -28,6 +29,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
   const sidebarDataRef = useRef<SidebarData>(createSidebarData());
   const currentThinkingChainRef = useRef<ThinkingChain | null>(null);
   const currentAssistantIdRef = useRef<string | null>(null);
+  const totalTokensUsedRef = useRef<number>(0);
 
   // Render state (updated to trigger re-renders)
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -35,6 +37,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
   const [sidebarData, setSidebarData] = useState<SidebarData>(createSidebarData());
   const [isStreaming, setIsStreaming] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [totalTokensUsed, setTotalTokensUsed] = useState(0);
 
   const syncRender = useCallback(() => {
     setMessages([...messagesRef.current]);
@@ -132,6 +135,13 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
             thinkingChainsRef.current.set(assistantId, chain);
           }
           currentThinkingChainRef.current = null;
+
+          // Track token usage from turn_complete events (agent:turn_complete has usage)
+          if (ev.usage && typeof ev.usage.totalTokens === 'number') {
+            totalTokensUsedRef.current += ev.usage.totalTokens;
+            setTotalTokensUsed(totalTokensUsedRef.current);
+          }
+
           syncRender();
           break;
         }
@@ -162,6 +172,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
     sidebarData,
     isStreaming,
     errors,
+    totalTokensUsed,
     addMessage,
     setMessages,
   };

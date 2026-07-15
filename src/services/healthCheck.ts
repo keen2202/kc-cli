@@ -1,6 +1,7 @@
 // Health Check Service - monitors API, LSP, and MCP service health
 
 import { CircuitBreakerRegistry } from './circuitBreaker';
+import { withTimeout } from '../utils/async-helpers';
 
 export type ServiceStatus = 'healthy' | 'degraded' | 'unhealthy';
 
@@ -189,12 +190,11 @@ export class HealthCheckService {
     }
 
     try {
-      const result = await Promise.race([
+      const result = await withTimeout(
         checkFn(),
-        new Promise<{ healthy: boolean; latencyMs: number; error?: string }>((_, reject) =>
-          setTimeout(() => reject(new Error('Health check timeout')), this.config.checkTimeoutMs)
-        ),
-      ]);
+        this.config.checkTimeoutMs,
+        'Health check timeout',
+      );
 
       // Update failure count
       if (!result.healthy) {

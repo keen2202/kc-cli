@@ -56,13 +56,21 @@ export class ConversationState {
   /** Add a message to the conversation (appends to active branch) */
   addMessage(msg: ChatMessage): void {
     this.messages.push(msg);
+    // Also update the tree node's messages in case this.messages was synced from getActiveMessages()
+    const activeNode = this.tree.getNode(this.tree.getActiveNodeId());
+    if (activeNode && activeNode.messages !== this.messages) {
+      activeNode.messages.push(msg);
+    }
     this.runningTokenTotal += estimateMessageTokens(msg);
     this.recomputed = false;
   }
 
-  /** Get all messages for the active branch */
+  /** Get all messages for the active branch (reconstructs root→active path) */
   getMessages(): ChatMessage[] {
-    return this.messages;
+    const allMessages = this.tree.getActiveMessages();
+    // Sync this.messages for backward compat with code that accesses it directly
+    this.messages = allMessages;
+    return allMessages;
   }
 
   /** Get a copy of all messages for the active branch */

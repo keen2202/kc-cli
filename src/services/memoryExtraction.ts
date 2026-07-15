@@ -74,10 +74,19 @@ function isDuplicate(content: string): boolean {
   return contentHashCache.has(hash);
 }
 
+/** Maximum entries in content hash cache before trimming */
+const CONTENT_HASH_CACHE_MAX = 10000;
+
 /**
  * Register content hash in the dedup cache
+ * Automatically trims when cache exceeds maximum size.
  */
 function registerContentHash(content: string): void {
+  if (contentHashCache.size >= CONTENT_HASH_CACHE_MAX) {
+    // Trim oldest half by clearing and repopulating is not possible with Set,
+    // so clear entirely under memory pressure
+    contentHashCache.clear();
+  }
   contentHashCache.add(hashContent(content));
 }
 

@@ -17,14 +17,32 @@ const DEFAULT_IMAGE = 'node:22-alpine';
 
 export class DockerSandbox implements SandboxBackend {
   readonly name = 'docker';
+  private _available: boolean | null = null;
 
-  isAvailable(): boolean {
+  /**
+   * Probe docker availability asynchronously and cache the result.
+   * Call this once during sandbox init to avoid synchronous execSync on the hot path.
+   */
+  async init(): Promise<void> {
     try {
       execSync('docker info', { stdio: 'ignore', timeout: 5000 });
-      return true;
+      this._available = true;
     } catch {
-      return false;
+      this._available = false;
     }
+  }
+
+  isAvailable(): boolean {
+    if (this._available !== null) return this._available;
+    // First call: probe synchronously for backward compatibility
+    // (callers that don't await init() still get a valid answer)
+    try {
+      execSync('docker info', { stdio: 'ignore', timeout: 5000 });
+      this._available = true;
+    } catch {
+      this._available = false;
+    }
+    return this._available;
   }
 
   wrapCommand(command: string, options: SandboxOptions): string {

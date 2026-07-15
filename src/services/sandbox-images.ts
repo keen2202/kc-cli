@@ -1,7 +1,7 @@
 // Docker image management for sandbox containers
 // Handles image pulling, caching, custom Dockerfiles, and cleanup.
 
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getErrorMessage } from '../utils/errors';
@@ -40,11 +40,14 @@ export class ImageManager {
     // Pull the image
     onProgress?.({ status: 'pulling', message: `Pulling ${image}...` });
     try {
-      execSync(`docker pull ${image}`, {
+      const result = spawnSync('docker', ['pull', image], {
         encoding: 'utf-8',
         timeout: 300000, // 5 minutes for large images
         stdio: ['pipe', 'pipe', 'pipe'],
       });
+      if (result.status !== 0) {
+        throw new Error((result.stderr as string)?.trim() || `docker pull failed with status ${result.status}`);
+      }
       this.checkedImages.add(image);
       onProgress?.({ status: 'pulling', message: `Successfully pulled ${image}` });
     } catch (error) {
@@ -65,11 +68,14 @@ export class ImageManager {
       fs.mkdirSync(tempDir, { recursive: true });
       fs.writeFileSync(dockerfilePath, dockerfile);
 
-      execSync(`docker build -t ${tag} -f ${dockerfilePath} ${tempDir}`, {
+      const result = spawnSync('docker', ['build', '-t', tag, '-f', dockerfilePath, tempDir], {
         encoding: 'utf-8',
         timeout: 600000, // 10 minutes for builds
         stdio: ['pipe', 'pipe', 'pipe'],
       });
+      if (result.status !== 0) {
+        throw new Error((result.stderr as string)?.trim() || `docker build failed with status ${result.status}`);
+      }
 
       this.checkedImages.add(tag);
     } finally {
@@ -109,10 +115,13 @@ export class ImageManager {
    */
   listCachedImages(): ImageInfo[] {
     try {
-      const output = execSync(
-        'docker images --format "{{.Repository}}:{{.Tag}}|{{.ID}}|{{.Size}}|{{.CreatedAt}}" --filter "reference=node" --filter "reference=kc-cli-*"',
+      const result = spawnSync(
+        'docker',
+        ['images', '--format', '{{.Repository}}:{{.Tag}}|{{.ID}}|{{.Size}}|{{.CreatedAt}}', '--filter', 'reference=node', '--filter', 'reference=kc-cli-*'],
         { encoding: 'utf-8', timeout: 10000 }
-      ).trim();
+      );
+      if (result.status !== 0) return [];
+      const output = (result.stdout as string).trim();
 
       if (!output) return [];
 
@@ -132,10 +141,13 @@ export class ImageManager {
    */
   pruneUnused(): number {
     try {
-      const output = execSync(
-        'docker image prune -f --filter "label=kc-cli-sandbox" 2>/dev/null',
-        { encoding: 'utf-8', timeout: 30000 }
-      ).trim();
+      const result = spawnSync(
+        'docker',
+        ['image', 'prune', '-f', '--filter', 'label=kc-cli-sandbox'],
+        { encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'ignore'] }
+      );
+      if (result.status !== 0) return 0;
+      const output = (result.stdout as string).trim();
 
       const match = output.match(/(\d+)\s+image/);
       return match ? parseInt(match[1], 10) : 0;
@@ -149,11 +161,11 @@ export class ImageManager {
    */
   private imageExists(image: string): boolean {
     try {
-      execSync(`docker image inspect ${image}`, {
+      const result = spawnSync('docker', ['image', 'inspect', image], {
         stdio: 'ignore',
         timeout: 5000,
       });
-      return true;
+      return result.status === 0;
     } catch {
       return false;
     }

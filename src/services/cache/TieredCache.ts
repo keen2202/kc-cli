@@ -50,6 +50,8 @@ export class TieredCache<V = any> {
   private options: TieredCacheOptions;
   private stats = { hits: 0, misses: 0, evictions: 0 };
   private version = 0;
+  /** PERF-07: O(1) total byte counter */
+  private totalBytes = 0;
 
   constructor(options: Partial<TieredCacheOptions> = {}) {
     this.options = { ...DEFAULT_OPTIONS, ...options };
@@ -83,7 +85,11 @@ export class TieredCache<V = any> {
     const now = Date.now();
     const sizeBytes = this.estimateSize(value);
 
-    // Remove existing entry if present (for update)
+    // Remove existing entry if present (for update) — PERF-07: track bytes
+    const existing = this.store.get(key);
+    if (existing) {
+      this.totalBytes -= existing.sizeBytes;
+    }
     this.store.delete(key);
 
     // Evict if necessary to make room
@@ -102,6 +108,8 @@ export class TieredCache<V = any> {
 
     // Map.set puts the entry at the end (most recently used)
     this.store.set(key, entry);
+    // PERF-07: Track allocated bytes
+    this.totalBytes += sizeBytes;
   }
 
   has(key: string): boolean {
@@ -115,11 +123,18 @@ export class TieredCache<V = any> {
   }
 
   delete(key: string): boolean {
-    return this.store.delete(key);
+    const entry = this.store.get(key);
+    if (entry) {
+      this.totalBytes -= entry.sizeBytes;
+      this.store.delete(key);
+      return true;
+    }
+    return false;
   }
 
   clear(): void {
     this.store.clear();
+    this.totalBytes = 0;
   }
 
   get size(): number {
@@ -166,6 +181,7 @@ export class TieredCache<V = any> {
     let count = 0;
     for (const [key, entry] of this.store) {
       if (predicate(key, entry)) {
+        this.totalBytes -= entry.sizeBytes;
         this.store.delete(key);
         count++;
       }
@@ -228,6 +244,7 @@ export class TieredCache<V = any> {
     let pruned = 0;
     for (const [key, entry] of this.store) {
       if (now - entry.createdAt > entry.ttlMs) {
+        this.totalBytes -= entry.sizeBytes;
         this.store.delete(key);
         pruned++;
       }
@@ -247,12 +264,10 @@ export class TieredCache<V = any> {
       this.evictLRU();
     }
 
-    // Evict by byte limit
-    let totalBytes = this.getTotalSizeBytes();
-    while (totalBytes + incomingSize > this.options.maxBytes && this.store.size > 0) {
-      const evicted = this.evictLRU();
-      if (!evicted) break;
-      totalBytes -= evicted.sizeBytes;
+    // Evict by byte limit — uses O(1) totalBytes counter (PERF-07)
+    while (this.totalBytes + incomingSize > this.options.maxBytes && this.store.size > 0) {
+      const evictedBytes = this.evictLRU();
+      if (evictedBytes === 0) break;
     }
   }
 
@@ -261,10 +276,10 @@ export class TieredCache<V = any> {
    * Uses Map.prototype.keys().next().value for O(1) access to the oldest entry,
    * since Map preserves insertion order and we re-insert entries on access.
    */
-  private evictLRU(): CacheEntry<V> | null {
+  private evictLRU(): number {
     // Evict oldest entries in batch for efficiency
     const batchSize = Math.max(1, Math.floor(this.store.size * this.options.evictionBatchRatio));
-    let firstEvicted: CacheEntry<V> | null = null;
+    let totalEvictedBytes = 0;
 
     for (let i = 0; i < batchSize && this.store.size > 0; i++) {
       const oldestKey = this.store.keys().next().value as string;
@@ -272,24 +287,20 @@ export class TieredCache<V = any> {
 
       const entry = this.store.get(oldestKey);
       if (entry) {
+        totalEvictedBytes += entry.sizeBytes;
         this.store.delete(oldestKey);
         this.stats.evictions++;
         this.options.onEvict?.(oldestKey, entry);
-        if (!firstEvicted) {
-          firstEvicted = entry;
-        }
       }
     }
 
-    return firstEvicted;
+    // PERF-07: Track evicted bytes in O(1) counter
+    this.totalBytes -= totalEvictedBytes;
+    return totalEvictedBytes;
   }
 
   private getTotalSizeBytes(): number {
-    let total = 0;
-    for (const entry of this.store.values()) {
-      total += entry.sizeBytes;
-    }
-    return total;
+    return this.totalBytes;
   }
 
   private estimateSize(value: V): number {

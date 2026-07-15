@@ -48,7 +48,7 @@ describe('sandbox-policy - coverage', () => {
 
     it('should return pattern match for Task* tools', () => {
       const policy = getToolPolicy('TaskCreate', DEFAULT_SANDBOX_POLICY);
-      expect(policy.enforcement).toBe('excluded');
+      expect(policy.enforcement).toBe('required');
     });
 
     it('should return default for unknown tools', () => {

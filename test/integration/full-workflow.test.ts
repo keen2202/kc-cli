@@ -40,6 +40,27 @@ const describeIfGrep = GrepTool ? describe : describe.skip;
 const describeIfSandbox = SandboxManager ? describe : describe.skip;
 const describeIfMemory = MemoryIntegration ? describe : describe.skip;
 
+function makeTestEnv(): any {
+  return {
+    cwd: '/',
+    fs: {
+      readFile: async (p: string, _encoding?: string) => fs.readFileSync(p, 'utf-8'),
+      writeFile: async (p: string, content: string) => { fs.writeFileSync(p, content); },
+      exists: async (p: string) => fs.existsSync(p),
+      stat: async (p: string) => {
+        const s = fs.statSync(p);
+        return { size: s.size, mtime: s.mtime, isFile: s.isFile(), isDirectory: s.isDirectory() };
+      },
+      glob: async () => [],
+      mkdir: async (_p: string, _opts?: { recursive?: boolean }) => {},
+      rm: async (_p: string, _opts?: { recursive?: boolean }) => {},
+    },
+    shell: {
+      exec: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
+    },
+  };
+}
+
 describe('Full Workflow Integration', () => {
   let tmpDir: string;
 
@@ -74,11 +95,12 @@ describe('Full Workflow Integration', () => {
         {
           cwd: tmpDir,
           permissions: { mode: 'auto', rules: [], bypassEnabled: false },
+          env: makeTestEnv(),
         } as any
       );
 
       expect(result).toBeDefined();
-      const content = result.content || result.output || '';
+      const content = result.output || '';
       expect(content).toContain('File content for workflow test');
     });
   });
@@ -92,6 +114,7 @@ describe('Full Workflow Integration', () => {
         {
           cwd: tmpDir,
           permissions: { mode: 'auto', rules: [], bypassEnabled: false },
+          env: makeTestEnv(),
         } as any
       );
 

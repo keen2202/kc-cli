@@ -96,6 +96,43 @@ export async function ensureSessionDirs(): Promise<void> {
 }
 
 /**
+ * Walk each ancestor directory with realpath to detect symlink-based escapes.
+ * Returns the real resolved path if all ancestors are safe, null otherwise.
+ * This prevents attacks where an ancestor directory is a symlink to an
+ * external location (e.g. ~/.kc-cli/memory/link -> /etc).
+ */
+async function resolveAncestorsSafe(
+  fullPath: string,
+  baseDir: string
+): Promise<string | null> {
+  const normalized = path.normalize(fullPath);
+  const parts = normalized.split(path.sep).filter(Boolean);
+  const baseParts = path.normalize(baseDir).split(path.sep).filter(Boolean);
+
+  // Build each prefix and check via realpath
+  let cumulative = '';
+  for (let i = 0; i < parts.length; i++) {
+    cumulative += '/' + parts[i];
+    // Only check directories that exist (and not the baseDir itself)
+    if (i < baseParts.length && parts[i] === baseParts[i]) {
+      continue; // Within base prefix — no need to realpath each time
+    }
+    try {
+      const real = await fs.realpath(cumulative);
+      // If realpath resolved outside the base, this is an escape
+      const relative = path.relative(baseDir, real);
+      if (relative.startsWith('..') || path.isAbsolute(relative)) {
+        return null;
+      }
+    } catch {
+      // Path component doesn't exist yet — that's fine, stop walking
+      break;
+    }
+  }
+  return cumulative;
+}
+
+/**
  * Validate that a path is safe and doesn't escape the memory directory
  * Security: prevents directory traversal, symlink attacks, Unicode normalization issues
  */
@@ -112,31 +149,28 @@ export async function validateMemoryPath(
     return false;
   }
 
-  // Ensure the path is within the base directory
+  // Ensure the path is within the base directory (basic check)
   const relativePath = path.relative(normalizedBase, normalizedFull);
   if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
     return false;
   }
 
-  // Check if file exists and validate symlinks
-  try {
-    const stat = await fs.lstat(normalizedFull);
+  // Walk each ancestor directory with realpath to detect symlink bypass (SEC-08)
+  const safePath = await resolveAncestorsSafe(normalizedFull, normalizedBase);
+  if (safePath === null) {
+    return false;
+  }
 
-    // If it's a symlink, resolve and validate target
-    if (stat.isSymbolicLink()) {
-      const realPath = await fs.realpath(normalizedFull);
-      const relativeTarget = path.relative(normalizedBase, realPath);
-      if (relativeTarget.startsWith('..') || path.isAbsolute(relativeTarget)) {
-        return false;
-      }
-    }
-  } catch {
-    // File doesn't exist yet - validate the parent directory
-    const parentDir = path.dirname(normalizedFull);
-    const relativeParent = path.relative(normalizedBase, parentDir);
-    if (relativeParent.startsWith('..') || path.isAbsolute(relativeParent)) {
+  // Resolve the final path component to catch TOCTOU attacks
+  // (if a symlink was created between ancestor check and now)
+  try {
+    const finalResolved = await fs.realpath(normalizedFull);
+    const relativeFinal = path.relative(normalizedBase, finalResolved);
+    if (relativeFinal.startsWith('..') || path.isAbsolute(relativeFinal)) {
       return false;
     }
+  } catch {
+    // File doesn't exist yet — ancestor check already verified safety
   }
 
   return true;

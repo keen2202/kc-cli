@@ -56,10 +56,18 @@ export class AgentOrchestrator {
     config: SubAgentSpawnConfig,
     parentContext: ToolUseContext
   ): Promise<string> {
-    const agentId = `${config.name}@default`;
-
     // Acquire semaphore permit — bounds concurrent sub-agents
     await this.semaphore.acquire();
+
+    // Spawn via backend first — backend assigns the unique agentId
+    const spawnResult = await this.backend.spawn(config, parentContext);
+
+    if (!spawnResult.success) {
+      this.semaphore.release();
+      throw new Error(`Failed to spawn agent: ${spawnResult.error}`);
+    }
+
+    const agentId = spawnResult.agentId;
 
     // Register listener to release permit when agent reaches terminal state
     const releaseOnTerminal = (event: AgentEvent | MultiAgentEvent): void => {
@@ -80,17 +88,6 @@ export class AgentOrchestrator {
     try {
       // Register with aggregator
       this.aggregator.register(agentId, config);
-
-      // Spawn via backend
-      const spawnResult = await this.backend.spawn(config, parentContext);
-
-      if (!spawnResult.success) {
-        this.semaphore.release();
-        unsubscribe();
-        released = true;
-        this.aggregator.recordFailure(agentId, spawnResult.error || 'Spawn failed');
-        throw new Error(`Failed to spawn agent ${agentId}: ${spawnResult.error}`);
-      }
 
       return agentId;
     } catch (error) {

@@ -76,7 +76,7 @@ export class BudgetEnforcer {
    * @param estimatedTokens - Estimated tokens for the upcoming turn
    * @returns BudgetCheckResult with allowed flag and remaining snapshot
    */
-  checkTurnBudget(estimatedTokens: number): BudgetCheckResult {
+  checkTurnBudget(estimatedTokens: number, estimatedCostUsd?: number): BudgetCheckResult {
     const remaining = this.getRemaining();
 
     // Check session limit
@@ -97,11 +97,11 @@ export class BudgetEnforcer {
       };
     }
 
-    // Check cost limit
-    if (this.config.costLimitUsd !== null && this.sessionCostUsd >= this.config.costLimitUsd) {
+    // Check cost limit (include estimated cost to avoid overshooting, FUN-03)
+    if (this.config.costLimitUsd !== null && this.sessionCostUsd + (estimatedCostUsd ?? 0) >= this.config.costLimitUsd) {
       return {
         allowed: false,
-        reason: `Session cost budget exceeded: $${this.sessionCostUsd.toFixed(4)} >= $${this.config.costLimitUsd} limit`,
+        reason: `Session cost budget exceeded: $${this.sessionCostUsd.toFixed(4)} spent + $${(estimatedCostUsd ?? 0).toFixed(4)} estimated >= $${this.config.costLimitUsd} limit`,
         remaining,
       };
     }
@@ -114,7 +114,7 @@ export class BudgetEnforcer {
    * @param result - The tool result to check
    * @returns BudgetCheckResult with allowed flag and remaining snapshot
    */
-  checkToolResultBudget(result: ToolResult): BudgetCheckResult {
+  checkToolResultBudget(result: ToolResult, estimatedCostUsd?: number): BudgetCheckResult {
     const remaining = this.getRemaining();
     const outputText = typeof result.output === 'string' ? result.output : JSON.stringify(result.output);
     const resultTokens = estimateToolResultTokens(outputText);
@@ -136,6 +136,15 @@ export class BudgetEnforcer {
       };
     }
 
+    // Check cost limit with estimated (FUN-03)
+    if (this.config.costLimitUsd !== null && this.sessionCostUsd + (estimatedCostUsd ?? 0) >= this.config.costLimitUsd) {
+      return {
+        allowed: false,
+        reason: `Session cost budget exceeded: $${this.sessionCostUsd.toFixed(4)} spent + $${(estimatedCostUsd ?? 0).toFixed(4)} estimated >= $${this.config.costLimitUsd} limit`,
+        remaining,
+      };
+    }
+
     return { allowed: true, remaining };
   }
 
@@ -144,7 +153,7 @@ export class BudgetEnforcer {
    * @param estimatedTokens - Estimated tokens the sub-agent might use
    * @returns BudgetCheckResult with allowed flag and remaining snapshot
    */
-  checkSubAgentBudget(estimatedTokens: number): BudgetCheckResult {
+  checkSubAgentBudget(estimatedTokens: number, estimatedCostUsd?: number): BudgetCheckResult {
     const remaining = this.getRemaining();
 
     // Check sub-agent limit
@@ -161,6 +170,15 @@ export class BudgetEnforcer {
       return {
         allowed: false,
         reason: `Session token budget exceeded by sub-agent: ${this.sessionTokens} used + ${estimatedTokens} estimated > ${this.config.sessionTokenLimit} limit`,
+        remaining,
+      };
+    }
+
+    // Check cost limit with estimated (FUN-03)
+    if (this.config.costLimitUsd !== null && this.sessionCostUsd + (estimatedCostUsd ?? 0) >= this.config.costLimitUsd) {
+      return {
+        allowed: false,
+        reason: `Session cost budget exceeded: $${this.sessionCostUsd.toFixed(4)} spent + $${(estimatedCostUsd ?? 0).toFixed(4)} estimated >= $${this.config.costLimitUsd} limit`,
         remaining,
       };
     }

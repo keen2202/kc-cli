@@ -18,9 +18,35 @@ interface EditorProps {
 
 const MAX_ATTACHMENTS = 5;
 
+/**
+ * Keyboard shortcut hint bar shown at the top or bottom of the editor.
+ * Lists the most common keybindings for quick reference.
+ */
+function KeyboardHints() {
+  const { tokens } = useTheme();
+  const hints = [
+    { key: 'Enter', action: 'Submit' },
+    { key: 'S-Enter', action: 'Newline' },
+    { key: '^I', action: 'Steer' },
+    { key: '^E', action: 'Editor' },
+    { key: '^C', action: 'Quit' },
+  ];
+
+  return (
+    <Box flexDirection="row" gap={1}>
+      {hints.map((hint) => (
+        <Text key={hint.key} dimColor>
+          <Text bold>{hint.key}</Text>
+          <Text>:{hint.action}</Text>
+        </Text>
+      ))}
+    </Box>
+  );
+}
+
 export function Editor({
   text,
-  cursorPos: _cursorPos,
+  cursorPos,
   isSteerMode = false,
   placeholder,
   attachments = [],
@@ -28,12 +54,46 @@ export function Editor({
 }: EditorProps) {
   const { tokens } = useTheme();
   const promptPrefix = isSteerMode ? 'steer> ' : 'kc> ';
-  const displayText = text || placeholder || 'Ask anything, @file to attach...';
 
   const attachmentCount = attachments.length;
 
+  // Build display text with cursor position indicator
+  const renderInputLine = () => {
+    if (text.length === 0) {
+      return (
+        <Text>
+          {isSteerMode
+            ? tokens['input.steer'](promptPrefix)
+            : tokens['input.prompt'](promptPrefix)}
+          <Text dimColor>{placeholder || 'Ask anything, @file to attach...'}</Text>
+        </Text>
+      );
+    }
+
+    // Position the cursor visually by splitting the text at cursorPos
+    const beforeCursor = text.slice(0, Math.min(cursorPos, text.length));
+    const atCursor = cursorPos < text.length ? text[cursorPos] : ' ';
+    const afterCursor = text.slice(Math.min(cursorPos + 1, text.length));
+
+    return (
+      <Text>
+        {isSteerMode
+          ? tokens['input.steer'](promptPrefix)
+          : tokens['input.prompt'](promptPrefix)}
+        <Text>{beforeCursor}</Text>
+        <Text backgroundColor="white" color="black">{atCursor}</Text>
+        <Text>{afterCursor}</Text>
+      </Text>
+    );
+  };
+
   return (
     <Box flexDirection="column" borderStyle="single" paddingLeft={1} paddingRight={1}>
+      {/* Keyboard shortcut hint bar */}
+      <Box marginBottom={1} marginTop={1}>
+        <KeyboardHints />
+      </Box>
+
       {/* Attachment bar */}
       <Box flexDirection="row" marginBottom={1}>
         <Text dimColor>
@@ -51,16 +111,9 @@ export function Editor({
         </Box>
       ))}
 
-      {/* Input line */}
+      {/* Input line with real cursor */}
       <Box flexDirection="row">
-        <Text>
-          {isSteerMode
-            ? tokens['input.steer'](promptPrefix)
-            : tokens['input.prompt'](promptPrefix)}
-        </Text>
-        <Text dimColor={text.length === 0}>{displayText}</Text>
-        {/* Cursor indicator */}
-        {text.length > 0 && <Text>{'█'.slice(0, 0)}</Text>}
+        {renderInputLine()}
       </Box>
     </Box>
   );

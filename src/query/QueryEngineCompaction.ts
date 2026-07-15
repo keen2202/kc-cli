@@ -1,13 +1,13 @@
 // QueryEngine compaction phase logic
 
 import { logger } from '../services/logger';
-import type { ChatMessage, StreamEvent, TurnTag } from '../query/protocol';
-import type { AgentEvent } from '../state/types';
+import type { ChatMessage, TurnTag } from '../query/protocol';
 import { shouldCompact, microcompact, fullCompact, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES, needsForceTruncation, forceTruncate } from '../services/compaction';
 import { estimateMessageTokensArray } from '../utils/tokenEstimation';
 import type { BaseApiClient } from '../api';
 import { classifyApiError, getRetryDelay } from '../services/error-classifier';
 import { StateValidator } from '../services/stateValidator';
+import { withTimeout } from '../utils/async-helpers';
 
 /**
  * Configuration for compaction phase.
@@ -72,13 +72,12 @@ export class CompactionHandler {
   /**
    * Execute compaction on messages.
    * Uses three-tier strategy: microcompact → full compact → force truncate.
-   * Yields events as compaction progresses.
    */
-  async *compact(
+  async compact(
     messages: ChatMessage[],
     apiClient: BaseApiClient,
     config: CompactionConfig
-  ): AsyncGenerator<AgentEvent | StreamEvent> {
+  ): Promise<{ messages: ChatMessage[]; method: string }> {
     const compactConfig = {
       contextWindow: config.contextWindow,
       model: config.model,
@@ -87,12 +86,6 @@ export class CompactionHandler {
     // Check if force truncation is needed (absolute token limit exceeded)
     if (needsForceTruncation(messages)) {
       const result = forceTruncate(messages);
-      yield {
-        type: 'agent:compact_full',
-        originalTokens: estimateMessageTokensArray(messages),
-        compactedTokens: estimateMessageTokensArray(result.messages),
-        timestamp: Date.now(),
-      };
       this.compactFailureCount = 0;
       return { messages: result.messages, method: 'force_truncate' as const };
     }
@@ -110,12 +103,6 @@ export class CompactionHandler {
       const microResult = microcompact(workingMessages);
 
       if (microResult.wasCompacted) {
-        yield {
-          type: 'agent:compact_micro',
-          tokensSaved: microResult.tokensSaved,
-          timestamp: Date.now(),
-        };
-
         const remainingTokens = estimateMessageTokensArray(microResult.messages);
         const threshold = config.contextWindow - 20_000 - 13_000;
 
@@ -139,7 +126,7 @@ export class CompactionHandler {
       for (let retryAttempt = 0; retryAttempt <= maxCompactionRetries; retryAttempt++) {
         try {
           // Race compaction against a timeout to prevent infinite hangs
-          fullResult = await Promise.race([
+          fullResult = await withTimeout(
             fullCompact(
               workingMessages,
               apiClient,
@@ -147,10 +134,9 @@ export class CompactionHandler {
               config.systemPrompt,
               config.modifiedFiles
             ),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error(`Compaction timed out after ${compactionTimeoutMs / 1000}s`)), compactionTimeoutMs)
-            ),
-          ]);
+            compactionTimeoutMs,
+            `Compaction timed out after ${compactionTimeoutMs / 1000}s`,
+          );
           break;
         } catch (compactError) {
           const err = compactError instanceof Error ? compactError : new Error(String(compactError));
@@ -168,14 +154,6 @@ export class CompactionHandler {
       }
 
       if (fullResult && fullResult.wasCompacted) {
-        const compactedTokens = estimateMessageTokensArray(fullResult.messages);
-        yield {
-          type: 'agent:compact_full',
-          originalTokens: compactedTokens + fullResult.tokensSaved,
-          compactedTokens,
-          timestamp: Date.now(),
-        };
-
         this.compactFailureCount = 0;
         return { messages: fullResult.messages, method: 'fullcompact' as const };
       }

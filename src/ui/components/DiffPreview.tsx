@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import { Box, Text } from 'ink';
-import chalk from 'chalk';
 import { computeDiff, type DiffLine } from '../diff-viewer';
+import { useTerminalSize } from '../hooks/useTerminalSize';
 
 export interface FileDiff {
   filePath: string;
@@ -28,7 +28,7 @@ interface DiffLineRowProps {
 
 const DiffLineRow: React.FC<DiffLineRowProps> = ({ line, maxWidth }) => {
   const lineNumWidth = 4;
-  const gutterWidth = 10; // "  123 │ " or "+ 123 │ "
+  const gutterWidth = 10;
 
   const formatLine = (): string => {
     const lineNum = line.type === 'remove'
@@ -44,6 +44,8 @@ const DiffLineRow: React.FC<DiffLineRowProps> = ({ line, maxWidth }) => {
     return `${prefix} ${lineNum} │ ${content}`;
   };
 
+  // Note: tokens from useTheme return ChalkInstance, not usable directly
+  // as Ink Text color prop. Fall back to standard color names.
   const renderStyled = () => {
     const formatted = formatLine();
     switch (line.type) {
@@ -98,9 +100,11 @@ const DiffPreview: React.FC<DiffPreviewProps> = ({
   onAccept,
   onReject,
   onFileChange,
-  maxWidth = 80,
+  maxWidth: propMaxWidth,
   maxLines = 30,
 }) => {
+  const termMaxWidth = useTerminalSize().width;
+  const maxWidth = propMaxWidth ?? termMaxWidth;
   const [activeIndex, setActiveIndex] = useState(activeFileIndex);
   const activeDiff = diffs[activeIndex];
 

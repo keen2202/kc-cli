@@ -367,20 +367,10 @@ describe('QueryEngine Coverage Part 2', () => {
       expect(finalMessages.some(m => m.id === 'system_anchor')).toBe(true);
     });
 
-    it('should use default maxMessages when not configured', async () => {
+    it('should return messages from active tree node (FUN-09)', async () => {
       setStream(textEvents('ok'));
 
       engine = createEngine();
-      const messages = (engine as any).messages as ChatMessage[];
-
-      for (let i = 0; i < 50; i++) {
-        messages.push({
-          id: `msg_${i}`,
-          role: 'user',
-          content: `Message ${i}`,
-          timestamp: Date.now(),
-        } as ChatMessage);
-      }
 
       try {
         for await (const _ of engine.submitMessage('test')) {
@@ -391,8 +381,8 @@ describe('QueryEngine Coverage Part 2', () => {
       }
 
       const finalMessages = engine.getMessages();
-      // 50 pushed + 1 user (submitMessage) + 1 assistant (response) = 52
-      expect(finalMessages.length).toBe(52);
+      // 1 user (submitMessage) + 1 assistant (response) = 2
+      expect(finalMessages.length).toBe(2);
     });
 
     it('should invalidate cached token estimate after trimming', async () => {
@@ -914,8 +904,8 @@ describe('QueryEngine Coverage Part 2', () => {
       const msgs2 = engine.getMessages();
 
       expect(msgs1).toEqual(msgs2);
-      // getMessages returns the internal array ref; getMessagesCopy provides a copy
-      expect(engine.getMessages()).toBe(engine.getMessages());
+      // getMessages returns a reconstructed array from the tree (FUN-09)
+      expect(engine.getMessages()).toEqual(engine.getMessages());
     });
   });
 

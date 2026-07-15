@@ -45,6 +45,8 @@ export class CommitOperator implements SEPLOperator<EvaluationSpace, CommitDecis
   private serverInterface: ServerInterface;
   private versionManager: VersionManager;
   private autoRollback: boolean;
+  /** Snapshot of baseline versions at evolution cycle start (FUN-10) */
+  private baselineVersions: Map<string, string> = new Map();
 
   constructor(
     serverInterface: ServerInterface,
@@ -61,6 +63,18 @@ export class CommitOperator implements SEPLOperator<EvaluationSpace, CommitDecis
     input: EvaluationSpace
   ): Promise<SEPLOutput<CommitDecision>> {
     const startTime = Date.now();
+
+    // Snapshot baseline versions at evolution cycle start (FUN-10)
+    this.baselineVersions.clear();
+    for (const varKey of state.trainableSubset) {
+      const variable = state.variables.get(varKey);
+      if (!variable) continue;
+      const resourceName = variable.resourceId.split(':')[1];
+      const activeVersion = this.versionManager.getActiveVersion(variable.resourceType, resourceName);
+      if (activeVersion) {
+        this.baselineVersions.set(`${variable.resourceType}:${resourceName}`, activeVersion);
+      }
+    }
 
     try {
       if (input.bestCandidateIndex < 0 || input.results.length === 0) {
@@ -189,7 +203,7 @@ export class CommitOperator implements SEPLOperator<EvaluationSpace, CommitDecis
   }
 
   /**
-   * Rollback all changes in the evolvable state to their original values.
+   * Rollback all changes in the evolvable state to their baseline versions (FUN-10).
    */
   private async rollbackAll(state: EvolvableState): Promise<void> {
     for (const varKey of state.trainableSubset) {
@@ -197,12 +211,12 @@ export class CommitOperator implements SEPLOperator<EvaluationSpace, CommitDecis
       if (!variable) continue;
 
       try {
-        // Attempt to restore via ServerInterface
+        // Attempt to restore via ServerInterface to the baseline version
         const resourceName = variable.resourceId.split(':')[1];
-        const lineage = this.versionManager.getLineage(variable.resourceType, resourceName);
-        if (lineage.length > 0) {
-          // Rollback to the initial (pre-evolution) version
-          this.serverInterface.restore(variable.resourceType, resourceName, lineage[0].version);
+        const key = `${variable.resourceType}:${resourceName}`;
+        const baselineVersion = this.baselineVersions.get(key);
+        if (baselineVersion) {
+          this.serverInterface.restore(variable.resourceType, resourceName, baselineVersion);
         }
       } catch {
         // Best effort rollback

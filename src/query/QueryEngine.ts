@@ -275,6 +275,13 @@ export class QueryEngine {
       }
 
       while (!this.stateMachine.isTerminal()) {
+        // Check aborted at each turn start — yield error and stop
+        if (this._aborted) {
+          this.stateMachine.forceTransitionTo('error');
+          yield { type: 'agent:error', error: new Error('Query aborted'), recoverable: false, timestamp: Date.now() } as AgentEvent;
+          return;
+        }
+
         const currentState = this.stateMachine.currentState;
 
         switch (currentState) {
@@ -503,7 +510,20 @@ export class QueryEngine {
 
           case 'deciding':
             const minTurnsEnforced = this.config.minTurns || 0;
-            const hasTools = turnCount >= maxTurns ? false : await this.decidingPhase(turnCount, minTurnsEnforced);
+            let hasTools: boolean;
+
+            // FUN-13: Emit warning event on final turn instead of silently
+            // setting hasTools=false (for better observability).
+            if (turnCount >= maxTurns) {
+              yield {
+                type: 'agent:text_delta',
+                text: '\n[Turn limit reached — completing]\n',
+                timestamp: Date.now(),
+              } as AgentEvent;
+              hasTools = false;
+            } else {
+              hasTools = await this.decidingPhase(turnCount, minTurnsEnforced);
+            }
 
             // Area 2: Zero-patch exhaustion error
             if (!hasTools && this.zeroPatchRetries > 0 && this.modifiedFiles.size === 0) {
@@ -548,7 +568,7 @@ export class QueryEngine {
                       rolledBackChanges: 0,
                     },
                   } as any);
-                  this.stateMachine.forceTransitionTo('evolving');
+                  this.stateMachine.transitionTo('evolving');
                   await this.config.evolution.onEvolve(this.stateStore.get().sessionId);
                   this.stateStore.set({
                     evolutionState: {
@@ -670,6 +690,10 @@ export class QueryEngine {
       : undefined;
 
     for (let retryAttempt = 0; retryAttempt <= maxRetries; retryAttempt++) {
+      // If aborted, break to error state instead of continuing
+      if (this._aborted) {
+        throw new Error('Query aborted during streaming');
+      }
       const apiMessages = this.buildApiMessages();
 
       const requestConfig: LLMRequestConfig = {
@@ -767,7 +791,8 @@ export class QueryEngine {
       }
     } catch (error) {
       if (this._aborted) {
-        logger.query.warn(`[QueryEngine] LLM stream timed out after ${streamTimeoutMs / 1000}s, continuing with partial response`);
+        logger.query.warn(`[QueryEngine] LLM stream aborted after ${streamTimeoutMs / 1000}s`);
+        throw new Error('LLM stream aborted');
       } else {
         throw error;
       }
@@ -969,14 +994,20 @@ export class QueryEngine {
    * Only allows known test runners with sanitized arguments.
    */
   private isTestCommandSafe(command: string): boolean {
-    // Reject shell metacharacters that enable command chaining
-    if (/[;&|`$(){}$\n\r]/.test(command.replace('{test_names}', ''))) {
+    // Reject shell metacharacters that enable command chaining, I/O redirection,
+    // or escape sequences (SEC-06)
+    if (/[;&|`$(){}$\n\r<>\\]/.test(command.replace('{test_names}', ''))) {
       return false;
     }
     // Allow only known test runner prefixes
     const allowedRunners = ['pytest', 'vitest', 'npx vitest', 'go test', 'cargo test', 'jest', 'npx jest', 'python -m pytest'];
     const trimmed = command.trim();
     return allowedRunners.some(runner => trimmed.startsWith(runner));
+  }
+
+  // Validate test names contain only safe characters (SEC-06)
+  private isValidTestName(name: string): boolean {
+    return /^[a-zA-Z0-9_\-./:]+$/.test(name);
   }
 
   /**
@@ -996,6 +1027,13 @@ export class QueryEngine {
     config: PatchGuaranteeConfig
   ): Promise<VerificationResult> {
     if (!testNames.length) {
+      return { canExit: true, reason: 'tests_not_found' };
+    }
+
+    // Validate test names independently to prevent injection (SEC-06)
+    const invalidNames = testNames.filter(n => !this.isValidTestName(n));
+    if (invalidNames.length > 0) {
+      logger.query.warn(`[QueryEngine] Invalid test names rejected: ${invalidNames.join(', ')}`);
       return { canExit: true, reason: 'tests_not_found' };
     }
 
@@ -1137,7 +1175,6 @@ export class QueryEngine {
   abort(reason?: string): void {
     this._aborted = true;
     this.abortController.abort(reason);
-    this.abortController = new AbortController();
   }
 
   /** Check if the current query is aborted */

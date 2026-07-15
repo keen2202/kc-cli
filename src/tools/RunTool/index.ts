@@ -8,67 +8,7 @@ import { isAlreadySandboxWrapped } from '../../executors/toolExecutor';
 import { getErrorMessage } from '../../utils/errors';
 import { isDangerousBashCommand } from '../../permissions/readonlyCommands';
 import { logger } from '../../services/logger';
-
-/**
- * Environment variables that can lead to code injection or privilege escalation
- * when set by untrusted input. These are filtered before merging into process env.
- */
-const DANGEROUS_ENV_VARS = new Set([
-  'LD_PRELOAD',
-  'LD_LIBRARY_PATH',
-  'DYLD_INSERT_LIBRARIES',
-  'DYLD_LIBRARY_PATH',
-  'NODE_OPTIONS',
-  'NODE_PATH',
-  'PYTHONSTARTUP',
-  'PYTHONPATH',
-  'PERL5LIB',
-  'PERLLIB',
-  'RUBYOPT',
-  'RUBYLIB',
-  'PATH',
-  'HOME',
-  'SHELL',
-  'BASH_ENV',
-  'PROMPT_COMMAND',
-  'IFS',
-  'CDPATH',
-  'GIT_EXEC_PATH',
-  'GIT_TEMPLATE_DIR',
-  'ANSIBLE_CONFIG',
-  'DOCKER_HOST',
-  'KUBECONFIG',
-]);
-
-// Allowlist override via KC_ALLOW_ENV_VARS env var (comma-separated)
-const ALLOWLISTED_ENV_VARS = new Set(
-  (process.env.KC_ALLOW_ENV_VARS || '')
-    .split(',')
-    .map(v => v.trim().toUpperCase())
-    .filter(Boolean)
-);
-
-function filterEnvVars(env: Record<string, string>): Record<string, string> {
-  const filtered: Record<string, string> = {};
-  const blockedVars: string[] = [];
-
-  for (const [key, value] of Object.entries(env)) {
-    const upperKey = key.toUpperCase();
-    if (DANGEROUS_ENV_VARS.has(upperKey) && !ALLOWLISTED_ENV_VARS.has(upperKey)) {
-      blockedVars.push(key);
-      continue;
-    }
-    filtered[key] = value;
-  }
-
-  if (blockedVars.length > 0) {
-    logger.tools.warn('Blocked dangerous environment variables', {
-      blockedVars,
-    });
-  }
-
-  return filtered;
-}
+import { filterEnvVars } from './secrets';
 
 const RunInputSchema = z.object({
   command: z.string().describe('Command to execute'),
@@ -91,8 +31,11 @@ export const tool = buildTool<RunInput, string>({
       const workingDir = input.cwd || context.cwd;
       const timeout = (Number.isFinite(input.timeout) ? input.timeout : 60) * 1000;
 
+      // Filter KC_* secrets and dangerous vars from parent env (SEC-03)
       const env = {
-        ...process.env,
+        ...filterEnvVars(Object.fromEntries(
+          Object.entries(process.env).filter(([, v]) => v !== undefined)
+        ) as Record<string, string>),
         ...filterEnvVars(input.env || {}),
       } as Record<string, string>;
 

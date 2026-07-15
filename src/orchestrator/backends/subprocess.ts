@@ -59,6 +59,7 @@ export class SubprocessBackend implements SubAgentBackend {
   private eventBus: EventBus;
   private parentPermissionMode: PermissionMode;
   private parentCwd: string;
+  private agentCounter = 0;
 
   constructor(
     eventBus: EventBus,
@@ -75,8 +76,12 @@ export class SubprocessBackend implements SubAgentBackend {
     config: SubAgentSpawnConfig,
     parentContext: ToolUseContext
   ): Promise<SpawnResult> {
-    const agentId = `${config.name}@default`;
+    const agentId = `${config.name}@${this.agentCounter++}`;
     const startedAt = Date.now();
+
+    // PERF-03: Timer handle tracking for cleanup
+    let killTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let runtimeTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
     try {
       // Derive child permissions
@@ -128,6 +133,7 @@ export class SubprocessBackend implements SubAgentBackend {
         switch (msg.type) {
           case 'ready': {
             runtime.status = 'running';
+            clearTimeout(readyTimeout);
             // Send init message with config
             const initMsg: ParentMessage = {
               type: 'init',
@@ -154,6 +160,10 @@ export class SubprocessBackend implements SubAgentBackend {
 
           case 'result': {
             if (msg.result) {
+              // PERF-03: Clear timers before cleanup
+              clearTimeout(readyTimeout);
+              if (killTimeoutHandle !== undefined) clearTimeout(killTimeoutHandle);
+              if (runtimeTimeoutHandle !== undefined) clearTimeout(runtimeTimeoutHandle);
               runtime.status = 'completed';
               runtime.completedAt = Date.now();
               this.eventBus.emit(agentId, {
@@ -168,6 +178,10 @@ export class SubprocessBackend implements SubAgentBackend {
           }
 
           case 'error': {
+            // PERF-03: Clear timers before cleanup
+            clearTimeout(readyTimeout);
+            if (killTimeoutHandle !== undefined) clearTimeout(killTimeoutHandle);
+            if (runtimeTimeoutHandle !== undefined) clearTimeout(runtimeTimeoutHandle);
             runtime.status = 'failed';
             runtime.error = new Error(msg.error?.message || 'Unknown subprocess error');
             runtime.completedAt = Date.now();
@@ -185,6 +199,10 @@ export class SubprocessBackend implements SubAgentBackend {
 
       // Handle child process exit
       child.on('exit', (code, signal) => {
+        // PERF-03: Clear timers on process exit
+        clearTimeout(readyTimeout);
+        if (killTimeoutHandle !== undefined) clearTimeout(killTimeoutHandle);
+        if (runtimeTimeoutHandle !== undefined) clearTimeout(runtimeTimeoutHandle);
         if (runtime.status === 'running') {
           if (signal) {
             runtime.status = 'cancelled';
@@ -215,24 +233,43 @@ export class SubprocessBackend implements SubAgentBackend {
       });
 
       child.on('error', (err) => {
+        // PERF-03: Clear timers on process error
+        clearTimeout(readyTimeout);
+        if (killTimeoutHandle !== undefined) clearTimeout(killTimeoutHandle);
+        if (runtimeTimeoutHandle !== undefined) clearTimeout(runtimeTimeoutHandle);
         runtime.status = 'failed';
         runtime.error = err;
         runtime.completedAt = Date.now();
         this.cleanup(agentId);
       });
 
+      // Safety timeout: if child doesn't send 'ready' within 5s, send init
+      // anyway to avoid deadlock (FUN-01 defense-in-depth)
+      const readyTimeout = setTimeout(() => {
+        if (runtime.status === 'spawning') {
+          logger.orchestrator.warn(`[SubprocessBackend] Child ${agentId} did not send ready, sending init anyway`);
+          runtime.status = 'running';
+          child.send({
+            type: 'init',
+            config,
+            permissionMode: childPermissionMode,
+            cwd: config.cwd || this.parentCwd,
+          } as ParentMessage);
+        }
+      }, 5000);
+
       // Wire abort controller
       runtime.abortController.signal.addEventListener('abort', () => {
         const abortMsg: ParentMessage = { type: 'shutdown', force: true };
         child.send(abortMsg);
-        setTimeout(() => {
+        killTimeoutHandle = setTimeout(() => {
           if (!child.killed) child.kill('SIGKILL');
         }, 5000);
       }, { once: true });
 
       // Set up timeout
       const timeoutMs = (Number.isFinite(config.timeoutSeconds ?? NaN) ? config.timeoutSeconds! : 300) * 1000;
-      setTimeout(() => {
+      runtimeTimeoutHandle = setTimeout(() => {
         if (runtime.status === 'running') {
           runtime.abortController.abort();
         }

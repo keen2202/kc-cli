@@ -4,6 +4,7 @@ import type { PermissionResult, PermissionContext } from '../permissions/protoco
 import { LOW_RISK_BASH_PATTERNS, MEDIUM_RISK_BASH_PATTERNS } from './readonlyCommands';
 import { containsProtectedPath } from './protectedPaths';
 import { normalizeCommand, splitSubCommands } from './commandNormalizer';
+import { withTimeout } from '../utils/async-helpers';
 
 // Module-level constants (avoid allocation per call)
 const SAFE_TOOLS = new Set(['FileRead', 'Glob', 'Grep', 'Monitor']);
@@ -143,12 +144,11 @@ export class PermissionClassifier {
 
     // Stage 2: Run classifier with timeout, fallback to 'ask'
     try {
-      return await Promise.race([
+      return await withTimeout(
         this.runClassifier(toolName, input, context),
-        new Promise<ClassifierDecision>((_, reject) =>
-          setTimeout(() => reject(new Error('Classifier timeout')), CLASSIFIER_TIMEOUT_MS)
-        ),
-      ]);
+        CLASSIFIER_TIMEOUT_MS,
+        'Classifier timeout',
+      );
     } catch {
       return {
         behavior: 'ask',

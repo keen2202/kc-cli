@@ -116,6 +116,41 @@ function convertSchema(schema: z.ZodTypeAny): Record<string, unknown> {
     };
   }
 
+  // Handle ZodIntersection
+  if (schema._def.typeName === 'ZodIntersection') {
+    const intersection = schema as z.ZodIntersection<any, any>;
+    return {
+      allOf: [convertSchema(intersection._def.left), convertSchema(intersection._def.right)],
+    };
+  }
+
+  // Handle ZodMap
+  if (schema._def.typeName === 'ZodMap') {
+    return {
+      type: 'object',
+      additionalProperties: convertSchema((schema as z.ZodMap<any, any>)._def.valueType),
+    };
+  }
+
+  // Handle ZodSet
+  if (schema._def.typeName === 'ZodSet') {
+    return {
+      type: 'array',
+      items: convertSchema((schema as z.ZodSet<any>)._def.valueType),
+      uniqueItems: true,
+    };
+  }
+
+  // Handle ZodDate
+  if (schema._def.typeName === 'ZodDate') {
+    return { type: 'string', format: 'date-time' };
+  }
+
+  // Handle ZodBigInt
+  if (schema._def.typeName === 'ZodBigInt') {
+    return { type: 'string', pattern: '^-?\\d+$' };
+  }
+
   // Handle ZodAny / ZodUnknown
   if (schema._def.typeName === 'ZodAny' || schema._def.typeName === 'ZodUnknown') {
     return {};
@@ -240,5 +275,9 @@ function convertNumber(schema: z.ZodNumber): Record<string, unknown> {
 function isOptional(schema: z.ZodTypeAny): boolean {
   if (schema._def.typeName === 'ZodOptional') return true;
   if (schema._def.typeName === 'ZodDefault') return true;
+  // Recursively unwrap ZodEffects (refine/transform) to detect wrapped optional fields
+  if (schema._def.typeName === 'ZodEffects') {
+    return isOptional((schema as z.ZodEffects<any>)._def.schema);
+  }
   return false;
 }

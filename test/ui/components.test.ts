@@ -5,11 +5,6 @@ import { renderToolCallCard, type ToolCallData } from '../../src/ui/components/T
 import { renderStatusBar } from '../../src/ui/components/StatusBar';
 import { renderInputBox, createInputState } from '../../src/ui/components/InputBox';
 import { renderSidebar, createSidebarData } from '../../src/ui/components/Sidebar';
-import { renderHeader } from '../../src/ui/components/Header';
-import { renderThinkingIndicator } from '../../src/ui/components/ThinkingIndicator';
-import { renderPermissionDialog } from '../../src/ui/components/PermissionDialog';
-import { renderHelpPanel } from '../../src/ui/components/HelpPanel';
-import { createDefaultKeybindings } from '../../src/ui/keybinding-manager';
 
 const themes = ['dark', 'light'] as const;
 
@@ -78,9 +73,8 @@ describe('StatusBar', () => {
         sessionStartTime: Date.now() - 60000,
       }, theme);
       expect(output).toContain('anthropic/claude-sonnet-4-20250514');
-      // New format: turn count without "turns" suffix, separated by progress bar
       expect(output).toContain('3/50');
-      expect(output).toContain('idle'); // mode indicator
+      expect(output).toContain('idle');
     });
 
     it(`returns empty when no data with ${themeName} theme`, () => {
@@ -136,62 +130,6 @@ describe('Sidebar', () => {
       data.visible = false;
       const output = renderSidebar(data, 30, theme);
       expect(output).toBe('');
-    });
-  }
-});
-
-describe('Header', () => {
-  for (const themeName of themes) {
-    it(`renders with ${themeName} theme`, () => {
-      const theme = getTheme(themeName);
-      const result = renderHeader({
-        provider: 'anthropic',
-        model: 'claude-sonnet-4-20250514',
-        sessionId: 'abc123',
-        width: 80,
-        theme,
-      });
-      expect(result.lines.length).toBe(2);
-      expect(result.lines[0]).toContain('┌');
-      expect(result.lines[1]).toContain('kc');
-    });
-  }
-});
-
-describe('ThinkingIndicator', () => {
-  it('renders elapsed time', () => {
-    const theme = getTheme('dark');
-    const output = renderThinkingIndicator({ startTime: Date.now() - 2300, theme });
-    expect(output).toContain('Thinking');
-    expect(output).toContain('2.3s');
-  });
-});
-
-describe('PermissionDialog', () => {
-  for (const themeName of themes) {
-    it(`renders with ${themeName} theme`, () => {
-      const theme = getTheme(themeName);
-      const output = renderPermissionDialog({ toolName: 'Bash', inputSummary: 'rm -rf /tmp/test', theme });
-      expect(output).toContain('Permission Required');
-      expect(output).toContain('Bash');
-      expect(output).toContain('[Y]');
-    });
-  }
-});
-
-describe('HelpPanel', () => {
-  for (const themeName of themes) {
-    it(`renders with ${themeName} theme`, () => {
-      const theme = getTheme(themeName);
-      const kb = createDefaultKeybindings();
-      const output = renderHelpPanel({
-        commands: [{ name: '/help', description: 'Show help' }],
-        keybindings: kb.getAll(),
-        theme,
-      });
-      expect(output).toContain('Help');
-      expect(output).toContain('/help');
-      expect(output).toContain('ctrl+k');
     });
   }
 });

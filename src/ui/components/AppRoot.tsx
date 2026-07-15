@@ -1,6 +1,7 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { ThemeProvider, useTheme } from '../hooks/useTheme';
+import { DEFAULT_THEME } from '../theme';
 import { useStreamingEvents } from '../hooks/useStreamingEvents';
 import { Layout } from './Layout';
 import { HeaderBar } from './HeaderBar';
@@ -30,6 +31,76 @@ import { toolRegistry } from '../../tools';
 import { UserProfileService } from '../../services/userProfile';
 import type { UserLevel } from '../../services/userProfile';
 import type { PermissionMode } from '../../permissions/protocol';
+
+// ── Error Bar ──
+
+interface ErrorBarProps {
+  errors: string[];
+  onDismiss: (index: number) => void;
+}
+
+function ErrorBar({ errors, onDismiss }: ErrorBarProps) {
+  if (errors.length === 0) return null;
+
+  // Show the most recent error
+  const latest = errors[errors.length - 1];
+
+  return (
+    <Box
+      flexDirection="row"
+      borderStyle="single"
+      borderColor="red"
+      paddingLeft={1}
+      paddingRight={1}
+      marginBottom={1}
+    >
+      <Text color="red">⚠ Error: </Text>
+      <Text>{latest}</Text>
+      <Text dimColor>  [Esc to dismiss]</Text>
+    </Box>
+  );
+}
+
+// ── Exit Confirmation Dialog ──
+
+interface ExitConfirmDialogProps {
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+function ExitConfirmDialog({ onConfirm, onCancel }: ExitConfirmDialogProps) {
+  useInput((input: string, key: any) => {
+    if (input === 'y' || input === 'Y') {
+      onConfirm();
+    }
+    if (key.escape || input === 'n' || input === 'N') {
+      onCancel();
+    }
+  });
+
+  return (
+    <Box
+      position="absolute"
+      top="50%"
+      left="50%"
+      flexDirection="column"
+      borderStyle="single"
+      padding={1}
+      backgroundColor="#1a1b26"
+    >
+      <Box marginBottom={1}>
+        <Text bold>Exit kc-cli?</Text>
+      </Box>
+      <Box marginBottom={1}>
+        <Text>Any active session will be terminated.</Text>
+      </Box>
+      <Box flexDirection="row">
+        <Text>[Y] Yes, exit  </Text>
+        <Text dimColor>[N/Esc] Cancel</Text>
+      </Box>
+    </Box>
+  );
+}
 
 // ── Sidebar placeholder ──
 
@@ -74,6 +145,7 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
     sidebarData,
     isStreaming,
     errors,
+    totalTokensUsed,
     addMessage,
     setMessages,
   } = useStreamingEvents(eventBus);
@@ -88,6 +160,22 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
     deleteMode: boolean;
   }>({ attachments: [], deleteMode: false });
   const [agentMode, setAgentMode] = useState<'build' | 'plan'>('build');
+
+  // Exit confirmation state
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const exitConfirmHandledRef = useRef(false);
+
+  // Error dismissal
+  const [dismissedErrors, setDismissedErrors] = useState<Set<number>>(new Set());
+  const dismissError = useCallback((index: number) => {
+    setDismissedErrors((prev) => new Set(prev).add(index));
+  }, []);
+
+  // Active errors (not dismissed)
+  const activeErrors = errors.filter((_, i) => !dismissedErrors.has(i));
+
+  // Get session ID from global state
+  const sessionId = getState().sessionId;
 
   // Slash command handler
   const handleSlashCommand = useCallback(async (command: string) => {
@@ -230,6 +318,19 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
 
   // Keyboard input handling via Ink's useInput
   useInput((input: string, key: any) => {
+    // When exit confirmation is showing, block all other input
+    if (showExitConfirm) {
+      exitConfirmHandledRef.current = true;
+      if (input === 'y' || input === 'Y') {
+        setShowExitConfirm(false);
+        process.exit(0);
+      }
+      if (key.escape || input === 'n' || input === 'N') {
+        setShowExitConfirm(false);
+      }
+      return;
+    }
+
     if (isStreaming) {
       if (key.ctrl && input === 'x') {
         // Cancel
@@ -253,14 +354,13 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
       setMode((m) => (m === 'steer' ? 'idle' : 'steer'));
       return;
     }
-    if (key.ctrl && input === 'c') {
-      // Quit
-      process.exit(0);
-      return;
-    }
-    if (key.ctrl && input === 'd') {
-      // Exit when idle
-      process.exit(0);
+    if (key.ctrl && (input === 'c' || input === 'd')) {
+      // Exit with confirmation if there's an active session
+      if (messages.length > 0) {
+        setShowExitConfirm(true);
+      } else {
+        process.exit(0);
+      }
       return;
     }
     if (key.ctrl && input === 'e') {
@@ -287,6 +387,12 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
     if (key.tab) {
       // Toggle build/plan mode
       setAgentMode((prev) => (prev === 'build' ? 'plan' : 'build'));
+      return;
+    }
+
+    // Dismiss error bar on Escape
+    if (key.escape && activeErrors.length > 0) {
+      dismissError(errors.length - 1);
       return;
     }
 
@@ -391,10 +497,16 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
 
   const sessionDuration = Date.now() - sessionStartTime;
 
+  const hasError = activeErrors.length > 0;
+
   return (
-    <Layout
-      headerBar={<HeaderBar provider={provider} model={model} agentMode={agentMode} />}
-      chatPanel={
+    <Box flexDirection="column" width="100%">
+      {hasError && (
+        <ErrorBar errors={activeErrors} onDismiss={dismissError} />
+      )}
+      <Layout
+        headerBar={<HeaderBar provider={provider} model={model} agentMode={agentMode} />}
+        chatPanel={
         <ChatPanel
           messages={messages}
           thinkingChains={thinkingChains}
@@ -413,7 +525,8 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
         <SessionInfo
           provider={provider}
           model={model}
-          tokensUsed={0}
+          sessionId={sessionId}
+          tokensUsed={totalTokensUsed}
           tokensMax={200000}
           duration={sessionDuration}
         />
@@ -426,10 +539,17 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
           model={model}
           turnCount={turnCount}
           maxTurns={maxTurns}
+          tokensUsed={totalTokensUsed}
         />
       }
-      overlay={null}
+      overlay={
+        showExitConfirm ? <ExitConfirmDialog
+          onConfirm={() => { setShowExitConfirm(false); process.exit(0); }}
+          onCancel={() => setShowExitConfirm(false)}
+        /> : null
+      }
     />
+    </Box>
   );
 }
 
@@ -445,7 +565,7 @@ interface AppRootProps {
 
 export function AppRoot({ queryEngine, provider, model, maxTurns, themeName }: AppRootProps) {
   return (
-    <ThemeProvider initialTheme={themeName || 'tokyonight'}>
+    <ThemeProvider initialTheme={themeName || DEFAULT_THEME}>
       <AppOpenCode
         queryEngine={queryEngine}
         provider={provider || 'unknown'}

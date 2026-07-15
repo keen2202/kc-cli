@@ -7,14 +7,19 @@ import type { CompactionEngine, CompactionContext, CompactionEngineResult } from
 import { ok, err } from './types';
 import { estimateMessageTokens, estimateMessageTokensArray } from '../../utils/tokenEstimation';
 
-/** Absolute token limit for force truncation */
-const MAX_TOKEN_LIMIT = 128_000;
+/**
+ * The minimum number of messages to preserve after force truncation.
+ * Prevents dropping all context when tokenBudget is very small.
+ */
+const MIN_KEPT_MESSAGES = 10;
 
 /**
- * Force truncate: keep most recent messages up to half the token limit.
+ * Force truncate: keep most recent messages up to half the token budget.
+ * Uses context.tokenBudget (passed as tokenBudget parameter) instead of
+ * a hardcoded constant (QUAL-07).
  */
-function forceTruncate(messages: ChatMessage[]): { messages: ChatMessage[]; tokensSaved: number } {
-  const targetTokens = Math.floor(MAX_TOKEN_LIMIT / 2);
+function forceTruncate(messages: ChatMessage[], tokenBudget: number): { messages: ChatMessage[]; tokensSaved: number } {
+  const targetTokens = Math.floor(tokenBudget / 2);
   const originalTokens = estimateMessageTokensArray(messages);
 
   // Keep messages from the end until we're under the target
@@ -22,7 +27,7 @@ function forceTruncate(messages: ChatMessage[]): { messages: ChatMessage[]; toke
   let runningTokens = 0;
   for (let i = messages.length - 1; i >= 0; i--) {
     const msgTokens = estimateMessageTokens(messages[i]);
-    if (runningTokens + msgTokens > targetTokens && kept.length > 10) break;
+    if (runningTokens + msgTokens > targetTokens && kept.length > MIN_KEPT_MESSAGES) break;
     kept.unshift(messages[i]);
     runningTokens += msgTokens;
   }
@@ -49,10 +54,10 @@ export class ForceTruncationEngine implements CompactionEngine {
     return true;
   }
 
-  async compact(messages: ChatMessage[], _context: CompactionContext): Promise<CompactionEngineResult> {
+  async compact(messages: ChatMessage[], context: CompactionContext): Promise<CompactionEngineResult> {
     try {
       const originalTokens = estimateMessageTokensArray(messages);
-      const result = forceTruncate(messages);
+      const result = forceTruncate(messages, context.tokenBudget);
       const newTokens = estimateMessageTokensArray(result.messages);
 
       return ok({

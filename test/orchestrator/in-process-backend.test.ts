@@ -8,6 +8,24 @@ let submitMessageImpl: () => AsyncGenerator<any> = async function* () {};
 // Optional error to throw from QueryEngine constructor
 let constructorError: Error | null = null;
 
+// ── Hoisted mock: vi.mock intercepts static imports of QueryEngine.
+//     For the dynamic import inside InProcessBackend.spawn(), vitest ESM has a
+//     known limitation — concurrent nested dynamic imports may bypass the mock.
+//     Tests that need reliable mocking must call spawn() sequentially so that
+//     CachedQueryEngine is populated before any concurrent spawns.
+vi.mock('../../src/query/QueryEngine', () => ({
+  QueryEngine: class MockQueryEngine {
+    constructor() {
+      if (constructorError) throw constructorError;
+    }
+    submitMessage(_msg: string) {
+      return submitMessageImpl();
+    }
+    abort(_reason?: string) {}
+    isAborted() { return false; }
+  },
+}));
+
 // Export for test access
 export function setSubmitMessageImpl(fn: () => AsyncGenerator<any>) {
   submitMessageImpl = fn;
@@ -48,19 +66,6 @@ beforeEach(async () => {
   // Reset to default no-op generator
   submitMessageImpl = async function* () {};
   constructorError = null;
-  // Re-register the mock for each test
-  vi.doMock('../../src/query/QueryEngine', () => ({
-    QueryEngine: class MockQueryEngine {
-      constructor() {
-        if (constructorError) throw constructorError;
-      }
-      submitMessage(_msg: string) {
-        return submitMessageImpl();
-      }
-      abort(_reason?: string) {}
-      isAborted() { return false; }
-    },
-  }));
 });
 
 afterEach(() => {
@@ -91,7 +96,7 @@ describe('InProcessBackend - spawn', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(result.agentId).toBe('test-agent@default');
+    expect(result.agentId).toMatch(/^test-agent@\d+$/);
     expect(result.queryEngine).toBeDefined();
   });
 
@@ -114,11 +119,11 @@ describe('InProcessBackend - spawn', () => {
     );
 
     const active = backend.listActive();
-    expect(active).toContain('my-agent@default');
+    expect(active).toContain('my-agent@0');
 
     // Cleanup
     resolveBlock!();
-    await backend.shutdown('my-agent@default', true);
+    await backend.shutdown('my-agent@0', true);
     await new Promise((r) => setTimeout(r, 50));
   });
 
@@ -129,7 +134,7 @@ describe('InProcessBackend - spawn', () => {
     const backend = new InProcessBackend(bus, tools, 'default', '/test');
 
     const events: any[] = [];
-    bus.on('my-agent@default', (event) => events.push(event));
+    bus.on('my-agent@0', (event) => events.push(event));
 
     await backend.spawn(
       { name: 'my-agent', prompt: 'task', systemPromptMode: 'default' },
@@ -218,7 +223,7 @@ describe('InProcessBackend - agent loop behavior', () => {
     const backend = new InProcessBackend(bus, tools, 'default', '/test');
 
     const events: any[] = [];
-    bus.on('agent@default', (event) => events.push(event));
+    bus.on('agent@0', (event) => events.push(event));
 
     await backend.spawn(
       { name: 'agent', prompt: 'say hello', systemPromptMode: 'default' },
@@ -253,7 +258,7 @@ describe('InProcessBackend - agent loop behavior', () => {
     const backend = new InProcessBackend(bus, tools, 'default', '/test');
 
     const events: any[] = [];
-    bus.on('agent@default', (event) => events.push(event));
+    bus.on('agent@0', (event) => events.push(event));
 
     await backend.spawn(
       { name: 'agent', prompt: 'read file', systemPromptMode: 'default' },
@@ -280,7 +285,7 @@ describe('InProcessBackend - agent loop behavior', () => {
     const backend = new InProcessBackend(bus, tools, 'default', '/test');
 
     const events: any[] = [];
-    bus.on('agent@default', (event) => events.push(event));
+    bus.on('agent@0', (event) => events.push(event));
 
     await backend.spawn(
       { name: 'agent', prompt: 'task', systemPromptMode: 'default' },
@@ -309,7 +314,7 @@ describe('InProcessBackend - agent loop behavior', () => {
     const backend = new InProcessBackend(bus, tools, 'default', '/test');
 
     const events: any[] = [];
-    bus.on('agent@default', (event) => events.push(event));
+    bus.on('agent@0', (event) => events.push(event));
 
     await backend.spawn(
       { name: 'agent', prompt: 'task', systemPromptMode: 'default', timeoutSeconds: 0.1 },
@@ -321,7 +326,7 @@ describe('InProcessBackend - agent loop behavior', () => {
     await new Promise((r) => setTimeout(r, 200));
 
     // After timeout + abort, agent should have progressed beyond 'running'
-    const status = backend.getStatus('agent@default');
+    const status = backend.getStatus('agent@0');
     expect(status).not.toBe('spawning');
   });
 
@@ -344,11 +349,11 @@ describe('InProcessBackend - agent loop behavior', () => {
     );
     expect(result.success).toBe(true);
     // Agent should be active
-    expect(backend.listActive()).toContain('agent@default');
+    expect(backend.listActive()).toContain('agent@0');
 
     // Cleanup
     resolveBlock!();
-    await backend.shutdown('agent@default', true);
+    await backend.shutdown('agent@0', true);
     await new Promise((r) => setTimeout(r, 50));
   });
 });
@@ -372,11 +377,11 @@ describe('InProcessBackend - getStatus', () => {
       createParentContext()
     );
 
-    const status = backend.getStatus('agent@default');
+    const status = backend.getStatus('agent@0');
     expect(status).toBe('running');
 
     // Cleanup
-    await backend.shutdown('agent@default', true);
+    await backend.shutdown('agent@0', true);
     resolveBlock!();
     await new Promise((r) => setTimeout(r, 100));
   });
@@ -387,7 +392,7 @@ describe('InProcessBackend - getStatus', () => {
     const tools = [createMockTool('FileRead')];
     const backend = new InProcessBackend(bus, tools, 'default', '/test');
 
-    const status = backend.getStatus('nonexistent@default');
+    const status = backend.getStatus('nonexistent@0');
     expect(status).toBeNull();
   });
 });
@@ -430,8 +435,8 @@ describe('InProcessBackend - listActive', () => {
     );
 
     const active = backend.listActive();
-    expect(active).toContain('agent-a@default');
-    expect(active).toContain('agent-b@default');
+    expect(active).toContain('agent-a@0');
+    expect(active).toContain('agent-b@1');
     expect(active).toHaveLength(2);
 
     // Cleanup
@@ -461,7 +466,7 @@ describe('InProcessBackend - sendMessage', () => {
       createParentContext()
     );
 
-    await backend.sendMessage('agent@default', {
+    await backend.sendMessage('agent@0', {
       type: 'user_message',
       from: 'parent',
       payload: { message: 'hello' },
@@ -469,7 +474,7 @@ describe('InProcessBackend - sendMessage', () => {
 
     // Cleanup
     resolveBlock!();
-    await backend.shutdown('agent@default', true);
+    await backend.shutdown('agent@0', true);
 
     // sendMessage should not throw for an existing agent
     expect(true).toBe(true);
@@ -482,12 +487,12 @@ describe('InProcessBackend - sendMessage', () => {
     const backend = new InProcessBackend(bus, tools, 'default', '/test');
 
     await expect(
-      backend.sendMessage('nonexistent@default', {
+      backend.sendMessage('nonexistent@0', {
         type: 'user_message',
         from: 'parent',
         payload: {},
       })
-    ).rejects.toThrow('Agent nonexistent@default not found');
+    ).rejects.toThrow('Agent nonexistent@0 not found');
   });
 });
 
@@ -511,11 +516,11 @@ describe('InProcessBackend - shutdown', () => {
     );
 
     const events: any[] = [];
-    bus.on('agent@default', (event) => events.push(event));
+    bus.on('agent@0', (event) => events.push(event));
 
-    const result = await backend.shutdown('agent@default', true);
+    const result = await backend.shutdown('agent@0', true);
     expect(result).toBe(true);
-    expect(backend.listActive()).not.toContain('agent@default');
+    expect(backend.listActive()).not.toContain('agent@0');
     expect(events.some((e) => e.type === 'agent:subagent_cancelled')).toBe(true);
 
     resolveBlock!();
@@ -540,7 +545,7 @@ describe('InProcessBackend - shutdown', () => {
       createParentContext()
     );
 
-    const result = await backend.shutdown('agent@default', false);
+    const result = await backend.shutdown('agent@0', false);
     expect(result).toBe(true);
 
     resolveBlock!();
@@ -553,7 +558,7 @@ describe('InProcessBackend - shutdown', () => {
     const tools = [createMockTool('FileRead')];
     const backend = new InProcessBackend(bus, tools, 'default', '/test');
 
-    const result = await backend.shutdown('nonexistent@default');
+    const result = await backend.shutdown('nonexistent@0');
     expect(result).toBe(false);
   });
 });
@@ -646,8 +651,8 @@ describe('getCurrentAgentContext', () => {
 });
 
 describe('InProcessBackend - concurrent execution', () => {
-  it('should handle multiple agents running concurrently', async () => {
-    // Keep agents running so they stay in the active map
+  it('should handle multiple agents spawned concurrently', async () => {
+    // Block agents indefinitely so they stay active
     const blocks: Array<() => void> = [];
     submitMessageImpl = async function* () {
       await new Promise<void>((r) => blocks.push(r));
@@ -658,6 +663,19 @@ describe('InProcessBackend - concurrent execution', () => {
     const tools = [createMockTool('FileRead')];
     const backend = new InProcessBackend(bus, tools, 'default', '/test');
 
+    // Prime the cached QueryEngine with a sequential spawn first.
+    // vitest ESM has a known limitation: vi.mock does not intercept
+    // dynamic imports inside dynamically imported modules when called
+    // concurrently — the import races and loads the real module.
+    // A sequential spawn guarantees CachedQueryEngine is set before
+    // the concurrent batch.
+    const primeResult = await backend.spawn(
+      { name: 'prime', prompt: 'prime', systemPromptMode: 'default' },
+      createParentContext()
+    );
+    expect(primeResult.agentId).toBe('prime@0');
+
+    // Now concurrent spawns reuse the cached mock
     const results = await Promise.all([
       backend.spawn(
         { name: 'agent-1', prompt: 'task 1', systemPromptMode: 'default' },
@@ -674,13 +692,18 @@ describe('InProcessBackend - concurrent execution', () => {
     ]);
 
     expect(results).toHaveLength(3);
-    // At least the spawn itself should succeed (even if the loop fails)
     expect(results.every((r) => r.agentId)).toBe(true);
+    expect(results.every((r) => r.queryEngine)).toBe(true);
 
     await new Promise((r) => setTimeout(r, 100));
 
+    // All 4 agents (prime + 3 concurrent) should be active
     const active = backend.listActive();
-    expect(active).toHaveLength(3);
+    expect(active).toHaveLength(4);
+    expect(active).toContain('prime@0');
+    expect(active).toContain('agent-1@1');
+    expect(active).toContain('agent-2@2');
+    expect(active).toContain('agent-3@3');
 
     // Cleanup
     for (const resolve of blocks) resolve();
@@ -708,11 +731,11 @@ describe('InProcessBackend - abort signal wiring', () => {
       createParentContext()
     );
 
-    await backend.shutdown('agent@default', true);
+    await backend.shutdown('agent@0', true);
     resolveBlock!();
 
     await new Promise((r) => setTimeout(r, 200));
 
-    expect(backend.listActive()).not.toContain('agent@default');
+    expect(backend.listActive()).not.toContain('agent@0');
   });
 });

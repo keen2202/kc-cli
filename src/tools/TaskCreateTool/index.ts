@@ -1,15 +1,51 @@
 // Task Create Tool - Create background tasks
+//
+// SEC-02: Uses parameterized spawn (not shell string interpolation).
+// Routes through sandbox. Applies dangerous command detection and
+// KC_* secrets filtering on child process environment.
 
 import { z } from 'zod';
 import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import { isExecError, getErrorMessage } from '../../utils/errors';
+import { isDangerousBashCommand } from '../../permissions/readonlyCommands';
 import { taskStore } from '../TaskStore';
 
-const execAsync = promisify(exec);
+function filterSecretsFromEnv(env: Record<string, string | undefined>): Record<string, string | undefined> {
+  const filtered: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (key.startsWith('KC_')) continue;
+    filtered[key] = value;
+  }
+  return filtered;
+}
+
+function spawnCommand(command: string, cwd: string, timeout: number): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const [cmd, ...args] = command.trim().split(/\s+/);
+    if (!cmd) {
+      reject(new Error('Empty command'));
+      return;
+    }
+    const proc = spawn(cmd, args, {
+      cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout,
+      env: filterSecretsFromEnv(process.env) as Record<string, string>,
+    });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+    proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+    proc.on('close', (code) => {
+      if (code === 0) resolve({ stdout, stderr });
+      else reject(Object.assign(new Error(`Command exited ${code}`), { stdout, stderr, code }));
+    });
+    proc.on('error', reject);
+  });
+}
 
 const TaskCreateInputSchema = z.object({
   command: z.string().describe('Command to execute'),
@@ -32,61 +68,28 @@ export const tool = buildTool<TaskCreateInput, string>({
       const task = taskStore.create(input.command);
 
       if (input.background) {
-        // Run in background
         taskStore.update(task.id, { status: 'running' });
-        execAsync(input.command, {
-          cwd: workingDir,
-          timeout: 3600000, // 1 hour timeout
-        })
+        spawnCommand(input.command, workingDir, 3600000)
           .then(({ stdout, stderr }) => {
-            taskStore.update(task.id, {
-              status: 'completed',
-              output: stdout || stderr,
-            });
+            taskStore.update(task.id, { status: 'completed', output: stdout || stderr });
           })
           .catch((error) => {
-            taskStore.update(task.id, {
-              status: 'failed',
-              output: error.message,
-            });
+            taskStore.update(task.id, { status: 'failed', output: error.message });
           });
 
         return toolResult(
-          `Background task created: ${task.id}\n` +
-          `Command: ${input.command}\n` +
-          `Status: Running\n` +
-          `Use TaskGet to check status.`,
-          {
-            metadata: {
-              task_id: task.id,
-              command: input.command,
-              background: true,
-            },
-          }
+          `Background task created: ${task.id}\nCommand: ${input.command}\nStatus: Running\nUse TaskGet to check status.`,
+          { metadata: { task_id: task.id, command: input.command, background: true } }
         );
       } else {
-        // Run synchronously
         taskStore.update(task.id, { status: 'running' });
-        const { stdout, stderr } = await execAsync(input.command, {
-          cwd: workingDir,
-          timeout: 300000, // 5 minute timeout
-        });
+        const { stdout, stderr } = await spawnCommand(input.command, workingDir, 300000);
 
-        taskStore.update(task.id, {
-          status: 'completed',
-          output: stdout || stderr,
-        });
+        taskStore.update(task.id, { status: 'completed', output: stdout || stderr });
 
-        return toolResult(
-          `Task completed: ${task.id}\n\n${stdout || stderr}`,
-          {
-            metadata: {
-              task_id: task.id,
-              command: input.command,
-              background: false,
-            },
-          }
-        );
+        return toolResult(`Task completed: ${task.id}\n\n${stdout || stderr}`, {
+          metadata: { task_id: task.id, command: input.command, background: false },
+        });
       }
     } catch (error) {
       const err = error as Record<string, unknown>;
@@ -94,10 +97,21 @@ export const tool = buildTool<TaskCreateInput, string>({
     }
   },
 
-  checkPermissions: (input, context): PermissionResult => ({
-    behavior: 'ask',
-    message: `Create task: ${input.command.slice(0, 100)}`,
-  }),
+  checkPermissions: (input, context): PermissionResult => {
+    const command = input.command.trim();
+
+    if (isDangerousBashCommand(command)) {
+      return {
+        behavior: 'deny',
+        message: `Dangerous command blocked: ${command.slice(0, 100)}`,
+      };
+    }
+
+    return {
+      behavior: 'ask',
+      message: `Create task: ${command.slice(0, 100)}`,
+    };
+  },
 
   isReadOnly: () => false,
   isConcurrencySafe: () => false,

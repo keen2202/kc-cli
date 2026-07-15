@@ -206,6 +206,21 @@ async function collectEvents(engine: QueryEngine, message: string) {
   return events;
 }
 
+/**
+ * Poll until `fullCompact` mock has been called at least once, or timeout.
+ * P6 moved compaction to fire-and-forget — this avoids flaky hardcoded
+ * setTimeout delays that break under CI load.
+ */
+async function waitForAsyncCompaction(timeoutMs = 1000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if ((fullCompact as ReturnType<typeof vi.fn>).mock.calls.length > 0) {
+      return;
+    }
+    await new Promise(r => setTimeout(r, 1));
+  }
+}
+
 // ── Tests ──
 
 describe('QueryEngine Coverage Part 1', () => {
@@ -308,51 +323,54 @@ describe('QueryEngine Coverage Part 1', () => {
       setStream(textEvents('ok'));
       engine = createEngine();
       await collectEvents(engine, 'test');
-      expect(microcompact).not.toHaveBeenCalled();
+      // P6: no synchronous compaction functions called when shouldCompact returns false
+      expect(fullCompact).not.toHaveBeenCalled();
     });
 
-    it('should attempt compaction when tokens exceed threshold', async () => {
+    it('should trigger async compaction when tokens exceed threshold', async () => {
       const threshold = 200_000 - 20_000 - 13_000;
       mockTokenEstimateRef.value = threshold + 1000;
       setStream(textEvents('ok'));
 
-      (microcompact as ReturnType<typeof vi.fn>).mockReturnValue({
+      (fullCompact as ReturnType<typeof vi.fn>).mockResolvedValue({
         wasCompacted: true,
         messages: [{ id: '1', role: 'user', content: 'test', timestamp: Date.now() }],
         tokensSaved: 5000,
       });
 
       engine = createEngine();
-      const events = await collectEvents(engine, 'test');
+      await collectEvents(engine, 'test');
+      // P6: compaction is fire-and-forget; wait for async to fire
+      await waitForAsyncCompaction();
 
-      expect(microcompact).toHaveBeenCalled();
-      const compactEvents = events.filter(e => e.type === 'agent:compact_micro');
-      expect(compactEvents.length).toBe(1);
-      expect(compactEvents[0].tokensSaved).toBe(5000);
+      expect(fullCompact).toHaveBeenCalled();
     });
 
-    it('should stop after microcompact when it brings tokens below threshold', async () => {
-      // Post-microcompact token estimate returns low value (microcompact sufficient)
-      mockTokenEstimateRef.value = 1000;
+    it('should not block the turn when compaction runs async', async () => {
+      const threshold = 200_000 - 20_000 - 13_000;
+      mockTokenEstimateRef.value = threshold + 1000;
       setStream(textEvents('ok'));
 
-      (microcompact as ReturnType<typeof vi.fn>).mockReturnValue({
-        wasCompacted: true,
-        messages: [{ id: '1', role: 'user', content: 'test', timestamp: Date.now() }],
-        tokensSaved: 50000,
+      let compactResolved = false;
+      (fullCompact as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+        await new Promise(r => setTimeout(r, 50));
+        compactResolved = true;
+        return { wasCompacted: false, messages: [], tokensSaved: 0 };
       });
 
       engine = createEngine();
-      const events = await collectEvents(engine, 'test');
+      await collectEvents(engine, 'test');
 
-      expect(microcompact).toHaveBeenCalled();
-      expect(fullCompact).not.toHaveBeenCalled();
-      const compactEvents = events.filter(e => e.type === 'agent:compact_micro');
-      expect(compactEvents.length).toBe(1);
+      // Turn completed without waiting for the 50ms compaction to finish
+      expect(fullCompact).toHaveBeenCalled();
+      expect(compactResolved).toBe(false);
+
+      // Compaction eventually finishes after the turn
+      await new Promise(r => setTimeout(r, 100));
+      expect(compactResolved).toBe(true);
     });
 
-    it('should do full compaction if microcompact is insufficient', async () => {
-      // Post-microcompact token estimate returns high value (microcompact insufficient)
+    it('should do full compaction async and drain result', async () => {
       const threshold = 200_000 - 20_000 - 13_000;
       mockTokenEstimateRef.value = threshold + 1000;
       setStream(textEvents('ok'));
@@ -360,18 +378,16 @@ describe('QueryEngine Coverage Part 1', () => {
       const compactedMessages: ChatMessage[] = [
         { id: '1', role: 'user', content: 'test', timestamp: Date.now() },
       ];
-      (microcompact as ReturnType<typeof vi.fn>).mockReturnValue({
-        wasCompacted: true, messages: compactedMessages, tokensSaved: 5000,
-      });
       (fullCompact as ReturnType<typeof vi.fn>).mockResolvedValue({
         wasCompacted: true, messages: compactedMessages, tokensSaved: 50000,
       });
 
       engine = createEngine();
-      const events = await collectEvents(engine, 'test');
+      await collectEvents(engine, 'test');
+      // P6: wait for async compaction to complete
+      await waitForAsyncCompaction();
 
       expect(fullCompact).toHaveBeenCalled();
-      expect(events.filter(e => e.type === 'agent:compact_full').length).toBe(1);
     });
 
     it('should use cached token estimate', async () => {
@@ -388,23 +404,24 @@ describe('QueryEngine Coverage Part 1', () => {
       mockTokenEstimateRef.value = threshold + 1000;
 
       (fullCompact as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('API error'));
-      (microcompact as ReturnType<typeof vi.fn>).mockReturnValue({
-        wasCompacted: false, messages: [], tokensSaved: 0,
-      });
 
       setStream(textEvents('ok'));
       engine = createEngine();
 
-      for (let i = 0; i < MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES + 1; i++) {
-        try { for await (const _ of engine.submitMessage(`msg ${i}`)) { /* drain */ } } catch {}
+      for (let i = 0; i < MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES + 2; i++) {
+        await collectEvents(engine, `msg ${i}`);
         engine.getStateMachine().reset();
+        await waitForAsyncCompaction();
       }
 
       vi.clearAllMocks();
       setStream(textEvents('ok'));
-      try { for await (const _ of engine.submitMessage('final msg')) { /* drain */ } } catch {}
+      await collectEvents(engine, 'final msg');
+      // Negative case: compaction is disabled, so just flush microtasks
+      await new Promise(r => setTimeout(r, 10));
 
-      expect(microcompact).not.toHaveBeenCalled();
+      // After max failures, no further compaction calls should be made
+      expect(fullCompact).not.toHaveBeenCalled();
     });
 
     it('should validate state before compaction', async () => {
@@ -428,15 +445,13 @@ describe('QueryEngine Coverage Part 1', () => {
       mockTokenEstimateRef.value = threshold + 1000;
       setStream(textEvents('ok'));
 
-      (microcompact as ReturnType<typeof vi.fn>).mockReturnValue({
-        wasCompacted: false, messages: [], tokensSaved: 0,
-      });
-      (fullCompact as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-        throw new Error('permanent auth failure');
-      });
+      (fullCompact as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('permanent auth failure'));
 
       engine = createEngine({ contextWindow: 200_000 });
-      try { for await (const _ of engine.submitMessage('test')) { /* drain */ } } catch {}
+      // Turn should complete successfully even when async compaction fails
+      await collectEvents(engine, 'test');
+      // Wait for async compaction to fire and fail
+      await waitForAsyncCompaction();
       expect(fullCompact).toHaveBeenCalled();
     });
 
@@ -444,15 +459,10 @@ describe('QueryEngine Coverage Part 1', () => {
       mockTokenEstimateRef.value = 18_000;
       setStream(textEvents('ok'));
 
-      (microcompact as ReturnType<typeof vi.fn>).mockReturnValue({
-        wasCompacted: true,
-        messages: [{ id: '1', role: 'user', content: 'test', timestamp: Date.now() }],
-        tokensSaved: 5000,
-      });
-
       engine = createEngine({ contextWindow: 50_000 });
       await collectEvents(engine, 'test');
-      expect(microcompact).toHaveBeenCalled();
+      // Custom context window should be used in shouldCompact check
+      expect(shouldCompact).toHaveBeenCalled();
     });
   });
 

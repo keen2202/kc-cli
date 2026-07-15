@@ -55,8 +55,9 @@ export class OllamaClient extends BaseApiClient {
   async *streamChat(config: LLMRequestConfig): AsyncGenerator<LLMStreamEvent> {
     const requestBody = this.buildRequestBody({ ...config, stream: true });
 
+    let response: Response | undefined;
     try {
-      const response = await fetch(`${this.baseUrl}/api/chat`, {
+      response = await fetch(`${this.baseUrl}/api/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -80,6 +81,8 @@ export class OllamaClient extends BaseApiClient {
         type: 'error',
         error: error instanceof Error ? error : new Error(String(error)),
       };
+    } finally {
+      await response?.body?.cancel();
     }
   }
 

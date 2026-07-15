@@ -353,6 +353,11 @@ tokyonightTheme.resolve = buildResolver(tokyonightTheme);
 /**
  * All built-in themes.
  */
+/**
+ * Default theme name used when no theme is specified.
+ */
+export const DEFAULT_THEME = 'tokyonight';
+
 export const THEMES: Record<string, Theme> = {
   dark: darkTheme,
   light: lightTheme,

@@ -85,10 +85,28 @@ export class SessionMetricsCollector {
     metrics.lastUsed = Date.now();
   }
 
+  /** Maximum age for a tool timer before it is considered orphaned (5 minutes) */
+  private static readonly TOOL_TIMER_TTL_MS = 5 * 60 * 1000;
+
+  /**
+   * Purge tool timer entries that have been running longer than the TTL.
+   * These are "orphaned" entries where endToolTimer was never called
+   * (PERF-16).
+   */
+  private cleanupStaleToolTimers(): void {
+    const now = Date.now();
+    for (const [toolName, startTime] of this.toolTimers.entries()) {
+      if (now - startTime > SessionMetricsCollector.TOOL_TIMER_TTL_MS) {
+        this.toolTimers.delete(toolName);
+      }
+    }
+  }
+
   /**
    * Start timing a tool call
    */
   startToolTimer(toolName: string): void {
+    this.cleanupStaleToolTimers();
     this.toolTimers.set(toolName, Date.now());
   }
 
@@ -102,6 +120,7 @@ export class SessionMetricsCollector {
       this.recordToolCall(toolName, success, executionMs);
       this.toolTimers.delete(toolName);
     }
+    this.cleanupStaleToolTimers();
   }
 
   /**

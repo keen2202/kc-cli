@@ -3,6 +3,7 @@
 
 import type { LanguageId } from './types';
 import { LSPClientManager, detectLanguage } from './client';
+import { pathToFileURL } from 'url';
 
 export interface ManagedDocument {
   uri: string;
@@ -34,7 +35,7 @@ export class DocumentManager {
    * Open a document and notify the language server.
    */
   async open(filePath: string, content: string, languageId?: LanguageId): Promise<ManagedDocument> {
-    const uri = `file://${filePath}`;
+    const uri = pathToFileURL(filePath).href;
     const lang = languageId || detectLanguage(filePath);
 
     const doc: ManagedDocument = {
@@ -50,7 +51,7 @@ export class DocumentManager {
     this.documents.set(filePath, doc);
 
     // Ensure language server is connected
-    const rootUri = `file://${process.cwd()}`;
+    const rootUri = pathToFileURL(process.cwd()).href;
     await this.clientManager.connect(lang, rootUri);
 
     // Send didOpen notification

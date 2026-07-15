@@ -147,6 +147,33 @@ export const ConfigSchema = z.object({
 
 export type Config = z.infer<typeof ConfigSchema>;
 
+// Unwrap ConfigSchema's ZodDefault wrapper to access .shape for env validation
+const _configObject: z.ZodObject<any> = (() => {
+  const s: z.ZodTypeAny = ConfigSchema;
+  return s._def.typeName === 'ZodDefault'
+    ? (s as unknown as z.ZodDefault<any>)._def.innerType as z.ZodObject<any>
+    : s as unknown as z.ZodObject<any>;
+})();
+
+// Enum schemas used for environment variable validation (QUAL-04)
+const providerSchema = _configObject.shape.provider;
+const permissionModeSchema = _configObject.shape.permissionMode;
+const searchProviderSchema = _configObject.shape.searchProvider;
+const sandboxBackendSchema = (() => {
+  const sb = _configObject.shape.sandbox;
+  const inner = sb._def.typeName === 'ZodDefault'
+    ? (sb as unknown as z.ZodDefault<any>)._def.innerType as z.ZodObject<any>
+    : sb as unknown as z.ZodObject<any>;
+  return inner.shape.backend;
+})();
+const sandboxEnforcementSchema = (() => {
+  const sb = _configObject.shape.sandbox;
+  const inner = sb._def.typeName === 'ZodDefault'
+    ? (sb as unknown as z.ZodDefault<any>)._def.innerType as z.ZodObject<any>
+    : sb as unknown as z.ZodObject<any>;
+  return inner.shape.defaultEnforcement;
+})();
+
 export interface ConfigLayer {
   source: string;
   config: Partial<Config>;
@@ -235,13 +262,28 @@ export function loadEnvConfig(): Partial<Config> {
     config.model = process.env.KC_MODEL;
   }
   if (process.env.KC_PROVIDER) {
-    config.provider = process.env.KC_PROVIDER as Config['provider'];
+    const result = providerSchema.safeParse(process.env.KC_PROVIDER);
+    if (result.success) {
+      config.provider = result.data;
+    } else {
+      logger.services.warn(`Invalid KC_PROVIDER value: "${process.env.KC_PROVIDER}" -- discarding`);
+    }
   }
   if (process.env.KC_PERMISSION_MODE) {
-    config.permissionMode = process.env.KC_PERMISSION_MODE as Config['permissionMode'];
+    const result = permissionModeSchema.safeParse(process.env.KC_PERMISSION_MODE);
+    if (result.success) {
+      config.permissionMode = result.data;
+    } else {
+      logger.services.warn(`Invalid KC_PERMISSION_MODE value: "${process.env.KC_PERMISSION_MODE}" -- discarding`);
+    }
   }
   if (process.env.KC_SEARCH_PROVIDER) {
-    config.searchProvider = process.env.KC_SEARCH_PROVIDER as Config['searchProvider'];
+    const result = searchProviderSchema.safeParse(process.env.KC_SEARCH_PROVIDER);
+    if (result.success) {
+      config.searchProvider = result.data;
+    } else {
+      logger.services.warn(`Invalid KC_SEARCH_PROVIDER value: "${process.env.KC_SEARCH_PROVIDER}" -- discarding`);
+    }
   }
   if (process.env.KC_SEARCH_API_KEY) {
     config.searchApiKey = process.env.KC_SEARCH_API_KEY;
@@ -252,13 +294,23 @@ export function loadEnvConfig(): Partial<Config> {
 
   // Agent turn configuration environment variables
   if (process.env.KC_MAX_TURNS) {
-    config.maxTurns = parseInt(process.env.KC_MAX_TURNS, 10);
+    const parsed = parseInt(process.env.KC_MAX_TURNS, 10);
+    if (Number.isFinite(parsed)) {
+      config.maxTurns = parsed;
+    } else {
+      logger.services.warn(`Invalid KC_MAX_TURNS value: "${process.env.KC_MAX_TURNS}" -- using default`);
+    }
   }
   if (process.env.KC_AUTO_EXTEND_TURNS) {
     config.autoExtendTurns = process.env.KC_AUTO_EXTEND_TURNS === 'true' || process.env.KC_AUTO_EXTEND_TURNS === '1';
   }
   if (process.env.KC_MAX_TURNS_CEILING) {
-    config.maxTurnsCeiling = parseInt(process.env.KC_MAX_TURNS_CEILING, 10);
+    const parsed = parseInt(process.env.KC_MAX_TURNS_CEILING, 10);
+    if (Number.isFinite(parsed)) {
+      config.maxTurnsCeiling = parsed;
+    } else {
+      logger.services.warn(`Invalid KC_MAX_TURNS_CEILING value: "${process.env.KC_MAX_TURNS_CEILING}" -- using default`);
+    }
   }
 
   // Sandbox environment variables
@@ -268,22 +320,42 @@ export function loadEnvConfig(): Partial<Config> {
     sb.enabled = process.env.KC_SANDBOX_ENABLED === 'true' || process.env.KC_SANDBOX_ENABLED === '1';
   }
   if (process.env.KC_SANDBOX_BACKEND) {
-    sb.backend = process.env.KC_SANDBOX_BACKEND as Config['sandbox']['backend'];
+    const result = sandboxBackendSchema.safeParse(process.env.KC_SANDBOX_BACKEND);
+    if (result.success) {
+      sb.backend = result.data;
+    } else {
+      logger.services.warn(`Invalid KC_SANDBOX_BACKEND value: "${process.env.KC_SANDBOX_BACKEND}" -- discarding`);
+    }
   }
   if (process.env.KC_SANDBOX_ALLOW_NETWORK) {
     sb.allowNetwork = process.env.KC_SANDBOX_ALLOW_NETWORK === 'true' || process.env.KC_SANDBOX_ALLOW_NETWORK === '1';
   }
   if (process.env.KC_SANDBOX_MAX_MEMORY_MB) {
-    sb.maxMemoryMb = parseInt(process.env.KC_SANDBOX_MAX_MEMORY_MB, 10);
+    const parsed = parseInt(process.env.KC_SANDBOX_MAX_MEMORY_MB, 10);
+    if (Number.isFinite(parsed)) {
+      sb.maxMemoryMb = parsed;
+    } else {
+      logger.services.warn(`Invalid KC_SANDBOX_MAX_MEMORY_MB value: "${process.env.KC_SANDBOX_MAX_MEMORY_MB}" -- using default`);
+    }
   }
   if (process.env.KC_SANDBOX_CPU_TIME_LIMIT_SEC) {
-    sb.cpuTimeLimitSec = parseInt(process.env.KC_SANDBOX_CPU_TIME_LIMIT_SEC, 10);
+    const parsed = parseInt(process.env.KC_SANDBOX_CPU_TIME_LIMIT_SEC, 10);
+    if (Number.isFinite(parsed)) {
+      sb.cpuTimeLimitSec = parsed;
+    } else {
+      logger.services.warn(`Invalid KC_SANDBOX_CPU_TIME_LIMIT_SEC value: "${process.env.KC_SANDBOX_CPU_TIME_LIMIT_SEC}" -- using default`);
+    }
   }
   if (process.env.KC_SANDBOX_FAIL_IF_NO_SANDBOX) {
     sb.failIfNoSandbox = process.env.KC_SANDBOX_FAIL_IF_NO_SANDBOX === 'true' || process.env.KC_SANDBOX_FAIL_IF_NO_SANDBOX === '1';
   }
   if (process.env.KC_SANDBOX_DEFAULT_ENFORCEMENT) {
-    sb.defaultEnforcement = process.env.KC_SANDBOX_DEFAULT_ENFORCEMENT as Config['sandbox']['defaultEnforcement'];
+    const result = sandboxEnforcementSchema.safeParse(process.env.KC_SANDBOX_DEFAULT_ENFORCEMENT);
+    if (result.success) {
+      sb.defaultEnforcement = result.data;
+    } else {
+      logger.services.warn(`Invalid KC_SANDBOX_DEFAULT_ENFORCEMENT value: "${process.env.KC_SANDBOX_DEFAULT_ENFORCEMENT}" -- discarding`);
+    }
   }
   if (process.env.KC_SANDBOX_TOOL_POLICIES) {
     try {
@@ -349,6 +421,9 @@ export function deepMerge<T extends Record<string, unknown>>(target: T, source: 
       const nestedTarget = target[key] as Record<string, unknown>;
       const nestedSource = source[key] as Record<string, unknown>;
       (result as Record<string, unknown>)[key] = deepMerge(nestedTarget, nestedSource);
+    } else if (Array.isArray(source[key]) && Array.isArray(target[key])) {
+      // QUAL-02: Concatenate arrays instead of replacing
+      (result as Record<string, unknown>)[key] = [...(target[key] as unknown[]), ...(source[key] as unknown[])];
     } else {
       (result as Record<string, unknown>)[key] = source[key];
     }

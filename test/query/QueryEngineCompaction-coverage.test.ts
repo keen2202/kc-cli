@@ -119,22 +119,6 @@ const messages: ChatMessage[] = [
 const config = { contextWindow: 200_000, model: 'test-model' };
 const mockApiClient = {} as any;
 
-/**
- * Run an async generator to completion and return both the yielded events and
- * the final return value.
- */
-async function collect<T, TReturn>(
-  gen: AsyncGenerator<T, TReturn>,
-): Promise<{ events: T[]; result: TReturn }> {
-  const events: T[] = [];
-  let iteration = await gen.next();
-  while (!iteration.done) {
-    events.push(iteration.value);
-    iteration = await gen.next();
-  }
-  return { events, result: iteration.value };
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -179,8 +163,7 @@ describe('CompactionHandler', () => {
 
       // Trigger exactly 3 failures — the default maximum.
       for (let i = 0; i < 3; i++) {
-        const gen = handler.compact(messages, mockApiClient, config);
-        await gen.next();
+        await handler.compact(messages, mockApiClient, config);
       }
 
       expect(handler.shouldAttemptCompaction(messages, config)).toBe(false);
@@ -194,16 +177,14 @@ describe('CompactionHandler', () => {
 
       // 3 failures should be fine with a max of 5.
       for (let i = 0; i < 3; i++) {
-        const gen = handler.compact(messages, mockApiClient, config);
-        await gen.next();
+        await handler.compact(messages, mockApiClient, config);
       }
 
       expect(handler.shouldAttemptCompaction(messages, config)).toBe(true);
 
       // 2 more to exhaust the budget.
       for (let i = 0; i < 2; i++) {
-        const gen = handler.compact(messages, mockApiClient, config);
-        await gen.next();
+        await handler.compact(messages, mockApiClient, config);
       }
 
       expect(handler.shouldAttemptCompaction(messages, config)).toBe(false);
@@ -229,8 +210,7 @@ describe('CompactionHandler', () => {
       mockFullCompact.mockRejectedValue(new Error('Fatal error'));
 
       for (let i = 0; i < 2; i++) {
-        const gen = handler.compact(messages, mockApiClient, config);
-        await gen.next();
+        await handler.compact(messages, mockApiClient, config);
       }
 
       expect(handler.shouldAttemptCompaction(messages, config)).toBe(false);
@@ -261,7 +241,7 @@ describe('CompactionHandler', () => {
   // ── compact — microcompact path ────────────────────────────────────────
 
   describe('compact — microcompact', () => {
-    it('yields agent:compact_micro when microcompact succeeds and tokens are below threshold', async () => {
+    it('returns microcompact result when microcompact succeeds and tokens are below threshold', async () => {
       const handler = new CompactionHandler();
       mockMicrocompact.mockReturnValue({
         wasCompacted: true,
@@ -270,35 +250,9 @@ describe('CompactionHandler', () => {
       });
       mockEstimateTokensRef.value = 50_000; // below threshold (200k - 20k - 13k = 167k)
 
-      const { events, result } = await collect(
-        handler.compact(messages, mockApiClient, config),
-      );
+      const result = await handler.compact(messages, mockApiClient, config);
 
-      expect(events).toHaveLength(1);
-      expect(events[0]).toMatchObject({
-        type: 'agent:compact_micro',
-        tokensSaved: 500,
-      });
       expect(result.method).toBe('microcompact');
-    });
-
-    it('returns microcompact result when remaining tokens are below threshold', async () => {
-      const handler = new CompactionHandler();
-      const compactedMsgs = [makeMessage('c1', 'user', 'compacted')];
-      mockMicrocompact.mockReturnValue({
-        wasCompacted: true,
-        messages: compactedMsgs,
-        tokensSaved: 500,
-      });
-      mockEstimateTokensRef.value = 50_000; // below threshold
-
-      const { events, result } = await collect(
-        handler.compact(messages, mockApiClient, config),
-      );
-
-      expect(result.messages).toBe(compactedMsgs);
-      expect(result.method).toBe('microcompact');
-      expect(handler.failureCount).toBe(0); // reset on success
     });
 
     it('proceeds to full compact when microcompact leaves tokens above threshold', async () => {
@@ -315,14 +269,8 @@ describe('CompactionHandler', () => {
         tokensSaved: 2000,
       });
 
-      const { events, result } = await collect(
-        handler.compact(messages, mockApiClient, config),
-      );
+      const result = await handler.compact(messages, mockApiClient, config);
 
-      // Expect both microcompact event AND full compact event
-      expect(events).toHaveLength(2);
-      expect(events[0]).toMatchObject({ type: 'agent:compact_micro' });
-      expect(events[1]).toMatchObject({ type: 'agent:compact_full' });
       expect(result.method).toBe('fullcompact');
     });
   });
@@ -330,7 +278,7 @@ describe('CompactionHandler', () => {
   // ── compact — full compact path ────────────────────────────────────────
 
   describe('compact — full compact', () => {
-    it('yields agent:compact_full after successful full compact', async () => {
+    it('returns fullcompact result after successful full compact', async () => {
       const handler = new CompactionHandler();
       // Skip microcompact (wasCompacted: false)
       mockMicrocompact.mockReturnValue({
@@ -344,14 +292,8 @@ describe('CompactionHandler', () => {
         tokensSaved: 3000,
       });
 
-      const { events, result } = await collect(
-        handler.compact(messages, mockApiClient, config),
-      );
+      const result = await handler.compact(messages, mockApiClient, config);
 
-      expect(events).toHaveLength(1);
-      expect(events[0]).toMatchObject({ type: 'agent:compact_full' });
-      expect(events[0]).toHaveProperty('originalTokens');
-      expect(events[0]).toHaveProperty('compactedTokens');
       expect(result.method).toBe('fullcompact');
       expect(handler.failureCount).toBe(0); // reset on success
     });
@@ -378,16 +320,12 @@ describe('CompactionHandler', () => {
           tokensSaved: 1000,
         });
 
-      const { events, result } = await collect(
-        handler.compact(messages, mockApiClient, config),
-      );
+      const result = await handler.compact(messages, mockApiClient, config);
 
       expect(mockFullCompact).toHaveBeenCalledTimes(2);
       expect(mockClassifyApiError).toHaveBeenCalled();
       // retryAfterMs was provided by classifyApiError, so getRetryDelay not used
       expect(mockGetRetryDelay).not.toHaveBeenCalled();
-      expect(events).toHaveLength(1);
-      expect(events[0]).toMatchObject({ type: 'agent:compact_full' });
       expect(result.method).toBe('fullcompact');
       expect(handler.failureCount).toBe(0); // reset on final success
     });
@@ -406,8 +344,7 @@ describe('CompactionHandler', () => {
       });
       mockFullCompact.mockRejectedValue(new Error('Auth error'));
 
-      const gen = handler.compact(messages, mockApiClient, config);
-      await gen.next();
+      await handler.compact(messages, mockApiClient, config);
 
       expect(handler.failureCount).toBe(1);
     });
@@ -428,8 +365,7 @@ describe('CompactionHandler', () => {
 
       // Exhaust the failure budget.
       for (let i = 0; i < 3; i++) {
-        const gen = handler.compact(messages, mockApiClient, config);
-        await gen.next();
+        await handler.compact(messages, mockApiClient, config);
       }
 
       expect(handler.failureCount).toBe(3);
@@ -441,7 +377,7 @@ describe('CompactionHandler', () => {
   // ── compact — force truncation path ────────────────────────────────────
 
   describe('compact — force truncation', () => {
-    it('yields agent:compact_full for force truncation path', async () => {
+    it('returns force_truncate result for force truncation path', async () => {
       const handler = new CompactionHandler();
       const truncatedMsgs = [makeMessage('t1', 'user', 'truncated')];
       mockNeedsForceTruncation.mockReturnValue(true);
@@ -451,12 +387,9 @@ describe('CompactionHandler', () => {
         wasCompacted: true,
       });
 
-      const { events, result } = await collect(
-        handler.compact(messages, mockApiClient, config),
-      );
+      const result = await handler.compact(messages, mockApiClient, config);
 
-      expect(events).toHaveLength(1);
-      expect(events[0]).toMatchObject({ type: 'agent:compact_full' });
+      expect(result.method).toBe('force_truncate');
       expect(handler.failureCount).toBe(0); // reset on force truncate
     });
   });
@@ -488,14 +421,10 @@ describe('CompactionHandler', () => {
       });
       mockEstimateTokensRef.value = 50_000; // below threshold
 
-      const { events, result } = await collect(
-        handler.compact(messages, mockApiClient, config),
-      );
+      const result = await handler.compact(messages, mockApiClient, config);
 
       expect(mockStateValidatorValidate).toHaveBeenCalledWith(messages);
       expect(mockStateValidatorRepair).toHaveBeenCalled();
-      expect(events).toHaveLength(1);
-      expect(events[0]).toMatchObject({ type: 'agent:compact_micro' });
       // The repaired messages should flow through to the result
       expect(result.messages).toBe(repairedMsgs);
     });
@@ -520,8 +449,7 @@ describe('CompactionHandler', () => {
 
       // Cause 2 failures
       for (let i = 0; i < 2; i++) {
-        const gen = handler.compact(messages, mockApiClient, config);
-        await gen.next();
+        await handler.compact(messages, mockApiClient, config);
       }
 
       expect(handler.failureCount).toBe(2);

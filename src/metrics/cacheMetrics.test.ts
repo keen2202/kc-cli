@@ -195,14 +195,15 @@ describe('withCacheMetrics', () => {
     expect(metrics!.size).toBe(1);
   });
 
-  it('records evictions on delete', () => {
+  it('does not count explicit deletes as evictions', () => {
     innerCache.set('key', 'value');
     const cache = withCacheMetrics('test', innerCache, collector);
 
     cache.delete('key');
 
     const metrics = collector.getMetrics('test');
-    expect(metrics!.evictions).toBe(1);
+    // Evictions are only counted from the onEvict callback path, not explicit deletes
+    expect(metrics!.evictions).toBe(0);
   });
 
   it('returns correct values', () => {

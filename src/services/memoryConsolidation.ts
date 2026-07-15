@@ -12,6 +12,7 @@ import {
 import { parseFrontmatter, composeMemoryFile, validateMemoryType } from '../memory/frontmatter';
 import { scanMemoryFiles, updateMemoryEntrypoint } from '../memory/scanner';
 import { FileMemoryService } from '../memory/FileMemoryService';
+import { markConsolidationComplete } from './consolidationScheduler';
 
 // Module-level memory service reference (set during initialization)
 let memoryServiceRef: FileMemoryService | null = null;
@@ -103,6 +104,7 @@ export async function executeConsolidation(
     result.success = false;
   } finally {
     state.inProgress = false;
+    markConsolidationComplete(projectHash);
     await releaseConsolidationLock(projectHash);
   }
 

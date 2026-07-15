@@ -2,6 +2,7 @@
 
 import { spawn, type ChildProcess } from 'child_process';
 import * as path from 'path';
+import { pathToFileURL, fileURLToPath } from 'url';
 import type { LSPDiagnostic, LSPHover, LSPLocation, LanguageId } from './types';
 import { getCacheManager } from '../services/cache';
 
@@ -77,16 +78,26 @@ export class LSPClientManager {
       });
 
       proc.on('error', () => {
+        // PERF-04: Clear pending request timers before removing server
+        for (const [, pending] of server.pending) {
+          clearTimeout(pending.timer);
+          pending.reject(new Error('LSP server process exited'));
+        }
+        server.pending.clear();
         this.servers.delete(languageId);
       });
 
       proc.on('exit', () => {
+        // PERF-04: Clear pending request timers before removing server
+        for (const [, pending] of server.pending) {
+          clearTimeout(pending.timer);
+          pending.reject(new Error('LSP server process exited'));
+        }
+        server.pending.clear();
         this.servers.delete(languageId);
       });
 
-      this.servers.set(languageId, server);
-
-      // Initialize
+      // Initialize BEFORE adding to servers map to avoid dead server on failure (FUN-04)
       await this.sendRequest(server, 'initialize', {
         processId: process.pid,
         rootUri,
@@ -96,8 +107,15 @@ export class LSPClientManager {
       });
 
       this.sendNotification(server, 'initialized', {});
+
+      // Only add to server map after successful initialization
+      this.servers.set(languageId, server);
       return true;
     } catch {
+      // Clean up: kill process and ensure server is not in map (FUN-04)
+      if (this.servers.has(languageId)) {
+        this.servers.delete(languageId);
+      }
       return false;
     }
   }
@@ -110,7 +128,7 @@ export class LSPClientManager {
     const server = this.servers.get(languageId);
     if (!server) return [];
 
-    const uri = `file://${filePath}`;
+    const uri = pathToFileURL(filePath).href;
 
     try {
       await this.sendRequest(server, 'textDocument/didOpen', {
@@ -156,7 +174,7 @@ export class LSPClientManager {
     const server = this.servers.get(languageId);
     if (!server) return null;
 
-    const uri = `file://${filePath}`;
+    const uri = pathToFileURL(filePath).href;
 
     try {
       await this.sendRequest(server, 'textDocument/didOpen', {
@@ -179,7 +197,7 @@ export class LSPClientManager {
     const server = this.servers.get(languageId);
     if (!server) return [];
 
-    const uri = `file://${filePath}`;
+    const uri = pathToFileURL(filePath).href;
 
     try {
       await this.sendRequest(server, 'textDocument/didOpen', {
@@ -284,7 +302,7 @@ export class LSPClientManager {
     // Handle diagnostics notification
     if (message.method === 'textDocument/publishDiagnostics' && message.params) {
       const params = message.params as { uri: string; diagnostics: LSPDiagnostic[] };
-      const filePath = params.uri.replace('file://', '');
+      const filePath = fileURLToPath(params.uri);
       this.diagnosticCache.set(filePath, params.diagnostics);
 
       // Resolve any pending waitForDiagnostics promise

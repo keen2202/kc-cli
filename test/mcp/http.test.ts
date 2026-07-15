@@ -145,7 +145,7 @@ describe('HttpTransport', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         headers: new Map([['content-type', 'text/event-stream']]),
-        body: { getReader: () => reader },
+        body: { getReader: () => reader, cancel: vi.fn().mockResolvedValue(undefined) },
       });
 
       const result = await transport.sendRequest('test');
@@ -166,7 +166,7 @@ describe('HttpTransport', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         headers: new Map([['content-type', 'text/event-stream']]),
-        body: { getReader: () => reader },
+        body: { getReader: () => reader, cancel: vi.fn().mockResolvedValue(undefined) },
       });
 
       await expect(transport.sendRequest('test')).rejects.toThrow('SSE stream ended without result');
@@ -186,7 +186,7 @@ describe('HttpTransport', () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         headers: new Map([['content-type', 'text/event-stream']]),
-        body: { getReader: () => reader },
+        body: { getReader: () => reader, cancel: vi.fn().mockResolvedValue(undefined) },
       });
 
       await expect(transport.sendRequest('test')).rejects.toThrow('MCP error -32603');

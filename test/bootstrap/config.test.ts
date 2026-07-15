@@ -538,7 +538,7 @@ describe('Config Layer Merging', () => {
     expect(config.memory.consolidationMinHours).toBe(24);
   });
 
-  it('should replace arrays, not merge them', async () => {
+  it('should concatenate arrays across config layers (QUAL-02)', async () => {
     tmpUserDir = fs.mkdtempSync('/tmp/kc-cli-array-merge-user-');
     writeConfig(mkdir(tmpUserDir, '.kc-cli'), {
       permissions: { allow: ['Bash', 'FileRead'] },
@@ -556,9 +556,9 @@ describe('Config Layer Merging', () => {
     const { loadConfig } = await import('../../src/bootstrap/config');
     const { config } = await loadConfig(tmpDir);
 
-    // Arrays from project should replace arrays from user (not concatenated)
-    expect(config.permissions.allow).toEqual(['FileWrite']);
-    expect(config.additionalDirectories).toEqual(['/dir3']);
+    // Arrays from project should concatenate with arrays from user (QUAL-02)
+    expect(config.permissions.allow).toEqual(['Bash', 'FileRead', 'FileWrite']);
+    expect(config.additionalDirectories).toEqual(['/dir1', '/dir2', '/dir3']);
   });
 });
 
@@ -580,13 +580,13 @@ describe('deepMerge', () => {
     expect(result).toEqual({ outer: { a: 1, b: 3, c: 4 } });
   });
 
-  it('should replace arrays, not merge them', async () => {
+  it('should concatenate arrays (QUAL-02)', async () => {
     const { deepMerge } = await import('../../src/bootstrap/config');
     const result = deepMerge(
       { items: [1, 2, 3], name: 'old' },
       { items: [4, 5], name: 'new' },
     );
-    expect(result.items).toEqual([4, 5]);
+    expect(result.items).toEqual([1, 2, 3, 4, 5]);
     expect(result.name).toBe('new');
   });
 

@@ -1,5 +1,6 @@
 // Three-layer permission decision engine
 
+import * as fs from 'fs';
 import type {
   PermissionResult,
   PermissionContext,
@@ -310,6 +311,25 @@ const WRITE_CAPABLE_TOOLS = new Set([
  * Covers tool-specific inputs — Sql database/query (protected paths),
  * WebFetch url (SSRF internal-network) — in addition to path/command.
  */
+/**
+ * Rough check whether a string looks like a file path (starts with / or ./ or ~/)
+ * Avoids calling realpath on things that are clearly not paths (e.g. SQL queries).
+ */
+function looksLikePath(value: string): boolean {
+  return /^(\/|\.\/|\.\.\/|~\/)/.test(value);
+}
+
+/**
+ * Safely resolve symlinks. Returns null on failure (file may not exist yet).
+ */
+function tryRealpath(value: string): string | null {
+  try {
+    return fs.realpathSync(value);
+  } catch {
+    return null;
+  }
+}
+
 function checkSecurityCritical(
   toolName: string,
   input: Record<string, unknown>
@@ -332,8 +352,14 @@ function checkSecurityCritical(
 
   for (const value of allValuesToCheck) {
     if (!value) continue;
+
+    // Resolve symlinks for path-like values before matching (SEC-05)
+    // Prevents symlink-based bypass of protected path checks.
+    // Use try/catch — realpath fails if file doesn't exist yet.
+    const resolved = looksLikePath(value) ? tryRealpath(value) : value;
+
     // System write directories: deny for write-capable tools only
-    if (isWriteTool && isSystemWriteDirectory(value)) {
+    if (isWriteTool && isSystemWriteDirectory(resolved || value)) {
       return {
         behavior: 'deny',
         message: `Writing to system directory is not allowed: ${value}`,
@@ -343,7 +369,7 @@ function checkSecurityCritical(
         },
       };
     }
-    if (containsProtectedPath(value)) {
+    if (containsProtectedPath(resolved || value)) {
       return {
         behavior: 'ask',
         message: `Access to protected path requires explicit permission`,

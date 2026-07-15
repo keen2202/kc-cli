@@ -59,6 +59,8 @@ export class CacheManager {
   private static instance: CacheManager | null = null;
   private caches = new Map<string, CacheRegistration>();
   private pruneInterval: NodeJS.Timeout | null = null;
+  private lastActivity: number = Date.now();
+  private static readonly INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000;
 
   private constructor() {
     // Prune expired entries every 60 seconds
@@ -67,6 +69,11 @@ export class CacheManager {
     if (this.pruneInterval.unref) {
       this.pruneInterval.unref();
     }
+
+    // Clean up on process exit
+    process.on('beforeExit', () => {
+      this.destroy();
+    });
   }
 
   static getInstance(): CacheManager {
@@ -85,6 +92,7 @@ export class CacheManager {
     category: CacheCategory = 'general',
     overrides: Partial<TieredCacheOptions> = {}
   ): TieredCache<V> {
+    this.recordActivity();
     const existing = this.caches.get(name);
     if (existing) {
       // Record metrics for cache access
@@ -116,6 +124,7 @@ export class CacheManager {
    * Get an existing cache by name
    */
   get<V>(name: string): TieredCache<V> | undefined {
+    this.recordActivity();
     return this.caches.get(name)?.cache as TieredCache<V> | undefined;
   }
 
@@ -133,6 +142,7 @@ export class CacheManager {
    * Get global cache statistics. Also syncs metrics to globalKVCacheMetrics.
    */
   getGlobalStats(): GlobalCacheStats {
+    this.recordActivity();
     let totalHits = 0;
     let totalMisses = 0;
     const cacheStats: Record<string, CacheStats> = {};
@@ -165,6 +175,7 @@ export class CacheManager {
    * Call periodically or before reporting.
    */
   syncMetrics(): void {
+    this.recordActivity();
     for (const [name, reg] of this.caches) {
       const stats = reg.cache.getStats();
       // Record hits and misses based on stats diff
@@ -175,8 +186,8 @@ export class CacheManager {
       const newHits = stats.hits - prevHits;
       const newMisses = stats.misses - prevMisses;
 
-      for (let i = 0; i < newHits; i++) globalKVCacheMetrics.recordHit(name);
-      for (let i = 0; i < newMisses; i++) globalKVCacheMetrics.recordMiss(name);
+      if (newHits > 0) globalKVCacheMetrics.addHits(name, newHits);
+      if (newMisses > 0) globalKVCacheMetrics.addMisses(name, newMisses);
       for (let i = 0; i < stats.evictions - (existing?.evictions ?? 0); i++) {
         globalKVCacheMetrics.recordEviction(name);
       }
@@ -196,6 +207,7 @@ export class CacheManager {
    * Get global hit rate (the primary metric)
    */
   getGlobalHitRate(): number {
+    this.recordActivity();
     let totalHits = 0;
     let totalMisses = 0;
     for (const reg of this.caches.values()) {
@@ -210,6 +222,7 @@ export class CacheManager {
    * Get per-category hit rates
    */
   getCategoryHitRates(): Record<CacheCategory, { hits: number; misses: number; hitRate: number }> {
+    this.recordActivity();
     const categories = new Map<CacheCategory, { hits: number; misses: number }>();
 
     for (const reg of this.caches.values()) {
@@ -239,6 +252,7 @@ export class CacheManager {
    * Invalidate entries across all caches matching a category
    */
   invalidateCategory(category: CacheCategory): number {
+    this.recordActivity();
     let total = 0;
     for (const reg of this.caches.values()) {
       if (reg.category === category) {
@@ -253,15 +267,27 @@ export class CacheManager {
    * Invalidate all caches
    */
   invalidateAll(): void {
+    this.recordActivity();
     for (const reg of this.caches.values()) {
       reg.cache.clear();
     }
   }
 
   /**
-   * Prune expired entries across all caches
+   * Prune expired entries across all caches.
+   * Self-clears after 5 minutes of inactivity.
    */
   pruneAll(): number {
+    const inactiveMs = Date.now() - this.lastActivity;
+    if (inactiveMs >= CacheManager.INACTIVITY_TIMEOUT_MS) {
+      // No activity for 5 minutes — self-clear the interval
+      if (this.pruneInterval) {
+        clearInterval(this.pruneInterval);
+        this.pruneInterval = null;
+      }
+      return 0;
+    }
+
     let totalPruned = 0;
     for (const reg of this.caches.values()) {
       totalPruned += reg.cache.prune();
@@ -270,9 +296,24 @@ export class CacheManager {
   }
 
   /**
+   * Record activity to keep the prune interval alive.
+   */
+  private recordActivity(): void {
+    this.lastActivity = Date.now();
+    // Restart interval if it was self-cleared
+    if (!this.pruneInterval) {
+      this.pruneInterval = setInterval(() => this.pruneAll(), 60_000);
+      if (this.pruneInterval.unref) {
+        this.pruneInterval.unref();
+      }
+    }
+  }
+
+  /**
    * List all registered cache names
    */
   listCaches(): string[] {
+    this.recordActivity();
     return Array.from(this.caches.keys());
   }
 

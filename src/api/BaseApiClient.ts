@@ -21,18 +21,47 @@ export abstract class BaseApiClient {
   protected model: string;
 
   // ── Formatted-message cache (appends-only) ──────────────────────────
-  // Caches individual message formatting by message id.
+  // Caches individual message formatting by message id + content hash.
   // A single ChatMessage can produce multiple output entries (e.g. tool results),
   // so each entry is an array.
   private _msgFormatCache = new Map<string, Array<Record<string, unknown>>>();
 
   // Full-array cache for reference equality on repeated calls with the same messages.
-  // Key: concatenation of message ids.
+  // Key: concatenation of "(msg.id):(contentHash)" entries.
   private _msgFullCache: { ids: string; result: Array<Record<string, unknown>> } | null = null;
 
   // ── Formatted-tools cache ───────────────────────────────────────────
   // Composite key: tool name + JSON of the input schema.
   private _toolsFormatCache: { key: string; result: Array<Record<string, unknown>> } | null = null;
+
+  /**
+   * Compute a simple content hash for a ChatMessage.
+   * Used in cache keys to detect content changes that preserve the same msg.id.
+   */
+  private static hashContent(msg: ChatMessage): string {
+    // Serialize only the parts that affect formatting output
+    const payload = {
+      role: msg.role,
+      content: msg.content,
+      toolCalls: msg.toolCalls,
+      toolResults: msg.toolResults,
+      tool_call_id: (msg as unknown as Record<string, unknown>).tool_call_id,
+      tool_calls: (msg as unknown as Record<string, unknown>).tool_calls,
+    };
+    let str: string;
+    try {
+      str = JSON.stringify(payload);
+    } catch {
+      str = `${msg.role}:${msg.content ?? ''}`;
+    }
+    // djb2 hash — fast, decent distribution, no deps
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) + hash) + str.charCodeAt(i);
+      hash |= 0; // force 32-bit integer
+    }
+    return Math.abs(hash).toString(36);
+  }
 
   constructor(config: { apiKey: string; baseUrl: string; model: string }) {
     this.apiKey = config.apiKey;
@@ -104,17 +133,24 @@ export abstract class BaseApiClient {
    * a conversation only re-formats the new/changed entries.
    */
   protected formatMessages(messages: ChatMessage[]): Array<Record<string, unknown>> {
-    // Full-array cache hit: same set of messages (ids) as last call
-    const idsKey = messages.map(m => m.id).join('\x00');
-    if (this._msgFullCache && this._msgFullCache.ids === idsKey) {
+    // Full-array cache hit: same set of messages (ids + content hashes) as last call.
+    // Skip cache when any message lacks an id (undefined ids collide).
+    const allHaveIds = messages.every(m => m.id !== undefined);
+    const idsKey = allHaveIds
+      ? messages.map(m => `${m.id!}:${BaseApiClient.hashContent(m)}`).join('\x00')
+      : null;
+    if (idsKey && this._msgFullCache && this._msgFullCache.ids === idsKey) {
       return this._msgFullCache.result;
     }
 
     const result: Array<Record<string, unknown>> = [];
 
     for (const msg of messages) {
-      // Per-message cache hit: individual entry already formatted
-      const cached = this._msgFormatCache.get(msg.id);
+      // Per-message cache hit: individual entry already formatted.
+      // Key is msg.id + content hash so that content changes invalidate the entry
+      // even when the id stays the same.
+      const msgKey = msg.id !== undefined ? `${msg.id}:${BaseApiClient.hashContent(msg)}` : undefined;
+      const cached = msgKey !== undefined ? this._msgFormatCache.get(msgKey) : undefined;
       if (cached) {
         result.push(...cached);
         continue;
@@ -131,7 +167,7 @@ export abstract class BaseApiClient {
             tool_call_id: toolMsg.tool_call_id,
             content: msg.content ?? '',
           });
-          this._msgFormatCache.set(msg.id, entries);
+          if (msgKey !== undefined) this._msgFormatCache.set(msgKey, entries);
           result.push(...entries);
           continue;
         }
@@ -144,7 +180,7 @@ export abstract class BaseApiClient {
               content: tr.output ?? '',
             });
           }
-          this._msgFormatCache.set(msg.id, entries);
+          if (msgKey !== undefined) this._msgFormatCache.set(msgKey, entries);
           result.push(...entries);
           continue;
         }
@@ -193,12 +229,12 @@ export abstract class BaseApiClient {
       }
 
       entries.push(formatted);
-      this._msgFormatCache.set(msg.id, entries);
+      if (msgKey !== undefined) this._msgFormatCache.set(msgKey, entries);
       result.push(...entries);
     }
 
     // Cache the full result array for reference equality on next call
-    this._msgFullCache = { ids: idsKey, result };
+    if (idsKey !== null) this._msgFullCache = { ids: idsKey, result };
     return result;
   }
 

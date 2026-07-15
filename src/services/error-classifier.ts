@@ -25,13 +25,15 @@ const RATE_LIMIT_BASE_DELAY_MS = 8000;
 const MAX_BACKOFF_MS = 120_000;
 
 // Pre-compiled regex patterns for error classification (single test instead of multiple includes())
-const RATE_LIMIT_REGEX = /429|rate.?limit/;
-const SERVER_ERROR_REGEX = /500|502|503|529/;
+// All HTTP status code patterns use \b word boundaries to prevent false matches
+// inside longer numeric strings (T044).
+const RATE_LIMIT_REGEX = /\b429\b|rate.?limit/;
+const SERVER_ERROR_REGEX = /\b(?:500|502|503|529)\b/;
 const OVERLOADED_REGEX = /overloaded/;
 const TIMEOUT_REGEX = /timeout|timed\s*out|etimedout/;
 const NETWORK_ERROR_REGEX = /econnreset|econnrefused|fetch\s*failed/;
-const AUTH_ERROR_REGEX = /401|403|invalid_api_key|unauthorized/;
-const BAD_REQUEST_REGEX = /400|invalid_request/;
+const AUTH_ERROR_REGEX = /\b(?:401|403)\b|invalid_api_key|unauthorized/;
+const BAD_REQUEST_REGEX = /\b400\b|invalid_request/;
 const TOOL_ERROR_REGEX = /tool.*(error|failed)|(error|failed).*tool/;
 const TOOL_TIMEOUT_REGEX = /timeout|timed\s*out/;
 const PERMISSION_DENIED_REGEX = /permission.*denied|denied.*permission/;

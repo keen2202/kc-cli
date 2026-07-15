@@ -149,12 +149,14 @@ export class HttpTransport {
             }
           } catch (e) {
             if (e instanceof Error && e.message.startsWith('MCP error')) throw e;
-            // Ignore parse errors
+            // Reject the pending request promise on JSON parse failure
+            throw new Error(`MCP SSE parse error: ${e instanceof Error ? e.message : String(e)}`);
           }
         }
       }
     } finally {
       reader.releaseLock();
+      await response.body?.cancel().catch(() => { /* ignore cancel errors */ });
     }
 
     if (!hasResult) {

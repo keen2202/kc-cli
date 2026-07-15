@@ -185,26 +185,29 @@ describe('array', () => {
     });
   });
 
-  it('calls min() but minItems is not emitted (Zod 3.23+ stores minLength on def, not in checks array)', () => {
-    // The source accesses schema._def.checks which is undefined in Zod 3.23+
+  it('emits minItems from min() (Q5 fix reads minLength from Zod def)', () => {
     expect(zodToJsonSchema(z.array(z.number()).min(1))).toEqual({
       type: 'array',
       items: { type: 'number' },
+      minItems: 1,
     });
   });
 
-  it('calls max() but maxItems is not emitted (Zod 3.23+ stores maxLength on def, not in checks array)', () => {
+  it('emits maxItems from max() (Q5 fix reads maxLength from Zod def)', () => {
     expect(zodToJsonSchema(z.array(z.boolean()).max(5))).toEqual({
       type: 'array',
       items: { type: 'boolean' },
+      maxItems: 5,
     });
   });
 
-  it('calls min().max() but neither is emitted for the same reason', () => {
+  it('emits both minItems and maxItems from min().max() (Q5 fix reads from Zod def)', () => {
     const schema = z.array(z.string()).min(2).max(10);
     expect(zodToJsonSchema(schema)).toEqual({
       type: 'array',
       items: { type: 'string' },
+      minItems: 2,
+      maxItems: 10,
     });
   });
 
@@ -315,6 +318,17 @@ describe('object', () => {
     });
     const result = zodToJsonSchema(schema);
     expect(result).toHaveProperty('required', ['b']);
+  });
+
+  it('treats ZodOptional wrapped in ZodEffects as optional', () => {
+    // .optional().refine() creates ZodEffects<ZodOptional> — isOptional must recurse
+    const schema = z.object({
+      a: z.string().optional().refine((s) => !s || s.length > 0),
+      b: z.number(),
+    });
+    const result = zodToJsonSchema(schema);
+    expect(result).toHaveProperty('required', ['b']);
+    expect(result).not.toHaveProperty('required', ['a']);
   });
 });
 
@@ -572,9 +586,50 @@ describe('special types', () => {
     expect(zodToJsonSchema(z.unknown())).toEqual({});
   });
 
-  it('unsupported type falls back to { type: "object" }', () => {
-    // ZodDate is not handled by the converter
-    expect(zodToJsonSchema(z.date())).toEqual({ type: 'object' });
+  it('ZodDate converts to string with date-time format', () => {
+    expect(zodToJsonSchema(z.date())).toEqual({
+      type: 'string',
+      format: 'date-time',
+    });
+  });
+
+  it('ZodBigInt converts to string with integer pattern', () => {
+    expect(zodToJsonSchema(z.bigint())).toEqual({
+      type: 'string',
+      pattern: '^-?\\d+$',
+    });
+  });
+
+  it('ZodIntersection converts to allOf', () => {
+    const schema = z.intersection(z.object({ a: z.string() }), z.object({ b: z.number() }));
+    expect(zodToJsonSchema(schema)).toEqual({
+      allOf: [
+        { type: 'object', properties: { a: { type: 'string' } }, required: ['a'] },
+        { type: 'object', properties: { b: { type: 'number' } }, required: ['b'] },
+      ],
+    });
+  });
+
+  it('ZodMap converts to object with additionalProperties', () => {
+    const schema = z.map(z.string(), z.number());
+    expect(zodToJsonSchema(schema)).toEqual({
+      type: 'object',
+      additionalProperties: { type: 'number' },
+    });
+  });
+
+  it('ZodSet converts to array with uniqueItems', () => {
+    const schema = z.set(z.string());
+    expect(zodToJsonSchema(schema)).toEqual({
+      type: 'array',
+      items: { type: 'string' },
+      uniqueItems: true,
+    });
+  });
+
+  it('ZodPromise falls back to { type: "object" } as truly unsupported type', () => {
+    // ZodPromise is not handled by the converter
+    expect(zodToJsonSchema(z.promise(z.string()))).toEqual({ type: 'object' });
   });
 });
 

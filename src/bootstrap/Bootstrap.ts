@@ -29,6 +29,7 @@ import {
 } from '../mcp';
 import { getGlobalRegistry } from '../agp/registry';
 import { detectProjectLanguage } from '../utils/project-detect';
+import { withTimeout } from '../utils/async-helpers';
 import type { IMBridge } from '../im/im-bridge';
 
 // ─── Options & Result types ───────────────────────────────────────────────────
@@ -204,18 +205,12 @@ export class Bootstrap {
           const connectionTimeout = 30000;
           const connectionPromises = Object.entries(mcpConfig.servers).map(
             async ([serverId, serverConfig]) => {
-              const timeoutPromise = new Promise<never>((_, reject) => {
-                setTimeout(
-                  () => reject(new Error(`Connection timeout after ${connectionTimeout / 1000}s`)),
-                  connectionTimeout,
-                );
-              });
-
               try {
-                await Promise.race([
+                await withTimeout(
                   mcpManager!.connect(serverId, serverConfig),
-                  timeoutPromise,
-                ]);
+                  connectionTimeout,
+                  `Connection timeout after ${connectionTimeout / 1000}s`,
+                );
                 const mcpTools = mcpManager!.getServerTools(serverId);
                 for (const mcpTool of mcpTools) {
                   const toolDef = convertMCPTool(mcpTool, serverId, mcpManager!);

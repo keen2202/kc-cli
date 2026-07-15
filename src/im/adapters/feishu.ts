@@ -202,11 +202,24 @@ export class FeishuAdapter implements IMAdapter {
       try {
         // Dynamic import for Node.js WebSocket support
         // In browser environments, native WebSocket is available
-        const wsUrl = `${FEISHU_WS_URL}?app_id=${this.config.appId}&app_secret=${this.config.appSecret}`;
-
-        // Use native WebSocket or ws package
         const WS = this.getWebSocketConstructor();
-        const ws = new WS(wsUrl);
+        const isWsPackage = typeof WebSocket === 'undefined';
+        let ws: any;
+
+        if (isWsPackage) {
+          // Node.js 'ws' package supports custom headers (SEC-07)
+          // Pass auth via headers to avoid leaking app_secret in URLs/logs
+          ws = new WS(FEISHU_WS_URL, {
+            headers: {
+              'X-App-Id': this.config.appId,
+              'X-App-Secret': this.config.appSecret,
+            },
+          });
+        } else {
+          // Browser native WebSocket must use query params for auth
+          const wsUrl = `${FEISHU_WS_URL}?app_id=${this.config.appId}&app_secret=${this.config.appSecret}`;
+          ws = new WS(wsUrl);
+        }
 
         const timeout = setTimeout(() => {
           ws.close();
@@ -234,7 +247,10 @@ export class FeishuAdapter implements IMAdapter {
         };
 
         ws.onerror = (err: any) => {
-          logger.services.error(`[FeishuAdapter] WebSocket error: ${err instanceof Error ? err.message : String(err)}`);
+          // Redact sensitive URL params from error messages to prevent secret leakage
+          const errMsg = err instanceof Error ? err.message : String(err);
+          const sanitized = errMsg.replace(/app_secret=[^&\s]+/gi, 'app_secret=***');
+          logger.services.error(`[FeishuAdapter] WebSocket error: ${sanitized}`);
           if (!this._connected) {
             clearTimeout(timeout);
             reject(err);

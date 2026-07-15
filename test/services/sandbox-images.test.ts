@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ImageManager } from '../../src/services/sandbox-images';
 
 vi.mock('child_process', () => ({
-  execSync: vi.fn(),
+  spawnSync: vi.fn(),
 }));
 
 vi.mock('fs', async () => {
@@ -19,10 +19,22 @@ vi.mock('fs', async () => {
   };
 });
 
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 
-const mockExecSync = vi.mocked(execSync);
+const mockSpawnSync = vi.mocked(spawnSync);
+
+/** Helper: build a spawnSync return value that represents success/error. */
+function spawnResult(overrides: { stdout?: string; stderr?: string; status?: number }) {
+  return {
+    pid: 123,
+    output: [null, null, null] as Array<string | null>,
+    stdout: overrides.stdout ?? '',
+    stderr: overrides.stderr ?? '',
+    status: overrides.status ?? 0,
+    signal: null,
+  };
+}
 const mockExistsSync = vi.mocked(fs.existsSync);
 
 describe('ImageManager', () => {
@@ -35,7 +47,7 @@ describe('ImageManager', () => {
 
   describe('ensureImage', () => {
     it('should skip pull if image already exists locally', async () => {
-      mockExecSync.mockReturnValue('');
+      mockSpawnSync.mockReturnValue(spawnResult({}));
 
       const progress = vi.fn();
       await manager.ensureImage('node:22-alpine', progress);
@@ -44,23 +56,26 @@ describe('ImageManager', () => {
         expect.objectContaining({ status: 'exists' })
       );
       // Should not call docker pull
-      expect(mockExecSync).not.toHaveBeenCalledWith(
-        expect.stringContaining('docker pull'),
+      expect(mockSpawnSync).not.toHaveBeenCalledWith(
+        'docker',
+        expect.arrayContaining(['pull']),
         expect.anything()
       );
     });
 
     it('should pull image if not found locally', async () => {
       let inspectCalled = false;
-      mockExecSync.mockImplementation((cmd: string) => {
-        if (typeof cmd === 'string' && cmd.includes('docker image inspect')) {
-          inspectCalled = true;
-          throw new Error('not found');
+      mockSpawnSync.mockImplementation((cmd: string, args?: readonly string[]) => {
+        if (cmd === 'docker' && args) {
+          if (args.includes('inspect')) {
+            inspectCalled = true;
+            return spawnResult({ status: 1 });
+          }
+          if (args.includes('pull')) {
+            return spawnResult({ stdout: 'Pulling complete' });
+          }
         }
-        if (typeof cmd === 'string' && cmd.includes('docker pull')) {
-          return 'Pulling complete';
-        }
-        return '';
+        return spawnResult({});
       });
 
       const progress = vi.fn();
@@ -73,21 +88,21 @@ describe('ImageManager', () => {
     });
 
     it('should not re-check images already verified in session', async () => {
-      mockExecSync.mockReturnValue('');
+      mockSpawnSync.mockReturnValue(spawnResult({}));
 
       await manager.ensureImage('node:22-alpine');
-      mockExecSync.mockClear();
+      mockSpawnSync.mockClear();
 
       await manager.ensureImage('node:22-alpine');
       // Should not call docker image inspect again
-      expect(mockExecSync).not.toHaveBeenCalled();
+      expect(mockSpawnSync).not.toHaveBeenCalled();
     });
   });
 
   describe('listCachedImages', () => {
     it('should parse docker images output', () => {
-      mockExecSync.mockReturnValue(
-        'node:22-alpine|abc123|150MB|2024-01-01\nnode:20-alpine|def456|140MB|2024-01-02'
+      mockSpawnSync.mockReturnValue(
+        spawnResult({ stdout: 'node:22-alpine|abc123|150MB|2024-01-01\nnode:20-alpine|def456|140MB|2024-01-02' })
       );
 
       const images = manager.listCachedImages();
@@ -97,7 +112,7 @@ describe('ImageManager', () => {
     });
 
     it('should return empty array on error', () => {
-      mockExecSync.mockImplementation(() => { throw new Error('docker not found'); });
+      mockSpawnSync.mockReturnValue(spawnResult({ status: 1 }));
 
       const images = manager.listCachedImages();
       expect(images).toEqual([]);
@@ -106,14 +121,16 @@ describe('ImageManager', () => {
 
   describe('pruneUnused', () => {
     it('should return number of pruned images', () => {
-      mockExecSync.mockReturnValue('Deleted Images:\nTotal reclaimed space: 500MB');
+      mockSpawnSync.mockReturnValue(
+        spawnResult({ stdout: 'Deleted Images:\nTotal reclaimed space: 500MB' })
+      );
 
       const count = manager.pruneUnused();
       expect(count).toBeGreaterThanOrEqual(0);
     });
 
     it('should return 0 on error', () => {
-      mockExecSync.mockImplementation(() => { throw new Error('docker not found'); });
+      mockSpawnSync.mockReturnValue(spawnResult({ status: 1 }));
 
       expect(manager.pruneUnused()).toBe(0);
     });
@@ -129,7 +146,7 @@ describe('ImageManager', () => {
 
     it('should return tag if custom image already built', async () => {
       mockExistsSync.mockReturnValue(true);
-      mockExecSync.mockReturnValue(''); // image inspect succeeds
+      mockSpawnSync.mockReturnValue(spawnResult({})); // image inspect succeeds
 
       const image = await manager.getProjectSandboxImage('/project');
       expect(image).toBe('kc-cli-sandbox-custom:latest');

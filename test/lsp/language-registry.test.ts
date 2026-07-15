@@ -158,7 +158,7 @@ describe('Language Registry', () => {
       vi.mocked(execSync).mockReturnValue(Buffer.from('/usr/bin/gopls'));
 
       expect(isLanguageServerAvailable('go')).toBe(true);
-      expect(execSync).toHaveBeenCalledWith('which gopls', { stdio: 'ignore', timeout: 3000 });
+      expect(execSync).toHaveBeenCalledWith('command -v gopls', { stdio: 'ignore', timeout: 3000 });
     });
 
     it('should return false when binary is not found', async () => {

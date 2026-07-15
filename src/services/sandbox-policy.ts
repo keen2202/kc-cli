@@ -82,8 +82,8 @@ const DEFAULT_TOOL_POLICIES: Record<string, ToolSandboxPolicy> = {
   // Database tools: prefer sandbox, no network by default
   Sql: { enforcement: 'preferred', allowNetwork: false },
 
-  // Docker tool: excluded (can't run Docker inside Docker easily)
-  Docker: { enforcement: 'excluded' },
+  // Docker tool: required sandbox (SEC-01: prevent command injection on host)
+  Docker: { enforcement: 'required', allowNetwork: false },
 
   // System tools: optional sandbox
   Monitor: { enforcement: 'excluded' },
@@ -94,7 +94,7 @@ const DEFAULT_TOOL_POLICIES: Record<string, ToolSandboxPolicy> = {
  * Built-in pattern rules for tool name matching.
  */
 const DEFAULT_PATTERN_RULES: Array<{ pattern: string; policy: ToolSandboxPolicy }> = [
-  { pattern: 'Task*', policy: { enforcement: 'excluded' } },
+  { pattern: 'Task*', policy: { enforcement: 'required' } },
   { pattern: 'Deploy*', policy: { enforcement: 'preferred', allowNetwork: true } },
   { pattern: 'Agent*', policy: { enforcement: 'excluded' } },
   { pattern: 'AskUser*', policy: { enforcement: 'excluded' } },

@@ -57,6 +57,9 @@ export class InProcessBackend implements SubAgentBackend {
   private allTools: Map<string, ToolDefinition>;
   private parentPermissionMode: PermissionMode;
   private parentCwd: string;
+  private agentCounter = 0;
+  /** Tracks which agents have already sent a terminal event, preventing duplicates (FUN-07) */
+  private terminalEventSent: Set<string> = new Set();
 
   constructor(
     eventBus: EventBus,
@@ -70,6 +73,15 @@ export class InProcessBackend implements SubAgentBackend {
     this.parentCwd = parentCwd;
   }
 
+  /** Ensure terminal event is only emitted once per agent (FUN-07) */
+  private tryEmitTerminalEvent(agentId: string): boolean {
+    if (this.terminalEventSent.has(agentId)) {
+      return false;
+    }
+    this.terminalEventSent.add(agentId);
+    return true;
+  }
+
   /**
    * Spawn a new sub-agent
    */
@@ -77,7 +89,7 @@ export class InProcessBackend implements SubAgentBackend {
     config: SubAgentSpawnConfig,
     parentContext: ToolUseContext
   ): Promise<SpawnResult> {
-    const agentId = `${config.name}@default`;
+    const agentId = `${config.name}@${this.agentCounter++}`;
     const startedAt = Date.now();
 
     try {
@@ -183,12 +195,14 @@ export class InProcessBackend implements SubAgentBackend {
           runtime.error = error;
           runtime.completedAt = Date.now();
 
-          this.eventBus.emit(agentId, {
-            type: 'agent:subagent_failed',
-            agentId,
-            error: error.message || String(error),
-            timestamp: Date.now(),
-          });
+          if (this.tryEmitTerminalEvent(agentId)) {
+            this.eventBus.emit(agentId, {
+              type: 'agent:subagent_failed',
+              agentId,
+              error: error.message || String(error),
+              timestamp: Date.now(),
+            });
+          }
         });
 
         // Wire up abort controller to query engine
@@ -275,12 +289,14 @@ export class InProcessBackend implements SubAgentBackend {
 
         if (isTimedOut) {
           runtime.status = 'timed_out';
-          this.eventBus.emit(agentId, {
-            type: 'agent:subagent_timed_out',
-            agentId,
-            elapsed: Math.round(duration / 1000),
-            timestamp: Date.now(),
-          });
+          if (this.tryEmitTerminalEvent(agentId)) {
+            this.eventBus.emit(agentId, {
+              type: 'agent:subagent_timed_out',
+              agentId,
+              elapsed: Math.round(duration / 1000),
+              timestamp: Date.now(),
+            });
+          }
         } else {
           runtime.status = 'completed';
           runtime.completedAt = Date.now();
@@ -295,24 +311,28 @@ export class InProcessBackend implements SubAgentBackend {
             duration,
           };
 
-          this.eventBus.emit(agentId, {
-            type: 'agent:subagent_completed',
-            agentId,
-            result,
-            timestamp: Date.now(),
-          });
+          if (this.tryEmitTerminalEvent(agentId)) {
+            this.eventBus.emit(agentId, {
+              type: 'agent:subagent_completed',
+              agentId,
+              result,
+              timestamp: Date.now(),
+            });
+          }
         }
       } catch (error) {
         runtime.status = 'failed';
         runtime.error = error instanceof Error ? error : new Error(String(error));
         runtime.completedAt = Date.now();
 
-        this.eventBus.emit(agentId, {
-          type: 'agent:subagent_failed',
-          agentId,
-          error: runtime.error.message,
-          timestamp: Date.now(),
-        });
+        if (this.tryEmitTerminalEvent(agentId)) {
+          this.eventBus.emit(agentId, {
+            type: 'agent:subagent_failed',
+            agentId,
+            error: runtime.error.message,
+            timestamp: Date.now(),
+          });
+        }
       } finally {
         // Clean up completed/failed agents from active map immediately
         this.activeAgents.delete(agentId);
@@ -389,11 +409,13 @@ export class InProcessBackend implements SubAgentBackend {
       runtime.status = 'cancelled';
       runtime.completedAt = Date.now();
 
-      this.eventBus.emit(agentId, {
-        type: 'agent:subagent_cancelled',
-        agentId,
-        timestamp: Date.now(),
-      });
+      if (this.tryEmitTerminalEvent(agentId)) {
+        this.eventBus.emit(agentId, {
+          type: 'agent:subagent_cancelled',
+          agentId,
+          timestamp: Date.now(),
+        });
+      }
 
       this.activeAgents.delete(agentId);
       return true;

@@ -9,6 +9,7 @@ import { ok, err } from './types';
 import { estimateMessageTokensArray, calculateTokensSaved } from '../../utils/tokenEstimation';
 import { classifyApiError, getRetryDelay } from '../error-classifier';
 import { logger } from '../logger';
+import { withTimeout, TimeoutError } from '../../utils/async-helpers';
 
 /** Default compaction timeout in milliseconds */
 const DEFAULT_COMPACTION_TIMEOUT_MS = 60_000;
@@ -84,7 +85,8 @@ async function fullCompact(
   apiClient: BaseApiClient,
   contextWindow: number,
   model: string,
-  systemPrompt: string = ''
+  systemPrompt: string = '',
+  abortSignal?: AbortSignal
 ): Promise<{ messages: ChatMessage[]; tokensSaved: number; wasCompacted: boolean }> {
   if (messages.length <= PRESERVE_RECENT + 2) {
     return { messages, tokensSaved: 0, wasCompacted: false };
@@ -109,9 +111,10 @@ async function fullCompact(
           content: summaryPrompt,
           timestamp: Date.now(),
         }],
-        maxTokens: 1024,
+        maxTokens: MAX_OUTPUT_TOKENS_FOR_SUMMARY,
         temperature: 0.3,
         stream: false,
+        abortSignal,
       });
       summaryResponse = response.content;
     } catch {
@@ -182,23 +185,26 @@ export class FullCompactionEngine implements CompactionEngine {
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= MAX_COMPACTION_RETRIES; attempt++) {
+      const abortController = new AbortController();
+
       try {
         // Race compaction against timeout
-        const result = await Promise.race([
+        const result = await withTimeout(
           fullCompact(
             messages,
             this.apiClient,
             context.tokenBudget,
             this.model,
-            this.systemPrompt
+            this.systemPrompt,
+            abortController.signal
           ),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(new Error(`Compaction timed out after ${this.compactionTimeoutMs / 1000}s`)),
-              this.compactionTimeoutMs
-            )
-          ),
-        ]);
+          this.compactionTimeoutMs,
+          `Compaction timed out after ${this.compactionTimeoutMs / 1000}s`,
+        ).catch(compactError => {
+          // On timeout (or any error), cancel in-flight LLM call
+          abortController.abort();
+          throw compactError;
+        });
 
         if (result.wasCompacted) {
           return ok({
@@ -216,6 +222,13 @@ export class FullCompactionEngine implements CompactionEngine {
         });
       } catch (compactError) {
         lastError = compactError instanceof Error ? compactError : new Error(String(compactError));
+
+        // Don't retry timeout'd summaries
+        if (lastError instanceof TimeoutError) {
+          logger.query.warn(`Full compaction timed out, not retrying: ${lastError.message}`);
+          break;
+        }
+
         const classified = classifyApiError(lastError);
 
         if (classified.retryable && attempt < MAX_COMPACTION_RETRIES) {

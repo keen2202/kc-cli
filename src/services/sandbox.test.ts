@@ -212,7 +212,7 @@ describe('sandbox-policy', () => {
 
     it('returns pattern match for unmatched tools', () => {
       const policy = getToolPolicy('TaskCreate');
-      expect(policy.enforcement).toBe('excluded');
+      expect(policy.enforcement).toBe('required');
     });
 
     it('returns default enforcement for unknown tools', () => {

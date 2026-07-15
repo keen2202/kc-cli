@@ -180,8 +180,9 @@ export class OpenAICompatibleClient extends BaseApiClient {
 
     const endpoint = this.getEndpoint();
 
+    let response: Response | undefined;
     try {
-      const response = await fetch(this.buildUrl(endpoint), {
+      response = await fetch(this.buildUrl(endpoint), {
         method: 'POST',
         headers,
         body: JSON.stringify(requestBody),
@@ -203,6 +204,8 @@ export class OpenAICompatibleClient extends BaseApiClient {
         type: 'error',
         error: error instanceof Error ? error : new Error(String(error)),
       };
+    } finally {
+      await response?.body?.cancel();
     }
   }
 

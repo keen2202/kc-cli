@@ -40,11 +40,33 @@ export class CacheMetricsCollector {
   }
 
   /**
+   * Record multiple cache hits in batch.
+   */
+  addHits(cacheName: string, count: number): void {
+    if (count <= 0) return;
+    const metrics = this.getOrCreateMetrics(cacheName);
+    metrics.hits += count;
+    this.updateHitRate(metrics);
+    this.checkAlert(cacheName, metrics);
+  }
+
+  /**
    * Record a cache miss.
    */
   recordMiss(cacheName: string): void {
     const metrics = this.getOrCreateMetrics(cacheName);
     metrics.misses++;
+    this.updateHitRate(metrics);
+    this.checkAlert(cacheName, metrics);
+  }
+
+  /**
+   * Record multiple cache misses in batch.
+   */
+  addMisses(cacheName: string, count: number): void {
+    if (count <= 0) return;
+    const metrics = this.getOrCreateMetrics(cacheName);
+    metrics.misses += count;
     this.updateHitRate(metrics);
     this.checkAlert(cacheName, metrics);
   }
@@ -258,9 +280,8 @@ export function withCacheMetrics<T>(
 
     delete(key: string): boolean {
       const result = cache.delete(key);
-      if (result) {
-        metricsCollector.recordEviction(cacheName);
-      }
+      // Note: evictions from explicit delete should NOT be counted as cache evictions.
+      // Evictions are only counted via the onEvict callback path from TieredCache.
       metricsCollector.updateSize(cacheName, cache.size, cache.size);
       return result;
     },

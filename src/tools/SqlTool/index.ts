@@ -135,14 +135,17 @@ function isDestructiveQuery(query: string): boolean {
 }
 
 // Pre-compiled regex for error sanitization (single-pass instead of 3 chained replaces)
-const SANITIZE_ERROR_REGEX = /\/[^\s]+\.(?:db|sqlite)|\/tmp\/[^\s]+/gi;
+// Covers .db, .sqlite, .sqlite3, .duckdb, .db3, .s3db extensions and all absolute paths
+const SANITIZE_ERROR_REGEX = /\/[^\s]+\.(?:db|sqlite|sqlite3|duckdb|db3|s3db)\b|\/tmp\/[^\s]+|\/[^\s]+\/[^\s]+/gi;
 
 function sanitizeError(error: unknown): string {
   const msg = error instanceof Error ? error.message : String(error);
   // Remove file paths from error messages for security (single regex)
-  return msg.replace(SANITIZE_ERROR_REGEX, (match) =>
-    match.startsWith('/tmp/') ? '[temp]' : '[database]'
-  );
+  return msg.replace(SANITIZE_ERROR_REGEX, (match) => {
+    if (match.startsWith('/tmp/')) return '[temp]';
+    if (/\.(?:db|sqlite|sqlite3|duckdb|db3|s3db)\b/i.test(match)) return '[database]';
+    return '[path]';
+  });
 }
 
 /**

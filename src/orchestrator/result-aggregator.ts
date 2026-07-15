@@ -159,7 +159,7 @@ export class ResultAggregator {
         return false;
       }
     }
-    return this.expectedAgents.size > 0;
+    return true;
   }
 
   /**

@@ -70,8 +70,9 @@ export class AnthropicClient extends BaseApiClient {
       'Accept': 'text/event-stream',
     };
 
+    let response: Response | undefined;
     try {
-      const response = await fetch(`${this.baseUrl}/v1/messages`, {
+      response = await fetch(`${this.baseUrl}/v1/messages`, {
         method: 'POST',
         headers,
         body: JSON.stringify(requestBody),
@@ -93,6 +94,8 @@ export class AnthropicClient extends BaseApiClient {
         type: 'error',
         error: error instanceof Error ? error : new Error(String(error)),
       };
+    } finally {
+      await response?.body?.cancel();
     }
   }
 

@@ -18,6 +18,12 @@ interface ParentMessage {
 let aborted = false;
 let queryEngine: { submitMessage(m: string): AsyncGenerator<StreamEvent | AgentEvent>; abort(r?: string): void } | null = null;
 
+// Signal readiness immediately at module load — parent will send 'init' upon
+// receiving this. Previously this was inside runAgentLoop() which is only called
+// after receiving 'init', causing a deadlock where both sides waited for each other.
+// FUN-01 fix.
+process.send!({ type: 'ready' });
+
 process.on('message', async (msg: ParentMessage) => {
   if (!msg || typeof msg.type !== 'string') return;
 
@@ -74,8 +80,6 @@ process.on('message', async (msg: ParentMessage) => {
 });
 
 async function runAgentLoop(config: SubAgentSpawnConfig, cwd: string): Promise<void> {
-  // Notify parent we're ready
-  process.send!({ type: 'ready' });
 
   // Dynamically import QueryEngine (isolated in this process)
   const { QueryEngine } = await import('../../query/QueryEngine');

@@ -63,7 +63,8 @@ export const PROTECTED_PATH_PATTERNS: RegExp[] = [
  * Used for string-based matching (e.g., in command args)
  * Pre-compiled regex for single-pass matching instead of 10 sequential includes()
  */
-export const PROTECTED_PATH_SUBSTRINGS_REGEX = /\/etc\/(passwd|shadow|ssh|ssl\/private|pki|cron|systemd\/system|sudoers\.d|pam\.d|environment|profile\.d|mysql|postgresql|ld\.so\.preload)|\.ssh|\.gnupg|\/sys\/|\/proc\/|\/run\/secrets|\.aws\/(credentials|config)|\.kube\/config|\.docker\/config\.json|\.config\/(gcloud|gh|hub)|\/root\/\.(bashrc|profile)|\.my\.cnf|\.pgpass/;
+// Case-insensitive matching with Windows path support (SEC-04)
+export const PROTECTED_PATH_SUBSTRINGS_REGEX = /\/etc\/(passwd|shadow|ssh|ssl\/private|pki|cron|systemd\/system|sudoers\.d|pam\.d|environment|profile\.d|mysql|postgresql|ld\.so\.preload)|\.ssh|\.gnupg|\/sys\/|\/proc\/|\/run\/secrets|\.aws\/(credentials|config)|\.kube\/config|\.docker\/config\.json|\.config\/(gcloud|gh|hub)|\/root\/\.(bashrc|profile)|\.my\.cnf|\.pgpass|\.env\b|\.credentials\b|\.secrets\b|\\Users\\.*\\\.ssh|%USERPROFILE%\\\./i;
 
 /**
  * @deprecated Use PROTECTED_PATH_SUBSTRINGS_REGEX for better performance

@@ -115,7 +115,8 @@ export function isLanguageServerAvailable(languageId: string): boolean {
   if (!config) return false;
 
   try {
-    execSync(`which ${config.command}`, { stdio: 'ignore', timeout: 3000 });
+    // Cross-platform: `command -v` works on Unix shells (bash/zsh) and Git Bash on Windows
+    execSync(`command -v ${config.command}`, { stdio: 'ignore', timeout: 3000 });
     return true;
   } catch {
     return false;
@@ -129,7 +130,7 @@ export function isLanguageServerAvailable(languageId: string): boolean {
 export function discoverAvailableServers(): LanguageServerConfig[] {
   return LANGUAGE_REGISTRY.filter(config => {
     try {
-      execSync(`which ${config.command}`, { stdio: 'ignore', timeout: 3000 });
+      execSync(`command -v ${config.command}`, { stdio: 'ignore', timeout: 3000 });
       return true;
     } catch {
       return false;

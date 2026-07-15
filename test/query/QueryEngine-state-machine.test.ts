@@ -503,8 +503,8 @@ describe('VALID_TRANSITIONS — completeness', () => {
     }
   });
 
-  it('completed has no outgoing transitions', () => {
-    expect(VALID_TRANSITIONS.completed).toEqual([]);
+  it('completed can transition to evolving (T045 FUN-14)', () => {
+    expect(VALID_TRANSITIONS.completed).toEqual(['evolving']);
   });
 
   it('evolving can reach completed (regression for H5 fix)', () => {

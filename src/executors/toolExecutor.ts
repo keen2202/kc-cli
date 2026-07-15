@@ -389,18 +389,23 @@ export class ToolExecutor {
     // Create abort controller for this tool execution
     const toolAbortController = new AbortController();
 
+    // PERF-01: Save abort listener reference for cleanup
+    const onParentAbort = () => {
+      toolAbortController.abort(context.abortController?.signal.reason);
+    };
+
     // Merge with parent abort signal if available
     if (context.abortController?.signal) {
-      context.abortController.signal.addEventListener('abort', () => {
-        toolAbortController.abort(context.abortController?.signal.reason);
-      }, { once: true });
+      context.abortController.signal.addEventListener('abort', onParentAbort, { once: true });
     }
 
     // Timeout promise - rejects after timeoutMs
     const timeoutError = new Error(`Tool '${toolName}' timed out after ${timeoutMs / 1000}s`);
     let timedOut = false;
+    // PERF-02: Save setTimeout handle for cleanup
+    let timeoutHandle: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
+      timeoutHandle = setTimeout(() => {
         timedOut = true;
         toolAbortController.abort(timeoutError);
         reject(timeoutError);
@@ -437,6 +442,13 @@ export class ToolExecutor {
         };
       }
       throw error;
+    } finally {
+      // PERF-01: Remove abort listener to prevent leak
+      if (context.abortController?.signal) {
+        context.abortController.signal.removeEventListener('abort', onParentAbort);
+      }
+      // PERF-02: Clear timeout handle to prevent leak
+      clearTimeout(timeoutHandle!);
     }
   }
 

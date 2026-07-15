@@ -67,6 +67,7 @@ export function checkIdleState(): void {
 
   if (timeSinceActivity >= idleThresholdMs && idleCallback) {
     idleCallback();
+    lastActivityTime = Date.now(); // Reset latch until next activity
   }
 }
 

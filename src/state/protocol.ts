@@ -103,7 +103,7 @@ export const VALID_TRANSITIONS: Record<AgentStateName, AgentStateName[]> = {
   streaming: ['deciding', 'compacting', 'error'],
   deciding: ['executing', 'completed', 'compacting', 'error'],
   executing: ['streaming', 'compacting', 'completed', 'error'],
-  completed: [],
+  completed: ['evolving'],
   evolving: ['idle', 'completed', 'error'],
   error: ['idle'],
 };

@@ -20,11 +20,13 @@ export class StdioTransport {
   private pendingRequests = new Map<number, {
     resolve: (result: unknown) => void;
     reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
   }>();
   private notificationHandler: ((notification: JSONRPCNotification) => void) | null = null;
   private sdkTransport: { connect(): Promise<void>; sendRequest(method: string, params?: Record<string, unknown>): Promise<unknown>; close(): Promise<void> } | null = null;
   private useSdk = false;
   private isDisconnecting = false;
+  private _connectReject: ((err: Error) => void) | null = null;
 
   // Store event handler references for cleanup
   private _onProcessError: ((err: Error) => void) | null = null;
@@ -51,6 +53,7 @@ export class StdioTransport {
     }
 
     return new Promise((resolve, reject) => {
+      this._connectReject = reject;
       const mergedEnv = { ...process.env, ...env };
 
       this.process = spawn(command, args, {
@@ -59,6 +62,7 @@ export class StdioTransport {
       });
 
       this._onProcessError = (err: Error) => {
+        clearTimeout(startupTimer);
         reject(new Error(`Failed to spawn MCP server: ${err.message}`));
       };
       this.process.on('error', this._onProcessError);
@@ -75,18 +79,26 @@ export class StdioTransport {
       this.process.stderr?.on('data', this._onStderrData);
 
       this._onProcessExit = (code: number | null) => {
+        clearTimeout(startupTimer);
         if (this.isDisconnecting) return;
-        this.process = null;
-        // Reject all pending requests
+        // Reject pending connect if process exits before startup completes
+        if (this._connectReject) {
+          this._connectReject(new Error(`MCP server exited with code ${code}`));
+          this._connectReject = null;
+        }
+        // PERF-05: Clear all pending request timers before rejecting
         for (const [, pending] of this.pendingRequests) {
+          clearTimeout(pending.timer);
           pending.reject(new Error(`MCP server exited with code ${code}`));
         }
         this.pendingRequests.clear();
+        this.process = null;
       };
       this.process.on('exit', this._onProcessExit);
 
-      // Give the process a moment to start
-      setTimeout(() => {
+      // Give the process a moment to start — save handle for cleanup
+      const startupTimer = setTimeout(() => {
+        this._connectReject = null;
         if (this.process) resolve();
         else reject(new Error('MCP server process failed to start'));
       }, 100);
@@ -111,19 +123,19 @@ export class StdioTransport {
     };
 
     return new Promise((resolve, reject) => {
-      this.pendingRequests.set(id, { resolve, reject });
-
-      const message = JSON.stringify(request);
-      const header = `Content-Length: ${Buffer.byteLength(message)}\r\n\r\n`;
-      this.process!.stdin!.write(header + message);
-
-      // Timeout after 30 seconds
-      setTimeout(() => {
+      // PERF-05: Save timer handle so it can be cleared on response or disconnect
+      const timer = setTimeout(() => {
         if (this.pendingRequests.has(id)) {
           this.pendingRequests.delete(id);
           reject(new Error(`MCP request ${method} timed out`));
         }
       }, 30000);
+
+      this.pendingRequests.set(id, { resolve, reject, timer });
+
+      const message = JSON.stringify(request);
+      const header = `Content-Length: ${Buffer.byteLength(message)}\r\n\r\n`;
+      this.process!.stdin!.write(header + message);
     });
   }
 
@@ -141,6 +153,13 @@ export class StdioTransport {
       this.isDisconnecting = false;
       return;
     }
+
+    // PERF-05: Clear all pending request timers on disconnect
+    for (const [, pending] of this.pendingRequests) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('MCP transport disconnected'));
+    }
+    this.pendingRequests.clear();
 
     if (this.process) {
       // Remove event listeners to prevent leaks on reconnect
@@ -229,6 +248,8 @@ export class StdioTransport {
       const pending = this.pendingRequests.get(response.id as number);
       if (pending) {
         this.pendingRequests.delete(response.id as number);
+        // PERF-05: Clear the timeout timer on response
+        clearTimeout(pending.timer);
         if (response.error) {
           pending.reject(new Error(`MCP error ${response.error.code}: ${response.error.message}`));
         } else {

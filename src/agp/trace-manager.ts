@@ -184,6 +184,10 @@ export class TraceManager {
     const session = this.sessions.get(fullEvent.sessionId);
     if (session) {
       session.events.push(fullEvent);
+      // Apply same ring-buffer cap as global events (FUN-11)
+      if (session.events.length > this.maxEvents) {
+        session.events = session.events.slice(-this.maxEvents);
+      }
       session.stats.totalEvents++;
       if (fullEvent.isError) session.stats.errorCount++;
       if (fullEvent.category === 'tool_call') session.stats.toolCallCount++;
