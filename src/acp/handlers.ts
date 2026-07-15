@@ -11,12 +11,10 @@ import type { StreamEvent } from '../query/protocol';
 import type { LLMProvider } from '../api';
 import { getErrorMessage } from '../utils/errors';
 import { v4 as uuidv4 } from 'uuid';
-import { ServiceContainer } from '../services/ServiceContainer';
-import { createLogger } from '../services/logger';
 
 export interface ACPHandlerState {
-  /** Per-connection DI container, created during handleInitialize */
-  container?: ServiceContainer;
+  /** Per-connection state, created during handleInitialize */
+  connectionState?: GlobalState;
   sessions: Map<string, { engine: QueryEngine; info: ACPSessionInfo }>;
   sendResult: (id: number | string, result: unknown) => void;
   sendError: (id: number | string | null, code: number, message: string) => void;
@@ -28,10 +26,7 @@ export async function handleInitialize(request: ACPRequest, state: ACPHandlerSta
   const model = (request.params?.model as string) || 'deepseek-v4-pro';
   const provider = (request.params?.provider as string) || 'deepseek';
 
-  // Create per-connection DI container for isolated service instances
-  const container = new ServiceContainer();
-
-  // Register scoped state for this connection
+  // Create per-connection scoped state
   const connectionState: GlobalState = {
     cwd,
     projectRoot: null,
@@ -44,13 +39,9 @@ export async function handleInitialize(request: ACPRequest, state: ACPHandlerSta
     maxBudgetUsd: null,
     config: null,
   };
-  container.register('globalState', () => connectionState, 'singleton');
 
-  // Register a scoped logger for this connection
-  container.register('logger', () => createLogger('acp'), 'singleton');
-
-  // Store the container in the handler state for downstream use
-  state.container = container;
+  // Store the connection state in the handler state for downstream use
+  state.connectionState = connectionState;
 
   // Also set global state for backward-compatible downstream code
   initializeState({ cwd, verbose: false, printMode: false, bareMode: false, permissionMode: 'default' });
@@ -72,11 +63,9 @@ export async function handleAgentRun(request: ACPRequest, state: ACPHandlerState
     return;
   }
 
-  // Resolve connection-scoped state from the per-session container when available,
+  // Use connection-scoped state when available,
   // falling back to global getState() for backward compatibility
-  const currentState = state.container
-    ? state.container.resolve<GlobalState>('globalState')
-    : getState();
+  const currentState = state.connectionState ?? getState();
 
   const { config } = await loadConfig(currentState.cwd);
   const tools = toolRegistry.getAllTools();

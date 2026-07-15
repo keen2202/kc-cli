@@ -194,9 +194,6 @@ class ToolRegistryImpl implements ToolRegistry {
 // Singleton registry
 export const toolRegistry = new ToolRegistryImpl();
 
-// Register with DI container for consumers
-import { getServiceContainer } from './services/ServiceContainer';
-getServiceContainer().register('toolRegistry', () => toolRegistry, 'singleton');
 
 /**
  * Register all built-in tools.

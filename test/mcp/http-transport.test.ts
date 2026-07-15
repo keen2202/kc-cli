@@ -9,6 +9,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { HttpTransport } from '../../src/mcp/transports/http';
 import { convertMCPTool } from '../../src/mcp/tool-bridge';
+import { logger } from '../../src/services/logger';
 import type { MCPServerConfig } from '../../src/mcp/types';
 
 // ── Mock fetch for HTTP transport tests ──
@@ -167,6 +168,81 @@ describe('HttpTransport', () => {
       transport.onNotification(h1);
       transport.onNotification(h2);
       // Last handler wins (standard pattern)
+    });
+  });
+
+  describe('SSE stream cancel error handling', () => {
+    let debugSpy: ReturnType<typeof vi.spyOn>;
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      debugSpy = vi.spyOn(logger.mcp, 'debug');
+      warnSpy = vi.spyOn(logger.mcp, 'warn');
+    });
+
+    afterEach(() => {
+      debugSpy.mockRestore();
+      warnSpy.mockRestore();
+    });
+
+    it('logs AbortError as debug during stream cancel', async () => {
+      const sseData = 'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":"ok"}\n\n';
+      const encoder = new TextEncoder();
+
+      const abortError = new Error('The user aborted a request');
+      abortError.name = 'AbortError';
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Map([['content-type', 'text/event-stream']]),
+        body: {
+          getReader: () => ({
+            read: vi.fn()
+              .mockResolvedValueOnce({ done: false, value: encoder.encode(sseData) })
+              .mockResolvedValueOnce({ done: true }),
+            releaseLock: vi.fn(),
+          }),
+          cancel: vi.fn().mockRejectedValue(abortError),
+        },
+      } as unknown as Response);
+
+      await transport.connect('http://localhost:3000/mcp');
+      const result = await transport.sendRequest('tools/list');
+
+      expect(result).toBe('ok');
+      expect(debugSpy).toHaveBeenCalled();
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it('logs non-AbortError as warn during stream cancel', async () => {
+      const sseData = 'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":"ok"}\n\n';
+      const encoder = new TextEncoder();
+
+      const networkError = new Error('Network error: connection reset');
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Map([['content-type', 'text/event-stream']]),
+        body: {
+          getReader: () => ({
+            read: vi.fn()
+              .mockResolvedValueOnce({ done: false, value: encoder.encode(sseData) })
+              .mockResolvedValueOnce({ done: true }),
+            releaseLock: vi.fn(),
+          }),
+          cancel: vi.fn().mockRejectedValue(networkError),
+        },
+      } as unknown as Response);
+
+      await transport.connect('http://localhost:3000/mcp');
+      const result = await transport.sendRequest('tools/list');
+
+      expect(result).toBe('ok');
+      expect(warnSpy).toHaveBeenCalled();
     });
   });
 });

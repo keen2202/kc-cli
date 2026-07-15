@@ -4,7 +4,6 @@ import { Bootstrap, buildSystemPrompt, type BootstrapOptions } from './Bootstrap
 import { resetState, initializeState } from './state';
 import { resetProfile } from './profiler';
 import { resetGlobalRegistry } from '../agp/registry';
-import { getServiceContainer, setServiceContainer, ServiceContainer } from '../services/ServiceContainer';
 import { toolRegistry } from '../tools';
 import type { ToolDefinition } from '../tools/protocol';
 
@@ -25,8 +24,7 @@ function minimalOptions(overrides: Partial<BootstrapOptions> = {}): BootstrapOpt
 
 describe('Bootstrap', () => {
   beforeEach(() => {
-    // Fresh DI container + state for each test
-    setServiceContainer(new ServiceContainer());
+    // Fresh state for each test
     resetState();
     resetProfile();
     resetGlobalRegistry();

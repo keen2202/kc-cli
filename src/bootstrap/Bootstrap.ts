@@ -13,7 +13,8 @@ import * as path from 'path';
 import chalk from 'chalk';
 
 import { profileCheckpoint } from './profiler';
-import { initializeState, getState, updateState } from './state';
+import type { GlobalState } from './state';
+import { initializeState, getState, updateState, runWithScopedState } from './state';
 import { loadConfig, type Config, type ConfigLayer } from './config';
 import { toolRegistry, registerBuiltInTools } from '../tools';
 import { QueryEngine } from '../query/QueryEngine';
@@ -62,6 +63,8 @@ export interface BootstrapResult {
   imBridge: IMBridge | null;
   /** MCP client manager (null if bare mode or no MCP servers configured). */
   mcpManager: MCPClientManager | null;
+  /** Scoped session state. Caller must wrap post-compose code in runWithScopedState(state, ...). */
+  state: GlobalState;
 }
 
 // ─── System Prompt builder ────────────────────────────────────────────────────
@@ -163,7 +166,7 @@ export class Bootstrap {
     } = this.options;
 
     // ── Phase 1: Initialize state ──
-    initializeState({
+    const bootstrapState = initializeState({
       cwd,
       verbose,
       printMode,
@@ -172,6 +175,8 @@ export class Bootstrap {
       maxTurns,
       maxBudgetUsd,
     });
+
+    return runWithScopedState(bootstrapState, async () => {
 
     if (bareMode) {
       setBareMode(true);
@@ -441,6 +446,8 @@ export class Bootstrap {
       tools,
       imBridge,
       mcpManager,
+      state: bootstrapState,
     };
+    }); // runWithScopedState
   }
 }

@@ -1,7 +1,7 @@
 // Tests for CacheMetrics service
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { PromptCacheMetrics, formatCacheMetrics, formatCacheSummary } from './cacheMetrics';
+import { PromptCacheMetrics, formatCacheMetrics, formatCacheSummary } from './promptCacheMetrics';
 
 describe('PromptCacheMetrics', () => {
   let metrics: PromptCacheMetrics;

@@ -8,9 +8,20 @@ vi.mock('../services/compaction', async (importOriginal) => {
   return { ...actual, fullCompact: vi.fn() };
 });
 
+// Mock logger so tests can verify error logging
+vi.mock('../services/logger', () => ({
+  logger: {
+    query: {
+      warn: vi.fn(),
+      error: vi.fn(),
+    },
+  },
+}));
+
 // Import AFTER the mock is set up
 import { CompactionHandler } from './QueryEngineCompaction';
 import { fullCompact } from '../services/compaction';
+import { logger } from '../services/logger';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -188,6 +199,67 @@ describe('CompactionHandler async compaction', () => {
 
     const result = handler.drainPendingCompactResult(messages);
     expect(result).toBeNull();
+  });
+
+  it('logs compaction error via logger.query.error', async () => {
+    const messages = makeMessages(50);
+
+    (fullCompact as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('API timeout'),
+    );
+
+    handler.triggerFullCompactAsync(messages, mockApiClient, defaultConfig);
+    await new Promise(resolve => setTimeout(resolve, 5));
+
+    expect(logger.query.error).toHaveBeenCalledWith(
+      '[compaction] Async full compaction failed',
+      expect.objectContaining({ error: 'API timeout' }),
+    );
+  });
+
+  it('sets pendingCompactDone to true after compaction error', async () => {
+    const messages = makeMessages(50);
+
+    (fullCompact as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('API error'),
+    );
+
+    handler.triggerFullCompactAsync(messages, mockApiClient, defaultConfig);
+    await new Promise(resolve => setTimeout(resolve, 5));
+
+    expect((handler as any).pendingCompactDone).toBe(true);
+  });
+
+  it('populates pendingCompactError on compaction failure', async () => {
+    const messages = makeMessages(50);
+
+    (fullCompact as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('API error'),
+    );
+
+    handler.triggerFullCompactAsync(messages, mockApiClient, defaultConfig);
+    await new Promise(resolve => setTimeout(resolve, 5));
+
+    expect((handler as any).pendingCompactError).toBe('API error');
+  });
+
+  it('drainPendingCompactResult logs warning about failed compaction', async () => {
+    const messages = makeMessages(50);
+
+    (fullCompact as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('API error'),
+    );
+
+    handler.triggerFullCompactAsync(messages, mockApiClient, defaultConfig);
+    await new Promise(resolve => setTimeout(resolve, 5));
+
+    // Drain should return null and log the stored error
+    const result = handler.drainPendingCompactResult(messages);
+    expect(result).toBeNull();
+    expect(logger.query.warn).toHaveBeenCalledWith(
+      '[compaction] Drain found failed async compaction',
+      expect.objectContaining({ error: 'API error' }),
+    );
   });
 
   // ── Reset ──────────────────────────────────────────────────────────

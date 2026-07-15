@@ -7,7 +7,6 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { getState, initializeState, updateState, resetState } from '../../src/bootstrap/state';
-import { getServiceContainer } from '../../src/services/ServiceContainer';
 
 // ── fs.existsSync Mocking ─────────────────────────────────────────────────
 // We need hoisted references so the vi.mock factory (also hoisted) can share
@@ -35,10 +34,6 @@ vi.mock('fs', async (importOriginal) => {
 describe('Global State Management', () => {
   beforeEach(() => {
     resetState();
-    // resetState only clears the module-level state variable but does NOT
-    // clear the ServiceContainer. We must clear the container too so that
-    // getState() cannot resolve a stale registration from a prior test.
-    getServiceContainer().clear();
     // Reset mock to default (delegate to real fs.existsSync)
     mockExistsSync.mockReset();
     if (realExistsSyncRef.current) {
@@ -52,7 +47,7 @@ describe('Global State Management', () => {
 
   describe('getState', () => {
     it('should throw "Global state not initialized" before initialization', () => {
-      expect(() => getState()).toThrow('Global state not initialized');
+      expect(() => getState()).toThrow('GlobalState not initialized');
     });
 
     it('should return consistent reference on multiple calls after initialization', () => {
@@ -62,11 +57,8 @@ describe('Global State Management', () => {
       expect(ref1).toBe(ref2);
     });
 
-    it('should fall back to module-level state when container lacks registration', () => {
-      // When the ServiceContainer is cleared after initialization,
-      // getState() should fall back to the module-level state variable.
+    it('should return the module-level state after initialization', () => {
       const initState = initializeState();
-      getServiceContainer().clear();
       const retrieved = getState();
       expect(retrieved).toBe(initState);
       expect(retrieved.cwd).toBe(process.cwd());
@@ -110,7 +102,7 @@ describe('Global State Management', () => {
       expect(state.config).toBeNull();
     });
 
-    it('should register state with ServiceContainer so getState resolves', () => {
+    it('should set module-level state so getState resolves', () => {
       initializeState();
       // Should not throw and return the same state
       const state = getState();
@@ -139,7 +131,7 @@ describe('Global State Management', () => {
 
     it('should throw if state is not initialized', () => {
       expect(() => updateState({ verbose: true })).toThrow(
-        'Global state not initialized',
+        'GlobalState not initialized',
       );
     });
   });
@@ -162,19 +154,10 @@ describe('Global State Management', () => {
       expect(state2).not.toBe(state1);
     });
 
-    it('should still allow getState to resolve if container holds a cached singleton', () => {
-      // resetState only clears the module-level state variable but does NOT
-      // clear the ServiceContainer. If initializeState was called and getState
-      // was resolved at least once, the container caches the singleton instance
-      // and getState continues to return it even after resetState.
+    it('should throw after resetState clears the module-level state', () => {
       initializeState();
-      const cached = getState();
-
       resetState();
-
-      // Container still holds the cached instance from the first resolve.
-      const afterReset = getState();
-      expect(afterReset).toBe(cached);
+      expect(() => getState()).toThrow('GlobalState not initialized');
     });
   });
 

@@ -16,7 +16,7 @@ import { createAPIClient, LLMProvider } from '../api';
 import type { BaseApiClient, LLMStreamEvent as APIStreamEvent, LLMRequestConfig } from '../api';
 import { UserProfileService } from '../services/userProfile';
 import { getSystemPromptAdaptation } from '../services/behavioralAdapter';
-import { PromptCacheMetrics } from '../services/cacheMetrics';
+import { PromptCacheMetrics } from '../services/promptCacheMetrics';
 import { CachePrefixService, buildCacheStrategy } from '../services/cachePrefix';
 import { estimateTaskComplexity } from '../api/prompts/task-prompts';
 import { autoStageFile, autoCommitAll } from '../utils/git';

@@ -1,9 +1,7 @@
 import chalk from 'chalk';
 
 import { profileCheckpoint, getProfileReport } from './profiler';
-import { getState, updateState } from './state';
 import { QueryEngine } from '../query/QueryEngine';
-import type { PermissionMode } from '../permissions/protocol';
 import { formatBanner } from '../ui';
 import { setLogLevel } from '../services/logger';
 import { updateStatus } from '../ui/statusline';
@@ -64,7 +62,8 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
 
   const result = await bootstrap.compose();
 
-  const { queryEngine, provider, model, apiKey, apiBaseUrl, config, layers, tools, imBridge } = result;
+  const { queryEngine, provider, model, apiKey, apiBaseUrl, config, layers, tools, imBridge, state } = result;
+  const maxTurns = state.maxTurns || 80;
 
   // ── Verbose display (config sources) ──
   if (opts.verbose) {
@@ -90,7 +89,7 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
   updateStatus({
     provider,
     model,
-    maxTurns: getState().maxTurns || 80,
+    maxTurns,
     sessionStartTime: Date.now(),
   });
 
@@ -113,7 +112,7 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
       queryEngine,
       provider,
       model,
-      maxTurns: getState().maxTurns || 80,
+      maxTurns,
     });
   } else {
     await options.onRunREPL(queryEngine);

@@ -4,6 +4,57 @@ import { normalizeCommand, splitSubCommands } from './commandNormalizer';
 // Single source of truth used by BashTool, GitTool, and PermissionClassifier
 
 /**
+ * Best-effort shell-aware normalization: strips string literals and comments
+ * before pattern matching to prevent false positives where dangerous keywords
+ * appear only inside quoted strings or comments.
+ *
+ * Handles:
+ *   - Single-quoted strings ('...') — no escape mechanism in POSIX shell
+ *   - Double-quoted strings ("...") — respects backslash-escaped quotes
+ *   - Line comments (# to end of line, preserving content after newline)
+ *
+ * Stripped content is replaced with a space to maintain word boundaries.
+ */
+export function shellAwareNormalize(command: string): string {
+  if (!command) return '';
+
+  // Step 1: Strip single-quoted strings (no escapes possible in POSIX)
+  let result = command.replace(/'[^']*'/g, ' ');
+
+  // Step 2: Strip double-quoted strings (respecting escaped quotes)
+  result = stripDoubleQuotedStrings(result);
+
+  // Step 3: Strip line comments (# to end of line, only to next newline boundary)
+  result = result.replace(/#[^\n]*/g, ' ');
+
+  return result;
+}
+
+/** Strip double-quoted strings with backslash-escape awareness. */
+function stripDoubleQuotedStrings(input: string): string {
+  const out: string[] = [];
+  let i = 0;
+  while (i < input.length) {
+    if (input[i] === '"') {
+      out.push(' ');
+      i++;
+      while (i < input.length && input[i] !== '"') {
+        if (input[i] === '\\' && i + 1 < input.length) {
+          i += 2; // skip escaped char
+        } else {
+          i++;
+        }
+      }
+      if (i < input.length) i++; // skip closing quote
+    } else {
+      out.push(input[i]);
+      i++;
+    }
+  }
+  return out.join('');
+}
+
+/**
  * Read-only bash command patterns
  * These commands do not modify the filesystem and are safe to auto-allow
  */
@@ -139,7 +190,10 @@ function hasRecursiveForceFlags(c: string): boolean {
  */
 export function isDangerousBashCommand(command: string): boolean {
   if (!command) return false;
-  const normalized = normalizeCommand(command);
+  // Strip shell string literals and comments FIRST to prevent false positives
+  // where dangerous keywords appear only inside quoted strings (e.g. echo "rm -rf /").
+  const stripped = shellAwareNormalize(command);
+  const normalized = normalizeCommand(stripped);
   const subs = splitSubCommands(normalized);
   // Check both the full command (cross-sub-command vectors) and each sub-command.
   const candidates = [normalized, ...subs];

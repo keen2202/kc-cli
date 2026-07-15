@@ -95,7 +95,7 @@ vi.mock('../../src/services/stateValidator', () => {
 
 vi.mock('../../src/services/logger', () => ({
   logger: {
-    query: { warn: vi.fn() },
+    query: { warn: vi.fn(), error: vi.fn() },
     tools: { info: vi.fn(), warn: vi.fn() },
   },
 }));

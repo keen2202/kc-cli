@@ -2,7 +2,7 @@
 // Manages all TieredCache instances, provides unified metrics and adaptive tuning
 
 import { TieredCache, type CacheStats, type TieredCacheOptions } from './TieredCache';
-import { globalKVCacheMetrics } from '../../metrics/cacheMetrics';
+import { globalKVCacheMetrics } from '../../metrics/kvCacheMetrics';
 
 export type CacheCategory =
   | 'token'       // Token estimation cache
@@ -362,18 +362,7 @@ export class CacheManager {
 
 /**
  * Convenience: get the global CacheManager instance.
- * Checks the ServiceContainer first (enables test-time replacement),
- * falling back to the class-level singleton.
  */
 export function getCacheManager(): CacheManager {
-  try {
-    const { getServiceContainer } = require('../../services/ServiceContainer');
-    const container = getServiceContainer();
-    if (container.has('cacheManager')) {
-      return container.resolve('cacheManager') as CacheManager;
-    }
-  } catch {
-    // ServiceContainer not available — use direct singleton
-  }
   return CacheManager.getInstance();
 }

@@ -1,6 +1,8 @@
 // MCP HTTP+SSE transport - wraps @modelcontextprotocol/sdk StreamableHTTPClientTransport
 
 import type { JSONRPCRequest, JSONRPCResponse, JSONRPCNotification } from '../types';
+import { logger } from '../../services/logger';
+import { getErrorMessage } from '../../utils/errors';
 
 /**
  * HttpTransport wraps the MCP SDK's StreamableHTTPClientTransport while
@@ -156,7 +158,15 @@ export class HttpTransport {
       }
     } finally {
       reader.releaseLock();
-      await response.body?.cancel().catch(() => { /* ignore cancel errors */ });
+      await response.body?.cancel().catch((err) => {
+        if (err instanceof Error && err.name === 'AbortError') {
+          logger.mcp.debug('[MCP SSE] Stream cancel (expected)', { error: err.message });
+        } else {
+          logger.mcp.warn('[MCP SSE] Unexpected error during stream cancel', {
+            error: getErrorMessage(err),
+          });
+        }
+      });
     }
 
     if (!hasResult) {

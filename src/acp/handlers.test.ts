@@ -135,7 +135,7 @@ describe('handleInitialize', () => {
     };
   });
 
-  it('creates a per-connection ServiceContainer with scoped state and logger', async () => {
+  it('creates a per-connection scoped state', async () => {
     await handleInitialize(
       {
         jsonrpc: '2.0',
@@ -146,17 +146,9 @@ describe('handleInitialize', () => {
       state,
     );
 
-    // Container must exist on the handler state
-    expect(state.container).toBeDefined();
-
-    // Scoped state must be resolvable
-    const gs = state.container!.resolve<{ cwd: string }>('globalState');
-    expect(gs.cwd).toBe('/test/project');
-
-    // Scoped logger must be resolvable
-    const log = state.container!.resolve<{ info: Function }>('logger');
-    expect(log).toBeDefined();
-    expect(typeof log.info).toBe('function');
+    // Connection state must exist on the handler state
+    expect(state.connectionState).toBeDefined();
+    expect(state.connectionState!.cwd).toBe('/test/project');
   });
 
   it('uses defaults when no params provided', async () => {
@@ -170,9 +162,9 @@ describe('handleInitialize', () => {
       state,
     );
 
-    expect(state.container).toBeDefined();
+    expect(state.connectionState).toBeDefined();
     // Should use process.cwd() when not specified
-    const gs = state.container!.resolve<{ cwd: string }>('globalState');
+    const gs = state.connectionState!;
     expect(gs.cwd).toBe(process.cwd());
   });
 
@@ -199,12 +191,12 @@ describe('handleInitialize', () => {
       state2,
     );
 
-    // Each connection gets its own container
-    expect(state1.container).not.toBe(state2.container);
+    // Each connection gets its own state
+    expect(state1.connectionState).not.toBe(state2.connectionState);
 
     // Each container has independent state
-    const gs1 = state1.container!.resolve<{ cwd: string }>('globalState');
-    const gs2 = state2.container!.resolve<{ cwd: string }>('globalState');
+    const gs1 = state1.connectionState!;
+    const gs2 = state2.connectionState!;
     expect(gs1.cwd).toBe('/project/a');
     expect(gs2.cwd).toBe('/project/b');
   });

@@ -17,7 +17,6 @@ import { ServerInterface, getServerInterface } from './server-interface';
 import { VersionManager, getVersionManager } from './version-manager';
 import { TraceManager, getTraceManager } from './trace-manager';
 import { DynamicManager, getDynamicManager } from './dynamic-manager';
-import { getServiceContainer } from '../services/ServiceContainer';
 import { RESOURCE_TYPES } from './protocol';
 
 // ─── AGP System Configuration ────────────────────────────────────────────────
@@ -90,9 +89,6 @@ export class GlobalRegistry {
       });
       this.serverInterface.registerManager(manager);
     }
-
-    // Register with DI container
-    getServiceContainer().register('agpGlobalRegistry', () => this, 'singleton');
 
     // Start trace session if enabled
     if (this.config.tracingEnabled) {

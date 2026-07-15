@@ -4,12 +4,7 @@ import { z } from 'zod';
 import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
-import { exec } from 'child_process';
-import { isExecError, getErrorMessage } from '../../utils/errors';
-import { LARGE_MAX_BUFFER } from '../../constants';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { getErrorMessage } from '../../utils/errors';
 
 const DeployInputSchema = z.object({
   target: z.enum(['local', 'docker', 'vercel', 'netlify', 'ssh', 'custom']).describe('Deployment target'),
@@ -47,16 +42,15 @@ export const tool = buildTool<DeployInput, string>({
       // Get deployment command
       const command = input.command || getDefaultDeployCommand(input.target);
 
-      // Execute deployment
-      const { stdout, stderr } = await execAsync(command, {
+      // Execute deployment via ExecutionEnv abstraction
+      const result = await context.env.shell.exec(command, {
         cwd: context.cwd,
-        timeout: 600000, // 10 minute timeout
-        maxBuffer: LARGE_MAX_BUFFER,
+        timeout: 600_000,
       });
 
       return toolResult(
         `Deployed to ${input.target} (${input.environment})\n\n` +
-        (stdout || stderr || 'Deployment completed successfully.'),
+        (result.stdout || result.stderr || 'Deployment completed successfully.'),
         {
           metadata: {
             target: input.target,
@@ -66,8 +60,7 @@ export const tool = buildTool<DeployInput, string>({
         }
       );
     } catch (error) {
-      const err = error as Record<string, unknown>;
-      return toolError(`Deploy failed: ${String(err.stdout || err.stderr || (error instanceof Error ? error.message : String(error)))}`);
+      return toolError(`Deploy failed: ${getErrorMessage(error)}`);
     }
   },
 

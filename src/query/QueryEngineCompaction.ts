@@ -8,6 +8,7 @@ import type { BaseApiClient } from '../api';
 import { classifyApiError, getRetryDelay } from '../services/error-classifier';
 import { StateValidator } from '../services/stateValidator';
 import { withTimeout } from '../utils/async-helpers';
+import { getErrorMessage } from '../utils/errors';
 
 /**
  * Configuration for compaction phase.
@@ -36,6 +37,8 @@ export class CompactionHandler {
   private pendingCompactMessages: ChatMessage[] | null = null;
   /** Whether the pending async compaction has finished */
   private pendingCompactDone = false;
+  /** Error message from a failed async compaction, null if no error or success */
+  private pendingCompactError: string | null = null;
   /** Number of messages at the time the async compaction was triggered */
   private pendingCompactMsgCount = 0;
 
@@ -220,6 +223,7 @@ export class CompactionHandler {
     this.pendingCompactPromise = null;
     this.pendingCompactMessages = null;
     this.pendingCompactDone = false;
+    this.pendingCompactError = null;
     this.pendingCompactMsgCount = 0;
   }
 
@@ -262,8 +266,10 @@ export class CompactionHandler {
     ).then(messages => {
       this.pendingCompactMessages = messages;
       this.pendingCompactDone = true;
-    }).catch(() => {
+    }).catch((err) => {
+      this.pendingCompactError = getErrorMessage(err);
       this.pendingCompactDone = true;
+      logger.query.error('[compaction] Async full compaction failed', { error: getErrorMessage(err) });
     });
   }
 
@@ -295,6 +301,10 @@ export class CompactionHandler {
 
     if (compactedMessages === null) {
       this.pendingCompactMsgCount = 0;
+      if (this.pendingCompactError) {
+        logger.query.warn('[compaction] Drain found failed async compaction', { error: this.pendingCompactError });
+        this.pendingCompactError = null;
+      }
       return null;
     }
 
@@ -336,9 +346,9 @@ export class CompactionHandler {
 
       this.compactFailureCount = 0;
       return null;
-    } catch {
+    } catch (err) {
       this.compactFailureCount++;
-      return null;
+      throw err;
     }
   }
 }

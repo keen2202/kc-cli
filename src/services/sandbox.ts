@@ -45,6 +45,7 @@ const DEFAULT_OPTIONS: Omit<SandboxOptions, 'workDir' | 'policy'> = {
   allowNetwork: false,
   maxMemoryMb: 512,
   cpuTimeLimitSec: 60,
+  failIfNoSandbox: true,
 };
 
 const BACKEND_REGISTRY: Record<string, () => SandboxBackend> = {
@@ -132,7 +133,9 @@ export class SandboxManager {
         // Default-deny posture: warn loudly about missing isolation before degrading (S2: AC-S2.1)
         logger.services.warn(
           `[sandbox] ⚠ NO ISOLATION — requested backend "${this.options.backend}" unavailable, ` +
-            `falling back to noop; commands will run on the host WITHOUT isolation.`
+            `falling back to noop; commands will run on the host WITHOUT isolation. ` +
+            `Install bubblewrap (apt install bubblewrap), seccomp, or docker, ` +
+            `or explicitly opt out with failIfNoSandbox: false or backend: 'noop'.`
         );
       }
       this.backend = new NoopSandbox();

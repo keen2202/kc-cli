@@ -12,7 +12,6 @@
 import type { ResourceType, ResourceRegistrationRecord } from './protocol';
 import type { ServerInterface } from './server-interface';
 import { getServerInterface } from './server-interface';
-import { getServiceContainer } from '../services/ServiceContainer';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -175,23 +174,6 @@ export class DynamicManager {
     return this.hotSwap(state);
   }
 
-  // ─── Integration with ServiceContainer ─────────────────────────────────────
-
-  /**
-   * Register the DynamicManager with the global ServiceContainer.
-   */
-  registerWithContainer(): void {
-    getServiceContainer().register('agpDynamicManager', () => this, 'singleton');
-  }
-
-  /**
-   * Get the DynamicManager from the ServiceContainer.
-   */
-  static fromContainer(): DynamicManager | null {
-    const container = getServiceContainer();
-    if (!container.has('agpDynamicManager')) return null;
-    return container.resolve<DynamicManager>('agpDynamicManager');
-  }
 }
 
 /**

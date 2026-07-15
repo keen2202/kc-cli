@@ -186,6 +186,3 @@ export const logger = {
   tools: createLogger('tools'),
 };
 
-// Register with DI container for consumers
-import { getServiceContainer } from './ServiceContainer';
-getServiceContainer().register('logger', () => logger, 'singleton');

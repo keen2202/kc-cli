@@ -2,7 +2,6 @@
 
 import type { PermissionMode } from '../permissions/protocol';
 import type { Config } from './config';
-import { getServiceContainer } from '../services/ServiceContainer';
 import type { GlobalRegistry } from '../agp/registry';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -23,10 +22,14 @@ export interface GlobalState {
   agpRegistry?: GlobalRegistry;
 }
 
-let state: GlobalState | null = null;
-
 // Scoped state for per-agent isolation (used by sub-agents)
 const scopedStateStorage = new AsyncLocalStorage<GlobalState>();
+
+/**
+ * Transitional fallback for code paths not yet migrated to ALS.
+ * TODO(A1): Remove once all callers use runWithScopedState().
+ */
+let _fallbackState: GlobalState | null = null;
 
 /**
  * Create a scoped copy of global state with overridden fields.
@@ -47,24 +50,22 @@ export function runWithScopedState<T>(state: GlobalState, fn: () => T): T {
 }
 
 export function getState(): GlobalState {
-  // First check for scoped state (per-agent isolation for sub-agents)
+  // Check for scoped state (per-agent isolation for sub-agents)
   const scoped = scopedStateStorage.getStore();
   if (scoped) {
     return scoped;
   }
-  // Then try the container (if initialized via container)
-  const container = getServiceContainer();
-  if (container.has('globalState')) {
-    return container.resolve<GlobalState>('globalState');
+  // Transitional fallback for code paths not yet migrated to ALS.
+  if (_fallbackState) {
+    return _fallbackState;
   }
-  if (!state) {
-    throw new Error('Global state not initialized');
-  }
-  return state;
+  throw new Error(
+    'GlobalState not initialized. Call initializeState() and wrap with runWithScopedState().'
+  );
 }
 
 export function initializeState(overrides: Partial<GlobalState> = {}): GlobalState {
-  state = {
+  _fallbackState = {
     cwd: process.cwd(),
     projectRoot: findProjectRoot(process.cwd()),
     sessionId: generateSessionId(),
@@ -77,9 +78,7 @@ export function initializeState(overrides: Partial<GlobalState> = {}): GlobalSta
     config: null,
     ...overrides,
   };
-  // Register with container for DI consumers
-  getServiceContainer().register('globalState', () => state!, 'singleton');
-  return state;
+  return _fallbackState;
 }
 
 export function updateState(updates: Partial<GlobalState>): void {
@@ -88,10 +87,12 @@ export function updateState(updates: Partial<GlobalState>): void {
 }
 
 /**
- * Reset global state (for testing isolation)
+ * Reset global state (for testing isolation).
+ * Clears the transitional fallback. Tests should migrate to initializeState()
+ * with runWithScopedState() for proper per-test state isolation.
  */
 export function resetState(): void {
-  state = null;
+  _fallbackState = null;
 }
 
 function findProjectRoot(dir: string): string | null {

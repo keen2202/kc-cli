@@ -29,9 +29,9 @@ describe('[S2] sandbox no-isolation warning + failIfNoSandbox', () => {
     vi.restoreAllMocks();
   });
 
-  it('AC-S2.1: warns NO ISOLATION when falling back to noop', () => {
+  it('AC-S2.1: warns NO ISOLATION when falling back to noop (failIfNoSandbox: false)', () => {
     const warn = vi.spyOn(logger.services, 'warn').mockImplementation(() => {});
-    new SandboxManager({ workDir: '/tmp', enabled: true, backend: 'bubblewrap' });
+    new SandboxManager({ workDir: '/tmp', enabled: true, backend: 'bubblewrap', failIfNoSandbox: false });
     expect(warn.mock.calls.some(c => /NO ISOLATION/.test(String(c[0])))).toBe(true);
     warn.mockRestore();
   });
