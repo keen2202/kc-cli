@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useInput } from 'ink';
 
 interface FileItem {
   name: string;
@@ -15,6 +15,27 @@ interface FilePickerProps {
 
 export function FilePicker({ files, onSelect, onCancel }: FilePickerProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
+
+  const maxIndex = Math.max(0, Math.min(files.length, 20) - 1);
+
+  useInput((input, key) => {
+    if (key.escape) {
+      onCancel();
+      return;
+    }
+    if (key.upArrow || input === 'k') {
+      setSelectedIndex((i) => Math.max(0, i - 1));
+      return;
+    }
+    if (key.downArrow || input === 'j') {
+      setSelectedIndex((i) => Math.min(maxIndex, i + 1));
+      return;
+    }
+    if (key.return) {
+      const file = files[selectedIndex];
+      if (file) onSelect(file.path);
+    }
+  });
 
   return (
     <Box flexDirection="column" borderStyle="single" padding={1} width={50}>

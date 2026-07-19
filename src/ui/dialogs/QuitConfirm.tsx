@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useInput } from 'ink';
 
 interface QuitConfirmProps {
   onConfirm: () => void;
@@ -7,6 +7,15 @@ interface QuitConfirmProps {
 }
 
 export function QuitConfirm({ onConfirm, onCancel }: QuitConfirmProps) {
+  useInput((input, key) => {
+    if (input === 'y' || input === 'Y') {
+      onConfirm();
+      return;
+    }
+    if (key.escape || input === 'n' || input === 'N') {
+      onCancel();
+    }
+  });
   return (
     <Box flexDirection="column" borderStyle="single" padding={1}>
       <Box marginBottom={1}>

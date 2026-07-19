@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import { useTheme } from '../hooks/useTheme';
 
 interface SessionItem {
@@ -19,6 +19,27 @@ interface SessionSwitcherProps {
 export function SessionSwitcher({ sessions, onSelect, onCancel }: SessionSwitcherProps) {
   const { tokens } = useTheme();
   const [selectedIndex, setSelectedIndex] = useState(0);
+
+  const maxIndex = Math.max(0, sessions.length - 1);
+
+  useInput((input, key) => {
+    if (key.escape) {
+      onCancel();
+      return;
+    }
+    if (key.upArrow || input === 'k') {
+      setSelectedIndex((i) => Math.max(0, i - 1));
+      return;
+    }
+    if (key.downArrow || input === 'j') {
+      setSelectedIndex((i) => Math.min(maxIndex, i + 1));
+      return;
+    }
+    if (key.return) {
+      const session = sessions[selectedIndex];
+      if (session) onSelect(session.id);
+    }
+  });
 
   return (
     <Box flexDirection="column" borderStyle="single" padding={1} width={50}>

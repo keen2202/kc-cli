@@ -45,6 +45,7 @@ export interface LayoutOptions {
 }
 
 const RIGHT_PANEL_WIDTH = 30;
+const RIGHT_PANEL_WIDTH_WIDE = 40;
 const SESSION_INFO_HEIGHT = 8;
 const EDITOR_MIN_HEIGHT = 3;
 const EDITOR_MAX_HEIGHT = 15;
@@ -66,24 +67,33 @@ export function computeOpenCodeLayout(
   const sidebarVisible = bp.sidebarVisible;
   const headerHeight = headerVisible ? HEADER_HEIGHT : 0;
   const statusBarHeight = STATUS_BAR_HEIGHT;
-  const rightPanelWidth = sidebarVisible ? RIGHT_PANEL_WIDTH : 0;
-  const sessionInfoHeight = sidebarVisible ? SESSION_INFO_HEIGHT : 0;
+  const rightPanelWidth = sidebarVisible
+    ? (bp.name === 'wide' ? RIGHT_PANEL_WIDTH_WIDE : RIGHT_PANEL_WIDTH)
+    : 0;
   const errorBarHeight = options.errorVisible ? ERROR_BAR_HEIGHT : 0;
 
-  // Editor grows with terminal but is capped
-  const available = height - headerHeight - statusBarHeight;
-  const editorHeight = Math.max(
+  // Vertical space available for the main content row (between header and status bar).
+  const available = Math.max(0, height - headerHeight - statusBarHeight);
+
+  // Editor grows with the terminal but is capped, then shrunk so the chat
+  // content area is never squeezed below one row on short terminals.
+  let editorHeight = Math.max(
     EDITOR_MIN_HEIGHT,
     Math.min(EDITOR_MAX_HEIGHT, Math.floor(available * 0.25)),
   );
+  editorHeight = Math.min(editorHeight, Math.max(1, available - errorBarHeight - 1));
 
-  // Guard against negative height on short terminals (sidebar visible uses ~13 rows).
-  // The error banner (when visible) also eats into the chat content area so the
-  // total column height never exceeds the terminal height (avoids overlap).
-  const contentHeight = Math.max(
-    1,
-    available - editorHeight - sessionInfoHeight - errorBarHeight,
-  );
+  // Chat content fills the remainder of the left column. SessionInfo is NOT
+  // subtracted here: it lives in the right column, and subtracting it left ~8
+  // blank rows at the bottom and floated the editor off the terminal floor.
+  const contentHeight = Math.max(1, available - editorHeight - errorBarHeight);
+
+  // The right column spans the same height as the main content row. SessionInfo
+  // shrinks so it never exceeds that row height on short terminals.
+  const rowHeight = contentHeight + editorHeight + errorBarHeight;
+  const sessionInfoHeight = sidebarVisible
+    ? Math.min(SESSION_INFO_HEIGHT, Math.max(0, rowHeight - 1))
+    : 0;
 
   return {
     terminalWidth: width,

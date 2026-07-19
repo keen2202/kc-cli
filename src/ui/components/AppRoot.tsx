@@ -1,6 +1,6 @@
-import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { ThemeProvider, useTheme } from '../hooks/useTheme';
+import { ThemeProvider } from '../hooks/useTheme';
 import { DEFAULT_THEME } from '../theme';
 import { useStreamingEvents } from '../hooks/useStreamingEvents';
 import { Layout } from './Layout';
@@ -9,6 +9,7 @@ import { ChatPanel } from './ChatPanel';
 import { SessionInfo } from './SessionInfo';
 import { Editor, openExternalEditor } from './Editor';
 import { StatusBar } from './StatusBarView.js';
+import { SidebarPanel } from './SidebarPanel';
 import { UIEventBus } from '../event-bus';
 import { createDefaultKeybindings } from '../keybinding-manager';
 import { isPrintableUnicode } from '../keypress';
@@ -104,27 +105,8 @@ function ExitConfirmDialog({ onConfirm, onCancel }: ExitConfirmDialogProps) {
   );
 }
 
-// ── Sidebar placeholder ──
-
-function SidebarPlaceholder() {
-  const { tokens } = useTheme();
-  return (
-    <Box flexDirection="column" borderStyle="single" padding={1}>
-      <Box marginBottom={1}>
-        <Text bold>Tools</Text>
-      </Box>
-      <Box marginBottom={1}>
-        <Text bold>Files</Text>
-      </Box>
-      <Box marginBottom={1}>
-        <Text bold>Tasks</Text>
-      </Box>
-      <Box>
-        <Text bold>Memory</Text>
-      </Box>
-    </Box>
-  );
-}
+// ── Sidebar ──
+// Real sidebar now lives in SidebarPanel.tsx (consumes live sidebarData).
 
 // ── Main App ──
 
@@ -165,7 +147,6 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
 
   // Exit confirmation state
   const [showExitConfirm, setShowExitConfirm] = useState(false);
-  const exitConfirmHandledRef = useRef(false);
 
   // Error dismissal
   const [dismissedErrors, setDismissedErrors] = useState<Set<number>>(new Set());
@@ -320,16 +301,9 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
 
   // Keyboard input handling via Ink's useInput
   useInput((input: string, key: any) => {
-    // When exit confirmation is showing, block all other input
+    // When the exit confirmation is showing, focus belongs to the dialog:
+    // block background input here and let ExitConfirmDialog own its keys.
     if (showExitConfirm) {
-      exitConfirmHandledRef.current = true;
-      if (input === 'y' || input === 'Y') {
-        setShowExitConfirm(false);
-        process.exit(0);
-      }
-      if (key.escape || input === 'n' || input === 'N') {
-        setShowExitConfirm(false);
-      }
       return;
     }
 
@@ -392,9 +366,15 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
       return;
     }
 
-    // Dismiss error bar on Escape
+    // Dismiss error bar on Escape. activeErrors is filtered by dismissedErrors,
+    // so errors.length-1 may already be dismissed; dismiss the last *active*
+    // error's real index instead (otherwise older errors can never close).
     if (key.escape && activeErrors.length > 0) {
-      dismissError(errors.length - 1);
+      const lastActive = errors
+        .map((_, i) => i)
+        .filter((i) => !dismissedErrors.has(i))
+        .pop();
+      if (lastActive !== undefined) dismissError(lastActive);
       return;
     }
 
@@ -534,7 +514,7 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
           duration={sessionDuration}
         />
       }
-      sidebar={<SidebarPlaceholder />}
+      sidebar={<SidebarPanel data={sidebarData} />}
       statusBar={
         <StatusBar
           mode={mode}
