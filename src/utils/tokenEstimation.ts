@@ -1,8 +1,12 @@
 // Token estimation utilities - tiktoken-based with character heuristic fallback
 // Provides precise token counting using js-tiktoken with LRU caching.
 
+import { createRequire } from 'node:module';
 import type { ChatMessage } from '../query/protocol';
 import { getCacheManager } from '../services/cache';
+
+// ESM-compatible require for lazy loading js-tiktoken (CommonJS module)
+const require = createRequire(import.meta.url);
 
 /**
  * Interface for tiktoken encoder

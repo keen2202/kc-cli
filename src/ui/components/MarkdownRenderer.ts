@@ -1,5 +1,9 @@
 import chalk from 'chalk';
+import { createRequire } from 'node:module';
 import type { Theme } from '../theme';
+
+// ESM-compatible require for lazy loading highlight.js (CommonJS module)
+const require = createRequire(import.meta.url);
 
 /** Map highlight.js token types to theme syntax colors. */
 const TOKEN_COLOR_MAP: Record<string, keyof import('../theme').ThemeSyntax> = {

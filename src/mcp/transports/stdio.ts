@@ -1,7 +1,11 @@
 // MCP stdio transport - wraps @modelcontextprotocol/sdk StdioClientTransport
 
 import { spawn, type ChildProcess } from 'child_process';
+import { createRequire } from 'node:module';
 import type { JSONRPCRequest, JSONRPCResponse, JSONRPCNotification } from '../types';
+
+// ESM-compatible require for optionally loading the MCP SDK transport (CommonJS)
+const require = createRequire(import.meta.url);
 
 type MessageHandler = (message: JSONRPCResponse | JSONRPCNotification) => void;
 

@@ -3,6 +3,10 @@
 import type { JSONRPCRequest, JSONRPCResponse, JSONRPCNotification } from '../types';
 import { logger } from '../../services/logger';
 import { getErrorMessage } from '../../utils/errors';
+import { createRequire } from 'node:module';
+
+// ESM-compatible require for optionally loading the MCP SDK transport (CommonJS)
+const require = createRequire(import.meta.url);
 
 /**
  * HttpTransport wraps the MCP SDK's StreamableHTTPClientTransport while

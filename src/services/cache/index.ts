@@ -1,5 +1,10 @@
 // Cache system - unified exports
 
+import { createRequire } from 'node:module';
+
+// ESM-compatible require for lazy loading CacheManager within the dashboard helper
+const require = createRequire(import.meta.url);
+
 export { TieredCache, cacheKey, contentKey, type CacheEntry, type CacheStats, type TieredCacheOptions } from './TieredCache';
 export { CacheManager, getCacheManager, type CacheCategory, type GlobalCacheStats } from './CacheManager';
 export { stableHash } from './compression';

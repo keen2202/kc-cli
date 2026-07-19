@@ -1,6 +1,7 @@
 import { AutoReconnectService } from '../../services/autoReconnect';
 import { CircuitBreaker } from '../../services/circuitBreaker';
 import { logger } from '../../services/logger';
+import { createRequire } from 'node:module';
 import type {
   IMAdapter,
   IMAdapterConfig,
@@ -8,6 +9,9 @@ import type {
   IMContent,
   IMPlatform,
 } from '../protocol';
+
+// ESM-compatible require for lazy loading the 'ws' package (CommonJS module)
+const require = createRequire(import.meta.url);
 
 const FEISHU_WS_URL = 'wss://open.feishu.cn/open-apis/ws/v1/events';
 const FEISHU_TOKEN_URL = 'https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal';

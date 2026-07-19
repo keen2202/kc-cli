@@ -1,6 +1,10 @@
 import chalk from 'chalk';
+import { createRequire } from 'node:module';
 import { isBareMode } from './formatter';
 import type { Theme } from './theme';
+
+// ESM-compatible require for lazy loading the diff library (CommonJS module)
+const require = createRequire(import.meta.url);
 
 /** Represents a single line in a diff. */
 export interface DiffLine {

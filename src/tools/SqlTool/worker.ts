@@ -3,6 +3,10 @@
 // Posts { type: 'result', data } or { type: 'error', error } back
 
 import { parentPort } from 'node:worker_threads';
+import { createRequire } from 'node:module';
+
+// ESM-compatible require for loading better-sqlite3 (native CommonJS module)
+const require = createRequire(import.meta.url);
 
 const port = parentPort;
 if (!port) {
@@ -16,11 +20,7 @@ port.on('message', (msg: {
   params?: unknown[];
 }) => {
   try {
-    // Dynamic require for better-sqlite3 (native module, CJS).
-    // `require` is available here via tsx's ESM require shim (dev) or
-    // because the compiled .js is loaded by Node as ESM where
-    // --experimental-require-module (Node 22+) provides it.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // Load better-sqlite3 (native CommonJS module) via createRequire.
     const Database = require('better-sqlite3');
     const db = new Database(msg.path, { readonly: msg.readonly, timeout: 30_000 });
 

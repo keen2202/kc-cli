@@ -1,4 +1,8 @@
 import chalk from 'chalk';
+import { createRequire } from 'node:module';
+
+// ESM-compatible require for lazy loading highlight.js (CommonJS module)
+const require = createRequire(import.meta.url);
 
 let _bareMode = false;
 

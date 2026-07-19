@@ -4,11 +4,15 @@ import { z } from 'zod';
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import { getState } from '../../bootstrap/state';
 import { getCacheManager } from '../../services/cache';
+
+// ESM-compatible require for loading better-sqlite3 (native CommonJS module)
+const require = createRequire(import.meta.url);
 
 const SqlInputSchema = z.object({
   query: z.string().describe('SQL query to execute'),
