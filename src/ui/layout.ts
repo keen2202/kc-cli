@@ -36,6 +36,12 @@ export interface OpenCodeLayout {
   sidebarVisible: boolean;
   headerVisible: boolean;
   contentHeight: number;
+  errorBarHeight: number;
+}
+
+export interface LayoutOptions {
+  /** When true, reserve vertical space for the error banner above the editor. */
+  errorVisible?: boolean;
 }
 
 const RIGHT_PANEL_WIDTH = 30;
@@ -44,11 +50,17 @@ const EDITOR_MIN_HEIGHT = 3;
 const EDITOR_MAX_HEIGHT = 15;
 const HEADER_HEIGHT = 1;
 const STATUS_BAR_HEIGHT = 1;
+// Error banner: border (2) + content (1) + marginBottom (1)
+const ERROR_BAR_HEIGHT = 4;
 
 /**
  * Compute the opencode-style layout for the given terminal dimensions.
  */
-export function computeOpenCodeLayout(width: number, height: number): OpenCodeLayout {
+export function computeOpenCodeLayout(
+  width: number,
+  height: number,
+  options: LayoutOptions = {},
+): OpenCodeLayout {
   const bp = getBreakpoint(width);
   const headerVisible = bp.headerVisible;
   const sidebarVisible = bp.sidebarVisible;
@@ -56,6 +68,7 @@ export function computeOpenCodeLayout(width: number, height: number): OpenCodeLa
   const statusBarHeight = STATUS_BAR_HEIGHT;
   const rightPanelWidth = sidebarVisible ? RIGHT_PANEL_WIDTH : 0;
   const sessionInfoHeight = sidebarVisible ? SESSION_INFO_HEIGHT : 0;
+  const errorBarHeight = options.errorVisible ? ERROR_BAR_HEIGHT : 0;
 
   // Editor grows with terminal but is capped
   const available = height - headerHeight - statusBarHeight;
@@ -64,8 +77,13 @@ export function computeOpenCodeLayout(width: number, height: number): OpenCodeLa
     Math.min(EDITOR_MAX_HEIGHT, Math.floor(available * 0.25)),
   );
 
-  // Guard against negative height on short terminals (sidebar visible uses ~13 rows)
-  const contentHeight = Math.max(1, available - editorHeight - sessionInfoHeight);
+  // Guard against negative height on short terminals (sidebar visible uses ~13 rows).
+  // The error banner (when visible) also eats into the chat content area so the
+  // total column height never exceeds the terminal height (avoids overlap).
+  const contentHeight = Math.max(
+    1,
+    available - editorHeight - sessionInfoHeight - errorBarHeight,
+  );
 
   return {
     terminalWidth: width,
@@ -78,6 +96,7 @@ export function computeOpenCodeLayout(width: number, height: number): OpenCodeLa
     sidebarVisible,
     headerVisible,
     contentHeight,
+    errorBarHeight,
   };
 }
 

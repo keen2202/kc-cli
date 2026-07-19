@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Box, Text } from 'ink';
 import { useTheme } from '../hooks/useTheme';
+import { useTerminalSize } from '../hooks/useTerminalSize';
+import { computeOpenCodeLayout } from '../layout';
 
 interface Attachment {
   path: string;
@@ -53,9 +55,19 @@ export function Editor({
   deleteMode = false,
 }: EditorProps) {
   const { tokens } = useTheme();
+  const { width, height } = useTerminalSize();
   const promptPrefix = isSteerMode ? 'steer> ' : 'kc> ';
 
   const attachmentCount = attachments.length;
+
+  // Height budget the editor is allotted by the layout. Content must fit
+  // within this (minus the border) or it overflows and overlaps the chat
+  // panel on small terminals. We progressively reveal chrome as room allows.
+  const { editorHeight } = computeOpenCodeLayout(width, height);
+  const innerBudget = editorHeight - 2; // subtract top/bottom border rows
+  const remaining = innerBudget - 1; // reserve one row for the input line
+  const showHints = remaining >= 3; // hint bar needs ~3 rows (with margins)
+  const showAttachmentDetails = remaining >= (showHints ? 5 : 2);
 
   // Build display text with cursor position indicator
   const renderInputLine = () => {
@@ -88,11 +100,13 @@ export function Editor({
   };
 
   return (
-    <Box flexDirection="column" borderStyle="single" paddingLeft={1} paddingRight={1}>
-      {/* Keyboard shortcut hint bar */}
-      <Box marginBottom={1} marginTop={1}>
-        <KeyboardHints />
-      </Box>
+    <Box flexDirection="column" width="100%" borderStyle="single" paddingLeft={1} paddingRight={1}>
+      {/* Keyboard shortcut hint bar (hidden when vertical space is tight) */}
+      {showHints && (
+        <Box marginBottom={1} marginTop={1}>
+          <KeyboardHints />
+        </Box>
+      )}
 
       {/* Attachment bar */}
       <Box flexDirection="row" marginBottom={1}>
@@ -103,13 +117,14 @@ export function Editor({
           <Text color="yellow"> [DELETE MODE: 0-{Math.max(0, attachmentCount - 1)} to remove, R to clear all]</Text>
         )}
       </Box>
-      {attachments.map((att, i) => (
-        <Box key={i} flexDirection="row" marginBottom={1}>
-          <Text dimColor>
-            {deleteMode ? `[${i}] ` : ''}📄 {att.name}
-          </Text>
-        </Box>
-      ))}
+      {showAttachmentDetails &&
+        attachments.map((att, i) => (
+          <Box key={i} flexDirection="row" marginBottom={1}>
+            <Text dimColor>
+              {deleteMode ? `[${i}] ` : ''}📄 {att.name}
+            </Text>
+          </Box>
+        ))}
 
       {/* Input line with real cursor */}
       <Box flexDirection="row">

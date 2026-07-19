@@ -503,13 +503,12 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
   const hasError = activeErrors.length > 0;
 
   return (
-    <Box flexDirection="column" width="100%">
-      {hasError && (
-        <ErrorBar errors={activeErrors} onDismiss={dismissError} />
-      )}
-      <Layout
-        headerBar={<HeaderBar provider={provider} model={model} agentMode={agentMode} />}
-        chatPanel={
+    <Layout
+      headerBar={<HeaderBar provider={provider} model={model} agentMode={agentMode} />}
+      errorBar={
+        hasError ? <ErrorBar errors={activeErrors} onDismiss={dismissError} /> : null
+      }
+      chatPanel={
         <ChatPanel
           messages={messages}
           thinkingChains={thinkingChains}
@@ -553,7 +552,6 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
         /> : null
       }
     />
-    </Box>
   );
 }
 
