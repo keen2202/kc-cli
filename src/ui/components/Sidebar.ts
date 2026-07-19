@@ -102,6 +102,10 @@ function getSectionItems(data: SidebarData, section: SidebarSection): any[] {
 
 /**
  * Render the sidebar panel.
+ *
+ * @deprecated Legacy string renderer superseded by the ink `SidebarPanel`
+ * component. No production callers remain; retained only for existing unit
+ * tests. Do not use in new code.
  */
 export function renderSidebar(
   data: SidebarData,

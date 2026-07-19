@@ -1,10 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { useTheme } from '../hooks/useTheme';
 
 interface SessionInfoProps {
-  provider: string;
-  model: string;
   sessionId?: string;
   tokensUsed?: number;
   tokensMax?: number;
@@ -12,15 +9,11 @@ interface SessionInfoProps {
 }
 
 export function SessionInfo({
-  provider,
-  model,
   sessionId = '—',
   tokensUsed = 0,
   tokensMax = 200000,
   duration = 0,
 }: SessionInfoProps) {
-  const { tokens } = useTheme();
-
   const formatDuration = (ms: number) => {
     const s = Math.floor(ms / 1000);
     const m = Math.floor(s / 60);
@@ -33,12 +26,12 @@ export function SessionInfo({
     return String(n);
   };
 
+  // Provider/model intentionally omitted here — the HeaderBar is the single
+  // source of truth for the active provider/model to avoid duplicate display.
   return (
     <Box flexDirection="column" borderStyle="single" padding={1}>
       <Text bold>Session Info</Text>
       <Box flexDirection="column" marginTop={1}>
-        <Text>{tokens['header.model']('Model:')} {model}</Text>
-        <Text>{tokens['header.model']('Provider:')} {provider}</Text>
         <Text dimColor>Session: {sessionId}</Text>
         <Text dimColor>
           Tokens: {formatTokens(tokensUsed)}/{formatTokens(tokensMax)}

@@ -54,7 +54,7 @@ export function Editor({
   attachments = [],
   deleteMode = false,
 }: EditorProps) {
-  const { tokens } = useTheme();
+  const { tokens, colors } = useTheme();
   const { width, height } = useTerminalSize();
   const promptPrefix = isSteerMode ? 'steer> ' : 'kc> ';
 
@@ -114,7 +114,7 @@ export function Editor({
           Attachments: {attachmentCount}/{MAX_ATTACHMENTS}
         </Text>
         {deleteMode && (
-          <Text color="yellow"> [DELETE MODE: 0-{Math.max(0, attachmentCount - 1)} to remove, R to clear all]</Text>
+          <Text color={colors.warning}> [DELETE MODE: 0-{Math.max(0, attachmentCount - 1)} to remove, R to clear all]</Text>
         )}
       </Box>
       {showAttachmentDetails &&

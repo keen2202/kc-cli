@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { computeOpenCodeLayout, getBreakpoint } from '../../src/ui/layout';
+import { computeOpenCodeLayout, getBreakpoint, truncate, abbreviateModel } from '../../src/ui/layout';
 
 const HEIGHTS = [10, 13, 24, 50];
 const WIDTHS = [40, 80, 120];
@@ -69,5 +69,48 @@ describe('computeOpenCodeLayout', () => {
     expect(l.sidebarVisible).toBe(false);
     expect(l.rightPanelWidth).toBe(0);
     expect(l.sessionInfoHeight).toBe(0);
+  });
+});
+
+describe('truncate', () => {
+  it('returns the text unchanged when it fits', () => {
+    expect(truncate('hello', 5)).toBe('hello');
+    expect(truncate('hi', 10)).toBe('hi');
+  });
+
+  it('clips with an ellipsis when too long', () => {
+    expect(truncate('hello world', 5)).toBe('hell…');
+    expect(truncate('hello world', 5).length).toBe(5);
+  });
+
+  it('handles degenerate widths', () => {
+    expect(truncate('anything', 0)).toBe('');
+    expect(truncate('anything', -3)).toBe('');
+    expect(truncate('anything', 1)).toBe('…');
+  });
+
+  it('never exceeds the requested width across breakpoints', () => {
+    const line = 'kc v3.2 · anthropic/claude-3-5-sonnet-20241022 · Build';
+    for (const width of [40, 60, 80, 120]) {
+      const out = truncate(line, width);
+      expect(out.length).toBeLessThanOrEqual(width);
+      expect(out.includes('\n')).toBe(false);
+    }
+  });
+});
+
+describe('abbreviateModel', () => {
+  it('abbreviates Claude model identifiers', () => {
+    expect(abbreviateModel('claude-3-5-sonnet-20241022')).toBe('c3.5-sonnet');
+    expect(abbreviateModel('claude-3-7-haiku-20250101')).toBe('c3.7-haiku');
+  });
+
+  it('strips trailing date stamps from other models', () => {
+    expect(abbreviateModel('gpt-4o-20240513')).toBe('gpt-4o');
+  });
+
+  it('leaves unknown names without a date stamp unchanged', () => {
+    expect(abbreviateModel('gpt-4o-mini')).toBe('gpt-4o-mini');
+    expect(abbreviateModel('')).toBe('');
   });
 });

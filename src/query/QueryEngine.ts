@@ -220,6 +220,16 @@ export class QueryEngine {
   }
 
   /**
+   * Register an interactive permission handler that the executor invokes when
+   * a tool requires explicit user authorization ('ask'). Pass null to detach.
+   */
+  setPermissionRequestHandler(
+    handler: import('../permissions/protocol').UIPermissionRequestHandler | null,
+  ): void {
+    this.toolExecutor.setPermissionRequestHandler(handler);
+  }
+
+  /**
    * Update the API key at runtime (e.g., from /key command).
    * Validates the key format and recreates the API client on success.
    * Returns an error message if validation fails, or null on success.

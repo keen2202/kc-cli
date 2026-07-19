@@ -1,6 +1,8 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { useTheme } from '../hooks/useTheme';
+import { useTerminalSize } from '../hooks/useTerminalSize';
+import { abbreviateModel, truncate, getBreakpoint } from '../layout';
 
 interface StatusBarProps {
   mode: 'idle' | 'streaming' | 'overlay' | 'steer';
@@ -27,20 +29,46 @@ const MODE_LABELS: Record<string, string> = {
 
 export function StatusBar({ mode, provider, model, turnCount, maxTurns, tokensUsed }: StatusBarProps) {
   const { tokens } = useTheme();
+  const { width } = useTerminalSize();
   const icon = MODE_ICONS[mode] || '○';
   const label = MODE_LABELS[mode] || mode;
 
   const progressFilled = Math.round((turnCount / Math.max(1, maxTurns)) * 10);
   const progressBar = '█'.repeat(progressFilled) + '░'.repeat(Math.max(0, 10 - progressFilled));
 
+  const modelLabel = abbreviateModel(model);
+  const tokenSuffix = tokensUsed !== undefined ? ` · ${tokensUsed} tokens` : '';
+  const plain = `${icon} ${label} ${provider}/${modelLabel} ${progressBar} ${turnCount}/${maxTurns}${tokenSuffix}`;
+  const avail = Math.max(0, width - 2);
+
+  // On the tiny breakpoint (<60 cols) drop the provider/model, progress bar and
+  // token count so the fixed single row shows only the essential mode + turns.
+  if (getBreakpoint(width).name === 'tiny') {
+    return (
+      <Box flexDirection="row" paddingLeft={1} paddingRight={1}>
+        <Text>{truncate(`${icon} ${label} ${turnCount}/${maxTurns}`, avail)}</Text>
+      </Box>
+    );
+  }
+
+  // Fixed single-row status bar (STATUS_BAR_HEIGHT=1). Clip on narrow widths so
+  // it never wraps and shifts the layout.
+  if (plain.length <= avail) {
+    return (
+      <Box flexDirection="row" paddingLeft={1} paddingRight={1}>
+        <Text>
+          {icon} {label}{' '}
+          {tokens['status.model'](`${provider}/${modelLabel}`)}{' '}
+          {progressBar} {turnCount}/{maxTurns}
+          {tokensUsed !== undefined ? ` · ${tokens['status.tokens'](`${tokensUsed} tokens`)}` : ''}
+        </Text>
+      </Box>
+    );
+  }
+
   return (
     <Box flexDirection="row" paddingLeft={1} paddingRight={1}>
-      <Text>
-        {icon} {label}{' '}
-        {tokens['status.model'](`${provider}/${model}`)}{' '}
-        {progressBar} {turnCount}/{maxTurns}
-        {tokensUsed !== undefined ? ` · ${tokens['status.tokens'](`${tokensUsed} tokens`)}` : ''}
-      </Text>
+      <Text>{truncate(plain, avail)}</Text>
     </Box>
   );
 }

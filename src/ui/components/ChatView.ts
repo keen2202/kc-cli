@@ -12,6 +12,11 @@ export interface ChatMessage {
   toolCalls?: ToolCallData[];
 }
 
+/**
+ * @deprecated Legacy string renderer. The live UI renders chat via the ink
+ * `ChatMessagesView` component; this remains only for the existing string-
+ * render unit tests and has no production callers. Do not use in new code.
+ */
 export function renderChatMessage(
   msg: ChatMessage,
   theme?: Theme,
@@ -52,6 +57,10 @@ export function renderChatMessage(
   return lines.join('\n');
 }
 
+/**
+ * @deprecated Legacy string renderer with no production callers (superseded by
+ * the ink `ChatMessagesView`). Retained only for existing unit tests.
+ */
 export function renderChatView(
   messages: ChatMessage[],
   theme?: Theme,

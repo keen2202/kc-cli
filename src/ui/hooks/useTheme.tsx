@@ -5,11 +5,18 @@ import {
   DEFAULT_THEME,
   type Theme,
   type ThemeTokens,
+  type ThemeColors,
 } from '../theme';
 
 interface ThemeContextValue {
   theme: Theme;
   tokens: ThemeTokens;
+  /**
+   * Raw hex color palette for the active theme. Use these for ink props that
+   * require string colors (`<Text color>`, `<Box borderColor>`), since
+   * `tokens` are chalk functions unsuitable for those props.
+   */
+  colors: ThemeColors;
   setTheme: (name: string) => void;
 }
 
@@ -21,6 +28,7 @@ export function ThemeProvider({ children, initialTheme }: { children: ReactNode;
   const value = useMemo<ThemeContextValue>(() => ({
     theme,
     tokens: theme.resolve(),
+    colors: theme.colors,
     setTheme: (name: string) => {
       const next = setGlobalTheme(name);
       setThemeState(next);

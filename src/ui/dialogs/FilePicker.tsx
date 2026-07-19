@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
+import { useTheme } from '../hooks/useTheme';
 
 interface FileItem {
   name: string;
@@ -14,6 +15,7 @@ interface FilePickerProps {
 }
 
 export function FilePicker({ files, onSelect, onCancel }: FilePickerProps) {
+  const { colors } = useTheme();
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const maxIndex = Math.max(0, Math.min(files.length, 20) - 1);
@@ -38,7 +40,7 @@ export function FilePicker({ files, onSelect, onCancel }: FilePickerProps) {
   });
 
   return (
-    <Box flexDirection="column" borderStyle="single" padding={1} width={50}>
+    <Box flexDirection="column" borderStyle="single" borderColor={colors.border} padding={1} width={50}>
       <Box marginBottom={1}>
         <Text bold>File Picker</Text>
         <Text dimColor> (Ctrl+F to close)</Text>
@@ -48,7 +50,7 @@ export function FilePicker({ files, onSelect, onCancel }: FilePickerProps) {
       ) : (
         files.slice(0, 20).map((file, i) => (
           <Box key={file.path} flexDirection="row">
-            <Text color={i === selectedIndex ? 'blue' : undefined}>
+            <Text color={i === selectedIndex ? colors.primary : undefined}>
               {i === selectedIndex ? '▶ ' : '  '}
               {file.isDirectory ? '📁 ' : '📄 '}
               {file.name}

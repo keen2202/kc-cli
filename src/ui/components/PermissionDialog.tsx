@@ -1,41 +1,68 @@
-// Permission confirmation dialog — ink component (T014)
-// Replaces the dead code path in App.ts / PermissionDialog.ts
-// Connected via OverlayHost in AppRoot
+// Permission confirmation dialog — ink component.
+// Rendered by AppRoot's overlay host when a tool requires interactive
+// authorization. When file diffs are attached, they are shown inline so the
+// user reviews the exact change before approving ("review → authorize").
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Box, Text, useInput } from 'ink';
+import { useTheme } from '../hooks/useTheme';
+import DiffPreview, { type FileDiff } from './DiffPreview';
+import type { FilePatchPreview } from '../../permissions/protocol';
 
 export type PermissionDecision = 'allow' | 'allow_always' | 'deny';
 
 export interface PermissionRequest {
   toolName: string;
   inputSummary?: string;
+  diffs?: FilePatchPreview[];
   onDecide: (decision: PermissionDecision) => void;
 }
 
 interface PermissionDialogProps {
   request: PermissionRequest;
-  onClose: () => void;
+  /** Optional close hook; the dialog always resolves onDecide first. */
+  onClose?: () => void;
 }
 
 export function PermissionDialog({ request, onClose }: PermissionDialogProps) {
+  const { colors } = useTheme();
+
+  // Every exit path resolves onDecide exactly once so the awaiting executor
+  // Promise can never deadlock — Esc / Q default to a safe 'deny'.
+  const decide = (decision: PermissionDecision) => {
+    request.onDecide(decision);
+    onClose?.();
+  };
+
   useInput((input, key) => {
     if (key.escape) {
-      onClose();
+      decide('deny');
       return;
     }
     switch (input.toLowerCase()) {
-      case 'y': request.onDecide('allow'); onClose(); break;
-      case 'a': request.onDecide('allow_always'); onClose(); break;
-      case 'n': request.onDecide('deny'); onClose(); break;
-      case 'q': onClose(); break;
+      case 'y': decide('allow'); break;
+      case 'a': decide('allow_always'); break;
+      case 'n':
+      case 'r': decide('deny'); break;
+      case 'q': decide('deny'); break;
     }
   });
 
+  const hasDiffs = !!request.diffs && request.diffs.length > 0;
+  const fileDiffs: FileDiff[] = hasDiffs
+    ? request.diffs!.map((d: FilePatchPreview) => ({
+        filePath: d.filePath,
+        oldContent: d.oldContent,
+        newContent: d.newContent,
+        accepted: false,
+        rejected: false,
+      }))
+    : [];
+
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="gray" padding={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor={colors.border} padding={1}>
       <Box>
-        <Text bold color="cyan">
+        <Text bold color={colors.primary}>
           Permission Required
         </Text>
       </Box>
@@ -45,20 +72,25 @@ export function PermissionDialog({ request, onClose }: PermissionDialogProps) {
       </Box>
       {request.inputSummary ? (
         <Box>
-          <Text dimColor>
+          <Text color={colors.muted}>
             {request.inputSummary.length > 60
               ? request.inputSummary.slice(0, 57) + '...'
               : request.inputSummary}
           </Text>
         </Box>
       ) : null}
-      <Box>
-        <Text color="green" bold>[Y]</Text>
-        <Text dimColor> Allow Once  </Text>
-        <Text color="cyan" bold>[A]</Text>
-        <Text dimColor> Allow Always  </Text>
-        <Text color="red" bold>[N]</Text>
-        <Text dimColor> Deny</Text>
+      {hasDiffs ? (
+        <Box marginTop={1}>
+          <DiffPreview diffs={fileDiffs} showActions={false} maxLines={20} />
+        </Box>
+      ) : null}
+      <Box marginTop={hasDiffs ? 1 : 0}>
+        <Text color={colors.success} bold>[Y]</Text>
+        <Text color={colors.muted}> {hasDiffs ? 'Accept' : 'Allow Once'}  </Text>
+        <Text color={colors.primary} bold>[A]</Text>
+        <Text color={colors.muted}> Allow Always  </Text>
+        <Text color={colors.error} bold>[N]</Text>
+        <Text color={colors.muted}> {hasDiffs ? 'Reject' : 'Deny'}</Text>
       </Box>
     </Box>
   );

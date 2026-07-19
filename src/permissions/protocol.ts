@@ -78,3 +78,33 @@ export interface PermissionContext {
   alwaysAllowRules: PermissionRule[];
   bypassPermissions: boolean;
 }
+
+// ── UI ↔ executor authorization bridge ──
+// These shared types let the interactive UI approve/deny 'ask' decisions
+// without introducing a circular dependency between the UI layer and the
+// executor/permission layer.
+
+/** A single file change preview surfaced to the user during authorization. */
+export interface FilePatchPreview {
+  filePath: string;
+  /** Original file content, or null for new files. */
+  oldContent: string | null;
+  newContent: string;
+}
+
+/** A request handed to the UI when a tool needs interactive authorization. */
+export interface UIPermissionRequest {
+  toolName: string;
+  /** Human-readable one-line summary of the tool input. */
+  inputSummary?: string;
+  /** Pending file changes, when the tool writes/edits files. */
+  diffs?: FilePatchPreview[];
+}
+
+/** The user's decision for a {@link UIPermissionRequest}. */
+export type UIPermissionDecision = 'allow' | 'allow_always' | 'deny';
+
+/** Handler the UI registers to resolve interactive authorization requests. */
+export type UIPermissionRequestHandler = (
+  req: UIPermissionRequest,
+) => Promise<UIPermissionDecision>;

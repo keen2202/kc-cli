@@ -80,8 +80,9 @@ export function createDefaultKeybindings(): KeybindingManager {
 
   const defaults: Keybinding[] = [
     { key: 'ctrl+k', command: 'palette', description: 'Open command palette' },
-    { key: 'ctrl+o', command: 'modelSelector', description: 'Open model selector' },
-    { key: 'ctrl+s', command: 'sessionSwitcher', description: 'Switch session' },
+    // modelSelector (ctrl+o) / sessionSwitcher (ctrl+s) removed: no backing UI
+    // exists, so advertising them would be a broken promise. Enter such flows
+    // via the command palette instead once implemented.
     { key: 'ctrl+n', command: 'newSession', description: 'New session' },
     { key: 'ctrl+e', command: 'externalEditor', when: 'input', description: 'Open external editor' },
     { key: 'ctrl+f', command: 'filePicker', when: 'input', description: 'File picker' },

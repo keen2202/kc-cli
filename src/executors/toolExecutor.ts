@@ -2,13 +2,20 @@
 
 import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import * as os from 'node:os';
+import * as path from 'node:path';
 import type { ToolCall, ToolResult } from '../query/protocol';
 import type { ToolDefinition, ToolUseContext } from '../tools/protocol';
-import type { PermissionResult } from '../permissions/protocol';
+import type {
+  PermissionResult,
+  UIPermissionRequest,
+  UIPermissionRequestHandler,
+  FilePatchPreview,
+} from '../permissions/protocol';
 import type { ToolExecutionState } from '../state/types';
 import type { PluginHooks } from '../plugins/types';
 import { hasPermissionsToUseTool } from '../permissions/engine';
 import { isReadOnlyBashCommand } from '../permissions/readonlyCommands';
+import { getState } from '../bootstrap/state';
 import type { AgentToolRestriction } from '../orchestrator/protocol';
 import { SandboxManager } from '../services/sandbox';
 import { mergeSandboxPolicy } from '../services/sandbox-policy';
@@ -136,6 +143,10 @@ export class ToolExecutor {
   private toolBlockCheck: ((toolName: string) => string | null) | null = null;
   // Agent-specific tool restrictions (e.g., read-only Bash for researcher)
   private agentToolRestrictions: AgentToolRestriction[] = [];
+  // Optional interactive authorization handler (set by the UI). When present,
+  // 'ask' permission decisions are routed to the user instead of silently
+  // proceeding. In non-interactive (CLI) contexts this stays null.
+  private permissionRequestHandler: UIPermissionRequestHandler | null = null;
 
   constructor(
     tools: ToolDefinition[],
@@ -277,6 +288,35 @@ export class ToolExecutor {
           output: `Permission denied: ${permissionResult.message}`,
           isError: true,
         };
+      }
+
+      // 3a. Interactive authorization for 'ask' decisions.
+      // Without a registered UI handler we preserve legacy behavior (proceed),
+      // so non-interactive/CLI runs do not regress. When a handler is present
+      // the user explicitly approves or denies each 'ask'.
+      if (permissionResult.behavior === 'ask' && this.permissionRequestHandler) {
+        const isEditTool = toolCall.toolName === 'FileWrite' || toolCall.toolName === 'FileEdit';
+        // acceptEdits mode approves file writes/edits without prompting.
+        const autoAcceptEdits = isEditTool && this.getPermissionMode() === 'acceptEdits';
+        if (!autoAcceptEdits) {
+          const request: UIPermissionRequest = {
+            toolName: toolCall.toolName,
+            inputSummary: permissionResult.message,
+            diffs: await this.buildDiffPreview(toolCall.toolName, effectiveInput),
+          };
+          const decision = await this.permissionRequestHandler(request);
+          if (decision === 'deny') {
+            return {
+              toolCallId: toolCall.id,
+              output: `Permission denied by user: ${toolCall.toolName}`,
+              isError: true,
+            };
+          }
+          if (decision === 'allow_always') {
+            this.addSessionAllowRule(toolCall.toolName);
+          }
+          // 'allow' / 'allow_always' fall through to execution.
+        }
       }
 
       // 3b. Check sandbox requirement for command-based tools
@@ -647,6 +687,89 @@ export class ToolExecutor {
    */
   setToolBlockCheck(check: ((toolName: string) => string | null) | null): void {
     this.toolBlockCheck = check;
+  }
+
+  /**
+   * Register an interactive authorization handler. When set, tool 'ask'
+   * decisions are routed to this handler (the UI) which resolves with the
+   * user's decision. Pass null to detach (e.g., on UI teardown).
+   */
+  setPermissionRequestHandler(handler: UIPermissionRequestHandler | null): void {
+    this.permissionRequestHandler = handler;
+  }
+
+  /** Current permission mode from global state (defaults to 'default'). */
+  private getPermissionMode(): string {
+    try {
+      return getState().permissionMode;
+    } catch {
+      return 'default';
+    }
+  }
+
+  /**
+   * Add a session-scoped allow rule for a tool so subsequent calls to the same
+   * tool are auto-approved by the permission engine (Step 5 allow-rule match).
+   */
+  private addSessionAllowRule(toolName: string): void {
+    if (!this.permissionConfig) this.permissionConfig = {};
+    if (!this.permissionConfig.alwaysAllowRules) this.permissionConfig.alwaysAllowRules = [];
+    if (!this.permissionConfig.alwaysAllowRules.includes(toolName)) {
+      this.permissionConfig.alwaysAllowRules.push(toolName);
+    }
+  }
+
+  /**
+   * Build a diff preview for write-capable tools (FileWrite/FileEdit) so the
+   * authorization dialog can show the user exactly what will change. Returns
+   * undefined for tools that do not produce a file diff, or on read failure.
+   */
+  private async buildDiffPreview(
+    toolName: string,
+    input: Record<string, unknown>,
+  ): Promise<FilePatchPreview[] | undefined> {
+    try {
+      const fs = this.executionEnv.fs;
+      if (toolName === 'FileWrite') {
+        const rel = input.path as string;
+        if (!rel) return undefined;
+        const filePath = path.resolve(this.cwd, rel);
+        const exists = await fs.exists(filePath);
+        const existing = exists ? await fs.readFile(filePath, 'utf-8') : null;
+        const append = input.append === true;
+        const content = String(input.content ?? '');
+        return [{
+          filePath: rel,
+          oldContent: existing,
+          newContent: append ? (existing ?? '') + content : content,
+        }];
+      }
+      if (toolName === 'FileEdit') {
+        const rel = input.file_path as string;
+        if (!rel) return undefined;
+        const filePath = path.resolve(this.cwd, rel);
+        if (!(await fs.exists(filePath))) return undefined;
+        const oldContent = await fs.readFile(filePath, 'utf-8');
+        const edits = (input.edits as Array<{
+          old_string: string;
+          new_string: string;
+          replace_all?: boolean;
+        }>) || [];
+        let newContent = oldContent;
+        for (const edit of edits) {
+          if (edit.replace_all) {
+            newContent = newContent.split(edit.old_string).join(edit.new_string);
+          } else if (newContent.includes(edit.old_string)) {
+            newContent = newContent.replace(edit.old_string, edit.new_string);
+          }
+        }
+        return [{ filePath: rel, oldContent, newContent }];
+      }
+      return undefined;
+    } catch {
+      // Best-effort preview: never block authorization on a read error.
+      return undefined;
+    }
   }
 
   /**
