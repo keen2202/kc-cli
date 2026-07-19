@@ -975,12 +975,18 @@ export class QueryEngine {
         yield this.createToolCompletedEvent(toolCall, result as ToolResult);
       }
 
-      // Add tool result as message
+      // Add tool result as message. Always preserve toolCallId so the tool
+      // message can be paired with the originating assistant tool_call — an
+      // Error result would otherwise drop it and break the OpenAI contract.
       const toolResultMsg: ChatMessage = {
         id: uuidv4(),
         role: 'tool',
         content: result instanceof Error ? result.message : (result as ToolResult).output,
-        toolResults: [result instanceof Error ? { output: result.message, isError: true } : result as ToolResult],
+        toolResults: [
+          result instanceof Error
+            ? { toolCallId, output: result.message, isError: true }
+            : (result as ToolResult),
+        ],
         timestamp: Date.now(),
       };
       this.conversation.addMessage(toolResultMsg);
@@ -1120,9 +1126,49 @@ export class QueryEngine {
   private buildApiMessages(): ChatMessage[] {
     const messages = this.conversation.getMessagesCopy();
     const systemMsg = messages.find(m => m.role === 'system');
-    const userMsgs = messages.filter(m => m.role !== 'system');
+    const nonSystem = messages.filter(m => m.role !== 'system');
 
-    return systemMsg ? [systemMsg, ...userMsgs] : userMsgs;
+    // Defensive pairing: the OpenAI contract requires every assistant
+    // tool_call id to be answered by a following tool message with the same
+    // tool_call_id. If any id is unanswered (e.g. a tool crashed before
+    // producing a result), synthesize a placeholder tool message so the API
+    // does not reject the request with HTTP 400.
+    const repaired: ChatMessage[] = [];
+    for (let i = 0; i < nonSystem.length; i++) {
+      const msg = nonSystem[i];
+      repaired.push(msg);
+
+      if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+        // Consume the immediately-following tool messages and record which
+        // tool_call ids they answer.
+        const answered = new Set<string>();
+        let j = i + 1;
+        while (j < nonSystem.length && nonSystem[j].role === 'tool') {
+          for (const tr of nonSystem[j].toolResults || []) {
+            if (tr.toolCallId) answered.add(tr.toolCallId);
+          }
+          repaired.push(nonSystem[j]);
+          j++;
+        }
+
+        // Synthesize placeholders for any unanswered tool_call ids.
+        for (const tc of msg.toolCalls) {
+          if (!answered.has(tc.id)) {
+            repaired.push({
+              id: uuidv4(),
+              role: 'tool',
+              content: 'Tool execution did not produce a result.',
+              toolResults: [{ toolCallId: tc.id, output: 'Tool execution did not produce a result.', isError: true }],
+              timestamp: Date.now(),
+            } as ChatMessage);
+          }
+        }
+
+        i = j - 1; // Skip the tool messages already appended above.
+      }
+    }
+
+    return systemMsg ? [systemMsg, ...repaired] : repaired;
   }
 
   private createToolContext(): ToolUseContext {

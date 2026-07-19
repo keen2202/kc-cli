@@ -149,6 +149,14 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
         case 'error': {
           const errorMsg = ev.error?.message || 'Unknown error';
           setErrors((prev) => [...prev, errorMsg]);
+          // A stream error means the turn will never emit turn_complete, so we
+          // must clear the streaming flag here — otherwise isStreaming stays
+          // true forever and AppRoot's useInput guard swallows all subsequent
+          // input (user can't type a second message).
+          currentAssistantIdRef.current = null;
+          currentThinkingChainRef.current = null;
+          setIsStreaming(false);
+          syncRender();
           break;
         }
       }
