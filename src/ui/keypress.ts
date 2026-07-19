@@ -63,7 +63,7 @@ export function parseKeypress(chunk: string): KeypressEvent {
 }
 
 /** Returns true when every code point in `s` is a printable (non-control) character. */
-function isPrintableUnicode(s: string): boolean {
+export function isPrintableUnicode(s: string): boolean {
   if (!s) return false;
   for (const cp of s) {
     const code = cp.codePointAt(0)!;

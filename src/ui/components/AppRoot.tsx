@@ -11,6 +11,8 @@ import { Editor, openExternalEditor } from './Editor';
 import { StatusBar } from './StatusBarView.js';
 import { UIEventBus } from '../event-bus';
 import { createDefaultKeybindings } from '../keybinding-manager';
+import { isPrintableUnicode } from '../keypress';
+import { normalizeSlashCommand } from './slash-commands';
 import {
   createInputState,
   insertChar,
@@ -180,7 +182,7 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
   // Slash command handler
   const handleSlashCommand = useCallback(async (command: string) => {
     const parts = command.split(' ');
-    const cmd = parts[0]!.toLowerCase();
+    const cmd = normalizeSlashCommand(parts[0]!.toLowerCase());
 
     const addSystemMsg = (content: string) => {
       addMessage({
@@ -276,7 +278,7 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
         break;
 
       default:
-        addSystemMsg(`Unknown command: ${cmd}. Type /help for commands.`);
+        addSystemMsg(`Unknown command: ${cmd}. Type /help to see the list of available commands.`);
     }
   }, [queryEngine, addMessage, setMessages]);
 
@@ -489,8 +491,9 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
       return;
     }
 
-    // Printable character
-    if (input.length === 1 && !key.ctrl && !key.meta) {
+    // Printable character (single char or multi-character IME-composed text,
+    // e.g. a committed Chinese phrase like "你好"). Reject control characters.
+    if (!key.ctrl && !key.meta && isPrintableUnicode(input)) {
       setInputState((prev) => insertChar(prev, input));
     }
   });
@@ -510,6 +513,7 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
         <ChatPanel
           messages={messages}
           thinkingChains={thinkingChains}
+          isModalOpen={showExitConfirm}
         />
       }
       editor={

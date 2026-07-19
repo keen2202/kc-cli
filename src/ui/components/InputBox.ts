@@ -74,9 +74,11 @@ function lineEndOffset(text: string, line: number): number {
 
 export function insertChar(state: InputState, char: string): InputState {
   const text = state.text.slice(0, state.cursorPos) + char + state.text.slice(state.cursorPos);
-  // Advance cursor by code-point count so that multi-character IME input
-  // (e.g. "你好") moves the cursor to the correct position.
-  return { ...state, text, cursorPos: state.cursorPos + [...char].length };
+  // Advance cursor by UTF-16 code-unit count to stay consistent with the
+  // code-unit-based slicing used everywhere else (deleteBefore, moveCursor*,
+  // Editor.tsx). This keeps multi-character IME input (e.g. "你好") and astral
+  // characters (e.g. emoji) aligned with how the text is indexed.
+  return { ...state, text, cursorPos: state.cursorPos + char.length };
 }
 
 export function deleteBefore(state: InputState): InputState {

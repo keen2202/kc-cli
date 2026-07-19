@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseKeypress, isOverlayKey, type KeypressEvent } from '../../src/ui/keypress';
+import { parseKeypress, isOverlayKey, isPrintableUnicode, type KeypressEvent } from '../../src/ui/keypress';
 
 describe('keypress — parseKeypress', () => {
   it('parses up arrow escape sequence', () => {
@@ -144,5 +144,39 @@ describe('keypress — isOverlayKey', () => {
 
   it('returns false for right arrow', () => {
     expect(isOverlayKey({ name: 'right', ctrl: false, meta: false })).toBe(false);
+  });
+});
+
+describe('keypress — isPrintableUnicode', () => {
+  it('returns true for a single ASCII character', () => {
+    expect(isPrintableUnicode('a')).toBe(true);
+  });
+
+  it('returns true for a multi-character Chinese phrase', () => {
+    expect(isPrintableUnicode('你好')).toBe(true);
+    expect(isPrintableUnicode('你好世界')).toBe(true);
+  });
+
+  it('returns true for a single Chinese character', () => {
+    expect(isPrintableUnicode('中')).toBe(true);
+  });
+
+  it('returns true for astral characters (emoji)', () => {
+    expect(isPrintableUnicode('😀')).toBe(true);
+  });
+
+  it('returns false for an empty string', () => {
+    expect(isPrintableUnicode('')).toBe(false);
+  });
+
+  it('returns false for control characters', () => {
+    expect(isPrintableUnicode('\x00')).toBe(false);
+    expect(isPrintableUnicode('\r')).toBe(false);
+    expect(isPrintableUnicode('\x1B')).toBe(false);
+    expect(isPrintableUnicode('\x7f')).toBe(false);
+  });
+
+  it('returns false when any code point is a control character', () => {
+    expect(isPrintableUnicode('a\x00b')).toBe(false);
   });
 });

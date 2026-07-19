@@ -58,9 +58,10 @@ export function ChatMessageView({ message, thinkingChain }: ChatMessageViewProps
 interface ChatViewProps {
   messages: ChatMessage[];
   thinkingChains?: Map<string, ThinkingChain>;
+  isModalOpen?: boolean;
 }
 
-export function ChatView({ messages, thinkingChains }: ChatViewProps) {
+export function ChatView({ messages, thinkingChains, isModalOpen }: ChatViewProps) {
   const {
     start,
     end,
@@ -88,6 +89,9 @@ export function ChatView({ messages, thinkingChains }: ChatViewProps) {
 
   // Handle arrow keys for scrolling through messages
   useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean }) => {
+    // When a modal/overlay is open, focus belongs to it: don't scroll the
+    // background chat behind the dialog.
+    if (isModalOpen) return;
     if (key.upArrow) {
       scrollUp();
     }

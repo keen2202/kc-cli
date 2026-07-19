@@ -7,9 +7,10 @@ import type { ThinkingChain } from './ThinkingChainView';
 interface ChatPanelProps {
   messages: ChatMessage[];
   thinkingChains?: Map<string, ThinkingChain>;
+  isModalOpen?: boolean;
 }
 
-export function ChatPanel({ messages, thinkingChains }: ChatPanelProps) {
+export function ChatPanel({ messages, thinkingChains, isModalOpen }: ChatPanelProps) {
   if (messages.length === 0) {
     return (
       <Box padding={1} flexDirection="column">
@@ -20,7 +21,7 @@ export function ChatPanel({ messages, thinkingChains }: ChatPanelProps) {
 
   return (
     <Box padding={1} flexDirection="column">
-      <ChatView messages={messages} thinkingChains={thinkingChains} />
+      <ChatView messages={messages} thinkingChains={thinkingChains} isModalOpen={isModalOpen} />
     </Box>
   );
 }

@@ -89,6 +89,39 @@ describe('InputBox — mutations', () => {
     expect(line).toBe(1);
     expect(col).toBe(1);
   });
+
+  it('insertChar inserts a multi-character IME phrase (Chinese)', () => {
+    let state = createInputState();
+    state = insertChar(state, '你好');
+    expect(state.text).toBe('你好');
+    // cursor advances by code-unit count (BMP CJK => 2)
+    expect(state.cursorPos).toBe(2);
+  });
+
+  it('insertChar keeps cursorPos aligned with text length for astral chars', () => {
+    let state = createInputState();
+    state = insertChar(state, '😀'); // emoji (surrogate pair, length 2)
+    expect(state.cursorPos).toBe(state.text.length);
+    expect(state.cursorPos).toBe(2);
+  });
+
+  it('deleteBefore removes a single Chinese character correctly', () => {
+    let state = createInputState();
+    state = insertChar(state, '你好');
+    state = deleteBefore(state);
+    expect(state.text).toBe('你');
+    expect(state.cursorPos).toBe(1);
+  });
+
+  it('moveCursorLeft/Right navigate over Chinese text', () => {
+    let state = createInputState();
+    state = insertChar(state, '你好');
+    state = moveCursorLeft(state);
+    expect(state.cursorPos).toBe(1);
+    state = insertChar(state, '好'); // insert between the two chars
+    expect(state.text).toBe('你好好');
+    expect(state.cursorPos).toBe(2);
+  });
 });
 
 describe('InputBox — renderInputBox', () => {
