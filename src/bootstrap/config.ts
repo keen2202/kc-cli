@@ -74,7 +74,7 @@ export const ConfigSchema = z.object({
     maxMemoryMb: z.number().default(512),
     cpuTimeLimitSec: z.number().default(60),
     /** If true, throw an error instead of silently falling back to noop sandbox */
-    failIfNoSandbox: z.boolean().default(false),
+    failIfNoSandbox: z.boolean().default(true),
     /** Default enforcement level for tools not explicitly configured */
     defaultEnforcement: z.enum(['required', 'preferred', 'optional', 'excluded', 'inherit']).default('preferred'),
     /** Per-tool sandbox policy overrides keyed by tool name */

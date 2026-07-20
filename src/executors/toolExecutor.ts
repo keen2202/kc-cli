@@ -163,6 +163,7 @@ export class ToolExecutor {
       allowNetwork?: boolean;
       maxMemoryMb?: number;
       cpuTimeLimitSec?: number;
+      failIfNoSandbox?: boolean;
       policy?: Parameters<typeof mergeSandboxPolicy>[0];
     },
     concurrencyOptions?: {
@@ -191,6 +192,7 @@ export class ToolExecutor {
       allowNetwork: sandboxOptions?.allowNetwork ?? false,
       maxMemoryMb: sandboxOptions?.maxMemoryMb ?? 512,
       cpuTimeLimitSec: sandboxOptions?.cpuTimeLimitSec ?? 60,
+      failIfNoSandbox: sandboxOptions?.failIfNoSandbox ?? true,
       policy,
     });
   }

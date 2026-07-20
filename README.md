@@ -5,7 +5,7 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 ## v3.2 Highlights
 
 - 🧬 **Autogenesis Protocol (AGP)**: Self-evolving multi-agent system with SEPL pipeline (reflect→select→improve→evaluate→commit), version management, and audit logging
-- 🔒 **Sandbox Security**: Shell commands run in isolated sandboxes (Docker/Bubblewrap/seccomp) when a backend is available, with network isolation, resource limits, and escape detection. If no backend is available, a loud `NO ISOLATION` warning is emitted and commands run on the host; set `sandbox.failIfNoSandbox` to hard-fail instead.
+- 🔒 **Sandbox Security**: Shell commands run in isolated sandboxes (Docker/Bubblewrap/seccomp) with network isolation, resource limits, and escape detection. **Hard-fails by default** if no sandbox backend is available — set `KC_SANDBOX_FAIL_IF_NO_SANDBOX=false` to opt out (NOT recommended for production). macOS requires Docker Desktop; Linux needs only `apt install bubblewrap`.
 - 🎨 **Redesigned UI**: Sidebar with file tree (LSP markers), diff preview, command palette, model selector, theme system, mouse support, multi-panel layout
 - 🔌 **LSP Integration**: Code completions, diagnostics, go-to-definition, find references, rename, quick fixes for 9 languages
 - 🧠 **Smart Model Adaptation**: Provider-specific prompts, dynamic parameter tuning, tiktoken-based token estimation
@@ -48,6 +48,11 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 - Node.js 20 or higher
 - npm or yarn
 - API key for your chosen LLM provider
+- **Sandbox backend** (default: hard-fail without one):
+  - **Linux**: `sudo apt install bubblewrap`
+  - **macOS**: Docker Desktop (`brew install --cask docker`)
+  - **Windows**: Docker Desktop (`winget install Docker.DockerDesktop`)
+  - Or opt out with `KC_SANDBOX_FAIL_IF_NO_SANDBOX=false` (NOT for production)
 
 ### Installation
 
@@ -84,6 +89,10 @@ export KC_PROVIDER=glm
 # Ollama (local)
 export KC_PROVIDER=ollama
 export KC_API_BASE_URL=http://localhost:11434
+
+# Sandbox (required by default)
+export KC_SANDBOX_BACKEND=bubblewrap   # Linux: bubblewrap | macOS: docker
+export KC_SANDBOX_FAIL_IF_NO_SANDBOX=true  # Set false to skip sandbox (dev only)
 ```
 
 See `.env.example` for all available environment variables.

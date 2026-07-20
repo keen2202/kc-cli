@@ -95,11 +95,39 @@ Isolation guarantees vary significantly by platform:
 
 | Platform | Available Backends | Isolation Strength | Notes |
 |----------|-------------------|-------------------|-------|
-| **Linux** | bubblewrap, seccomp, Docker | **Strong** | Namespace isolation (PID, IPC, network, mount), syscall filtering, resource limits, capabilities dropping |
-| **macOS** | noop (fallback) | **None** | No native sandbox backend available. Commands run on host with `NO ISOLATION` warning. Set `sandbox.failIfNoSandbox` to hard-fail. |
-| **Windows** | windows-sandbox (job objects) | **Partial** | Process-level isolation via `CreateJobObject` with resource limits. No filesystem isolation, no network isolation, no syscall filtering. Less comprehensive than Linux backends. |
+| **Linux** | bubblewrap, seccomp, Docker | **Strong** | Namespace isolation (PID, IPC, network, mount), syscall filtering, resource limits, capabilities dropping. Native, no extra dependencies beyond `apt install bubblewrap`. |
+| **macOS** | Docker only | **Container** | Requires Docker Desktop. Set `KC_SANDBOX_BACKEND=docker`. Without Docker, the process will **hard-fail on startup** (since `failIfNoSandbox` defaults to `true`). To develop without a sandbox, explicitly opt out: `KC_SANDBOX_FAIL_IF_NO_SANDBOX=false`. |
+| **Windows** | Docker, windows-sandbox (job objects) | **Container / Partial** | Docker Desktop recommended for strong isolation. The native `windows-sandbox` backend provides process-level isolation via `CreateJobObject` with resource limits but no filesystem or network isolation. |
 
-**Recommendation**: Use Linux for production and security-sensitive workloads. macOS is suitable for development with `failIfNoSandbox: false`. Windows provides basic resource limiting but weaker overall isolation than Linux.
+### Platform Setup
+
+**Linux** (recommended for production):
+```bash
+sudo apt install bubblewrap
+# Ready — no further configuration needed
+```
+
+**macOS**:
+```bash
+# Required: Docker Desktop
+brew install --cask docker
+# Then configure:
+export KC_SANDBOX_BACKEND=docker
+# Or if developing without a sandbox (NOT for production):
+export KC_SANDBOX_FAIL_IF_NO_SANDBOX=false
+```
+
+**Windows**:
+```bash
+# Option A: Docker Desktop (recommended)
+winget install Docker.DockerDesktop
+export KC_SANDBOX_BACKEND=docker
+
+# Option B: Native job objects (partial isolation)
+# Enabled automatically, no extra setup
+```
+
+**Recommendation**: Use Linux for production and security-sensitive workloads. Docker Desktop provides adequate isolation on macOS/Windows for development. Never set `failIfNoSandbox=false` when processing untrusted input.
 
 ## Per-Tool Policies
 

@@ -89,6 +89,9 @@ export interface QueryEngineConfig {
 
   /** Patch guarantee configuration (Area 2) */
   patchGuarantee?: PatchGuaranteeConfig;
+
+  /** Sandbox failIfNoSandbox — passed through to SandboxManager */
+  sandboxFailIfNoSandbox?: boolean;
 }
 
 /**
@@ -190,6 +193,8 @@ export class QueryEngine {
       alwaysDenyRules: rules.deny || [],
       alwaysAskRules: rules.ask || [],
       alwaysAllowRules: rules.allow || [],
+    }, undefined, {
+      failIfNoSandbox: config.sandboxFailIfNoSandbox,
     });
 
     // Initialize user profile (level-based adaptation)

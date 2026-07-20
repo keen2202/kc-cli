@@ -373,6 +373,7 @@ export class Bootstrap {
               maxTurns: getState().maxTurns || config.maxTurns || 80,
               maxBudgetUsd: getState().maxBudgetUsd,
               systemPrompt: buildSystemPrompt(sessionTools),
+              sandboxFailIfNoSandbox: config.sandbox?.failIfNoSandbox,
               permissionRules: {
                 deny: config.permissions.deny,
                 ask: config.permissions.ask,
@@ -425,6 +426,7 @@ export class Bootstrap {
         systemPrompt,
         autoExtendTurns: autoExtend,
         maxTurnsCeiling,
+        sandboxFailIfNoSandbox: config.sandbox?.failIfNoSandbox,
         permissionRules: {
           deny: config.permissions.deny,
           ask: config.permissions.ask,
