@@ -20,6 +20,9 @@ export const SLASH_COMMAND_ALIASES: Record<string, string> = {
   '/状态': '/status',
   '/级别': '/level',
   '/退出': '/exit',
+  '/自动': '/auto',
+  '/目标': '/goal',
+  '/交互': '/interactive',
 };
 
 /**

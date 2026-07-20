@@ -18,6 +18,12 @@ describe('normalizeSlashCommand', () => {
     expect(normalizeSlashCommand('/密钥')).toBe('/key');
   });
 
+  it('maps the execution-mode aliases', () => {
+    expect(normalizeSlashCommand('/自动')).toBe('/auto');
+    expect(normalizeSlashCommand('/目标')).toBe('/goal');
+    expect(normalizeSlashCommand('/交互')).toBe('/interactive');
+  });
+
   it('returns English commands unchanged', () => {
     expect(normalizeSlashCommand('/help')).toBe('/help');
     expect(normalizeSlashCommand('/clear')).toBe('/clear');

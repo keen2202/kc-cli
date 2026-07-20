@@ -93,6 +93,7 @@ export function createDefaultKeybindings(): KeybindingManager {
     { key: 'ctrl+c', command: 'quit', when: 'idle', description: 'Quit kc-cli' },
     { key: 'ctrl+d', command: 'exit', when: 'idle', description: 'Exit (empty input)' },
     { key: 'ctrl+t', command: 'toggleSidebar', description: 'Toggle sidebar' },
+    { key: 'ctrl+g', command: 'cycleExecutionMode', description: 'Cycle execution mode (interactive/auto/goal)' },
     { key: 'ctrl+shift+t', command: 'toggleThinking', description: 'Toggle thinking chain' },
     { key: 'escape', command: 'closeOverlay', when: 'overlay', description: 'Close overlay' },
     { key: 'escape', command: 'cancelMode', when: 'delete-mode', description: 'Exit delete mode' },

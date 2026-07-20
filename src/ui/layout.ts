@@ -66,6 +66,8 @@ export interface OpenCodeLayout {
   headerVisible: boolean;
   contentHeight: number;
   errorBarHeight: number;
+  /** Reserved rows for the operation-summary strip above the editor (0 when hidden). */
+  operationHeight: number;
   /** Active breakpoint name so consumers can degrade UI density. */
   breakpoint: BreakpointName;
   /** Active density derived from the breakpoint. */
@@ -75,6 +77,8 @@ export interface OpenCodeLayout {
 export interface LayoutOptions {
   /** When true, reserve vertical space for the error banner above the editor. */
   errorVisible?: boolean;
+  /** When true, reserve vertical space for the operation-summary strip. */
+  operationVisible?: boolean;
 }
 
 // Right panel: narrower on the standard breakpoint (80-119 cols) so the chat
@@ -88,6 +92,13 @@ const HEADER_HEIGHT = 1;
 const STATUS_BAR_HEIGHT = 1;
 // Error banner: border (2) + content (1) + marginBottom (1)
 const ERROR_BAR_HEIGHT = 4;
+// Operation summary strip. Sized to the tallest content it can render so it
+// never overflows the fixed-height slot and shifts the layout:
+//   normal  = border(2) + title + op-name + steps + expected + confirm = 7
+//   compact = border(2) + title + op-name + confirm                    = 5
+// (compact hides the steps/expected detail lines.)
+const OPERATION_HEIGHT = 7;
+const OPERATION_HEIGHT_COMPACT = 5;
 // Minimum chat rows to keep visible; the editor is shrunk (below its nominal
 // minimum if necessary) before the chat content is squeezed on short terminals.
 const MIN_CONTENT_HEIGHT = 6;
@@ -112,7 +123,16 @@ export function computeOpenCodeLayout(
 
   // Vertical space available for the main content row (between header and status bar).
   const available = Math.max(0, height - headerHeight - statusBarHeight);
-  const usable = Math.max(0, available - errorBarHeight);
+
+  // Operation strip nominal height, then clamped so it never pushes the
+  // essential editor(1) + content(1) rows (and the error bar) off a short
+  // terminal — mirroring how the editor is shrunk below its minimum.
+  let operationHeight = options.operationVisible
+    ? (bp.density === 'compact' ? OPERATION_HEIGHT_COMPACT : OPERATION_HEIGHT)
+    : 0;
+  operationHeight = Math.min(operationHeight, Math.max(0, available - errorBarHeight - 2));
+
+  const usable = Math.max(0, available - errorBarHeight - operationHeight);
 
   // Editor grows with the terminal but is capped. To protect a minimum chat
   // area, the editor is shrunk (even below EDITOR_MIN_HEIGHT) so the content
@@ -131,7 +151,7 @@ export function computeOpenCodeLayout(
 
   // The right column spans the same height as the main content row. SessionInfo
   // shrinks so it never exceeds that row height on short terminals.
-  const rowHeight = contentHeight + editorHeight + errorBarHeight;
+  const rowHeight = contentHeight + editorHeight + errorBarHeight + operationHeight;
   const sessionInfoHeight = sidebarVisible
     ? Math.min(SESSION_INFO_HEIGHT, Math.max(0, rowHeight - 1))
     : 0;
@@ -148,6 +168,7 @@ export function computeOpenCodeLayout(
     headerVisible,
     contentHeight,
     errorBarHeight,
+    operationHeight,
     breakpoint: bp.name,
     density: bp.density,
   };

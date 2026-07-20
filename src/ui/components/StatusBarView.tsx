@@ -11,6 +11,10 @@ interface StatusBarProps {
   turnCount: number;
   maxTurns: number;
   tokensUsed?: number;
+  /** Name of the tool currently running, shown as `· running: <name>`. */
+  currentOperation?: string;
+  /** Overall progress 0-100 (turn-based normally, iteration-based in goal mode). */
+  progressPercent?: number;
 }
 
 const MODE_ICONS: Record<string, string> = {
@@ -27,7 +31,7 @@ const MODE_LABELS: Record<string, string> = {
   steer: 'steer',
 };
 
-export function StatusBar({ mode, provider, model, turnCount, maxTurns, tokensUsed }: StatusBarProps) {
+export function StatusBar({ mode, provider, model, turnCount, maxTurns, tokensUsed, currentOperation, progressPercent }: StatusBarProps) {
   const { tokens } = useTheme();
   const { width } = useTerminalSize();
   const icon = MODE_ICONS[mode] || '○';
@@ -38,7 +42,11 @@ export function StatusBar({ mode, provider, model, turnCount, maxTurns, tokensUs
 
   const modelLabel = abbreviateModel(model);
   const tokenSuffix = tokensUsed !== undefined ? ` · ${tokensUsed} tokens` : '';
-  const plain = `${icon} ${label} ${provider}/${modelLabel} ${progressBar} ${turnCount}/${maxTurns}${tokenSuffix}`;
+  // Live operation + progress percent are the lowest-priority segments: they
+  // are appended after the essentials and dropped first when width is tight.
+  const pct = progressPercent !== undefined ? ` ${Math.round(progressPercent)}%` : '';
+  const opSuffix = currentOperation ? ` · running: ${currentOperation}` : '';
+  const plain = `${icon} ${label} ${provider}/${modelLabel} ${progressBar} ${turnCount}/${maxTurns}${pct}${opSuffix}${tokenSuffix}`;
   const avail = Math.max(0, width - 2);
 
   // On the tiny breakpoint (<60 cols) drop the provider/model, progress bar and
@@ -59,7 +67,8 @@ export function StatusBar({ mode, provider, model, turnCount, maxTurns, tokensUs
         <Text>
           {icon} {label}{' '}
           {tokens['status.model'](`${provider}/${modelLabel}`)}{' '}
-          {progressBar} {turnCount}/{maxTurns}
+          {progressBar} {turnCount}/{maxTurns}{pct}
+          {currentOperation ? ` · running: ${currentOperation}` : ''}
           {tokensUsed !== undefined ? ` · ${tokens['status.tokens'](`${tokensUsed} tokens`)}` : ''}
         </Text>
       </Box>

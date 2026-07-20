@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { formatDuration } from '../format-duration';
 
 interface SessionInfoProps {
   sessionId?: string;
@@ -14,13 +15,6 @@ export function SessionInfo({
   tokensMax = 200000,
   duration = 0,
 }: SessionInfoProps) {
-  const formatDuration = (ms: number) => {
-    const s = Math.floor(ms / 1000);
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m}:${sec.toString().padStart(2, '0')}`;
-  };
-
   const formatTokens = (n: number) => {
     if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
     return String(n);

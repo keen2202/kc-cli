@@ -44,8 +44,34 @@ describe('computeOpenCodeLayout', () => {
           l.statusBarHeight;
         expect(total).toBeLessThanOrEqual(height);
       });
+
+      it(`reserves operation-summary space within ${width}x${height}`, () => {
+        const l = computeOpenCodeLayout(width, height, { operationVisible: true });
+        expect(l.operationHeight).toBeGreaterThan(0);
+        expect(l.contentHeight).toBeGreaterThanOrEqual(1);
+        const total =
+          l.headerHeight +
+          l.contentHeight +
+          l.editorHeight +
+          l.errorBarHeight +
+          l.operationHeight +
+          l.statusBarHeight;
+        expect(total).toBeLessThanOrEqual(height);
+      });
     }
   }
+
+  it('reserves no operation-summary space when hidden', () => {
+    expect(computeOpenCodeLayout(80, 24).operationHeight).toBe(0);
+    expect(computeOpenCodeLayout(80, 24, { operationVisible: false }).operationHeight).toBe(0);
+  });
+
+  it('degrades the operation-summary height on compact breakpoints', () => {
+    const compact = computeOpenCodeLayout(40, 24, { operationVisible: true });
+    const standard = computeOpenCodeLayout(80, 24, { operationVisible: true });
+    expect(getBreakpoint(40).density).toBe('compact');
+    expect(compact.operationHeight).toBeLessThan(standard.operationHeight);
+  });
 
   it('anchors the editor to the bottom (no wasted rows) when sidebar is visible', () => {
     // At 80 cols the sidebar is visible; sessionInfo must NOT shrink the left

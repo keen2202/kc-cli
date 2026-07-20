@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback, useEffect } from 'react';
+import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { ThemeProvider, useTheme } from '../hooks/useTheme';
 import { DEFAULT_THEME } from '../theme';
@@ -10,9 +10,12 @@ import { SessionInfo } from './SessionInfo';
 import { Editor, openExternalEditor } from './Editor';
 import { StatusBar } from './StatusBarView.js';
 import { SidebarPanel } from './SidebarPanel';
-import { PermissionDialog, type PermissionRequest, type PermissionDecision } from './PermissionDialog';
+import { type PermissionRequest, type PermissionDecision } from './PermissionDialog';
+import { OperationSummary, synthesizeOperation, operationsFromTools } from './OperationSummary';
 import { CommandPalette, type CommandItem } from './CommandPalette';
 import { FilePicker } from '../dialogs/FilePicker';
+import { useTerminalSize } from '../hooks/useTerminalSize';
+import { getBreakpoint } from '../layout';
 import { UIEventBus } from '../event-bus';
 import { createDefaultKeybindings } from '../keybinding-manager';
 import { isPrintableUnicode, type KeypressEvent } from '../keypress';
@@ -165,6 +168,9 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
   const [inputState, setInputState] = useState<InputState>(createInputState());
   const [turnCount, setTurnCount] = useState(0);
   const [sessionStartTime] = useState(() => Date.now());
+  // Ticks once per second so the session duration timer advances live rather
+  // than only re-rendering when other state changes (which froze the clock).
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const [mode, setMode] = useState<'idle' | 'streaming' | 'overlay' | 'steer'>('idle');
   const [attachmentState, setAttachmentState] = useState<{
     attachments: Array<{ path: string; name: string }>;
@@ -172,6 +178,20 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
   }>({ attachments: [], deleteMode: false });
   const [agentMode, setAgentMode] = useState<'build' | 'plan'>('build');
   const [sidebarHidden, setSidebarHidden] = useState(false);
+
+  // Execution automation level, orthogonal to agentMode (build/plan): the
+  // "work mode" (build/plan) is what the agent does; executionMode is how much
+  // it does autonomously. A ref mirrors it so the stable permission-handler
+  // closure always reads the latest value.
+  const [executionMode, setExecutionMode] = useState<'interactive' | 'auto' | 'goal'>('interactive');
+  const executionModeRef = useRef<'interactive' | 'auto' | 'goal'>('interactive');
+  const [goalState, setGoalState] = useState<{
+    goal: string;
+    iteration: number;
+    maxIterations: number;
+    active: boolean;
+  } | null>(null);
+  const goalCancelledRef = useRef(false);
 
   // Overlay state
   const [showExitConfirm, setShowExitConfirm] = useState(false);
@@ -196,7 +216,10 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
   // Get session ID from global state
   const sessionId = getState().sessionId;
 
-  const overlayOpen = permissionRequest !== null || showExitConfirm || showPalette || showFilePicker;
+  // A pending tool authorization is confirmed inline above the editor (not as a
+  // modal overlay), so it is deliberately excluded from overlayOpen; useInput
+  // gives it top priority instead.
+  const overlayOpen = showExitConfirm || showPalette || showFilePicker;
 
   // Register the interactive authorization handler with the engine. The
   // returned Promise resolves when the user decides; PermissionDialog.onDecide
@@ -205,6 +228,13 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
   useEffect(() => {
     queryEngine.setPermissionRequestHandler((req: UIPermissionRequest) =>
       new Promise<PermissionDecision>((resolve) => {
+        // Auto/Goal modes execute autonomously: approve without prompting so the
+        // engine loop is never blocked waiting on the UI. The tool still shows
+        // up in the live operation summary / sidebar as it runs.
+        if (executionModeRef.current !== 'interactive') {
+          resolve('allow');
+          return;
+        }
         setPermissionRequest({
           toolName: req.toolName,
           inputSummary: req.inputSummary,
@@ -233,6 +263,13 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
     }
   }, [keybindingManager, isStreaming, overlayOpen, attachmentState.deleteMode]);
 
+  // Advance the session clock once per second so SessionInfo's duration timer
+  // updates live instead of freezing until the next unrelated re-render.
+  useEffect(() => {
+    const timer = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const addSystemMsg = useCallback((content: string) => {
     addMessage({
       id: `system-${Date.now()}`,
@@ -241,6 +278,100 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
       timestamp: Date.now(),
     });
   }, [addMessage]);
+
+  // Switch the execution automation level. Auto/Goal route tool authorization
+  // through the classifier (permissionMode 'auto') and auto-approve in the UI;
+  // Interactive restores the default ask-based confirmation flow.
+  const applyExecutionMode = useCallback((next: 'interactive' | 'auto' | 'goal') => {
+    executionModeRef.current = next;
+    setExecutionMode(next);
+    updateState({ permissionMode: next === 'interactive' ? 'default' : 'auto' });
+  }, []);
+
+  // Run one engine invocation: add the user + assistant messages, stream the
+  // events onto the bus, and return the assistant's accumulated text so callers
+  // (notably the goal loop) can inspect the outcome.
+  const runEngineTurn = useCallback(async (text: string): Promise<string> => {
+    addMessage({
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: text,
+      timestamp: Date.now(),
+    });
+
+    const assistantId = `assistant-${Date.now()}`;
+    addMessage({
+      id: assistantId,
+      role: 'assistant',
+      content: null,
+      timestamp: Date.now(),
+      toolCalls: [],
+    });
+
+    setMode('streaming');
+    setTurnCount((prev) => prev + 1);
+
+    let assistantText = '';
+    try {
+      for await (const event of queryEngine.submitMessage(text)) {
+        eventBus.emit(event);
+        const anyEv = event as { type?: string; text?: unknown };
+        if (typeof anyEv.text === 'string' && String(anyEv.type).includes('text_delta')) {
+          assistantText += anyEv.text;
+        }
+      }
+    } catch (error) {
+      const errMsg = `Error: ${getErrorMessage(error)}`;
+      setMessages((prev) =>
+        prev.map((m) => (m.id === assistantId ? { ...m, content: errMsg } : m)),
+      );
+    } finally {
+      setMode('idle');
+    }
+    return assistantText;
+  }, [queryEngine, eventBus, addMessage, setMessages]);
+
+  // Goal mode: iterate the engine toward a high-level goal until the model
+  // signals GOAL_ACHIEVED, the iteration cap is hit, or the user cancels (Esc).
+  const runGoal = useCallback(async (goal: string) => {
+    const maxIterations = 10;
+    goalCancelledRef.current = false;
+    setGoalState({ goal, iteration: 0, maxIterations, active: true });
+    setSubmittedHistory((prev) => [...prev, goal]);
+    setHistoryIndex(null);
+    addSystemMsg(
+      `[Goal mode] Working toward: ${goal}\n` +
+      `Iterating up to ${maxIterations} times or until GOAL_ACHIEVED. Press Esc to stop.`,
+    );
+
+    let prompt =
+      `Goal: ${goal}\n\n` +
+      `Work autonomously toward this goal. When it is fully achieved, reply with the ` +
+      `token GOAL_ACHIEVED on its own line. Otherwise keep making concrete progress.`;
+
+    let achieved = false;
+    for (let i = 0; i < maxIterations; i++) {
+      if (goalCancelledRef.current) break;
+      setGoalState((g) => (g ? { ...g, iteration: i + 1 } : g));
+      const text = await runEngineTurn(prompt);
+      if (/\bGOAL_ACHIEVED\b/.test(text)) {
+        achieved = true;
+        break;
+      }
+      prompt =
+        `The goal is not yet complete: ${goal}\n` +
+        `Continue working toward it. Reply GOAL_ACHIEVED when fully done.`;
+    }
+
+    setGoalState((g) => (g ? { ...g, active: false } : g));
+    if (goalCancelledRef.current) {
+      addSystemMsg('[Goal mode] Stopped by user.');
+    } else if (achieved) {
+      addSystemMsg('[Goal mode] Goal achieved.');
+    } else {
+      addSystemMsg(`[Goal mode] Reached iteration limit (${maxIterations}) without GOAL_ACHIEVED.`);
+    }
+  }, [runEngineTurn, addSystemMsg]);
 
   // Slash command handler
   const handleSlashCommand = useCallback(async (command: string) => {
@@ -255,6 +386,9 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
           '  /key <api-key> - Set API key\n' +
           '  /clear         - Clear conversation\n' +
           '  /mode <mode>   - Set permission mode (default|acceptEdits|plan|bypassPermissions)\n' +
+          '  /auto          - Autonomous mode (run tools without confirmation)\n' +
+          '  /goal <text>   - Goal mode (iterate autonomously toward a goal)\n' +
+          '  /interactive   - Interactive mode (confirm each operation)\n' +
           '  /tools         - List tools\n' +
           '  /level [level] - Show/set user level (beginner|intermediate|advanced)\n' +
           '  /status        - Show status\n' +
@@ -328,6 +462,27 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
         break;
       }
 
+      case '/auto':
+        applyExecutionMode('auto');
+        addSystemMsg('Execution mode: auto — tools run without confirmation.');
+        break;
+
+      case '/interactive':
+        applyExecutionMode('interactive');
+        addSystemMsg('Execution mode: interactive — you confirm each operation.');
+        break;
+
+      case '/goal': {
+        const goal = parts.slice(1).join(' ').trim();
+        applyExecutionMode('goal');
+        if (goal) {
+          void runGoal(goal);
+        } else {
+          addSystemMsg('Usage: /goal <objective> — describe what to accomplish, then it runs autonomously.');
+        }
+        break;
+      }
+
       case '/exit':
         process.exit(0);
         break;
@@ -335,47 +490,14 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
       default:
         addSystemMsg(`Unknown command: ${cmd}. Type /help to see the list of available commands.`);
     }
-  }, [queryEngine, addSystemMsg, setMessages, keybindingManager]);
+  }, [queryEngine, addSystemMsg, setMessages, keybindingManager, applyExecutionMode, runGoal]);
 
   const submitMessage = useCallback(async (text: string) => {
     // Record for ↑/↓ history recall.
     setSubmittedHistory((prev) => [...prev, text]);
     setHistoryIndex(null);
-
-    addMessage({
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: text,
-      timestamp: Date.now(),
-    });
-
-    const assistantId = `assistant-${Date.now()}`;
-    addMessage({
-      id: assistantId,
-      role: 'assistant',
-      content: null,
-      timestamp: Date.now(),
-      toolCalls: [],
-    });
-
-    setMode('streaming');
-    setTurnCount((prev) => prev + 1);
-
-    try {
-      for await (const event of queryEngine.submitMessage(text)) {
-        eventBus.emit(event);
-      }
-    } catch (error) {
-      const errMsg = `Error: ${getErrorMessage(error)}`;
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId ? { ...m, content: errMsg } : m,
-        ),
-      );
-    } finally {
-      setMode('idle');
-    }
-  }, [queryEngine, eventBus, addMessage, setMessages]);
+    await runEngineTurn(text);
+  }, [runEngineTurn]);
 
   const startNewSession = useCallback(() => {
     setMessages(() => []);
@@ -454,6 +576,9 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
     { id: 'help', label: '/help — Show help', keywords: '帮助', run: () => handleSlashCommand('/help') },
     { id: 'clear', label: '/clear — Clear conversation', keywords: '清空 清除', run: () => handleSlashCommand('/clear') },
     { id: 'mode', label: '/mode — Show permission mode', keywords: '模式 permission', run: () => handleSlashCommand('/mode') },
+    { id: 'auto-mode', label: 'Auto Mode — autonomous execution', keywords: 'auto 自动', run: () => handleSlashCommand('/auto') },
+    { id: 'goal-mode', label: 'Goal Mode — set a goal', keywords: 'goal 目标', run: () => handleSlashCommand('/goal') },
+    { id: 'interactive-mode', label: 'Interactive Mode — confirm operations', keywords: 'interactive 交互', run: () => handleSlashCommand('/interactive') },
     { id: 'tools', label: '/tools — List tools', keywords: '工具', run: () => handleSlashCommand('/tools') },
     { id: 'status', label: '/status — Show status', keywords: '状态', run: () => handleSlashCommand('/status') },
     { id: 'level', label: '/level — User level', keywords: '级别', run: () => handleSlashCommand('/level') },
@@ -484,11 +609,28 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
         setInputState((prev) => toggleSteerMode(prev));
         setMode((m) => (m === 'steer' ? 'idle' : 'steer'));
         return true;
-      case 'cancel': setMode('idle'); return true;
+      case 'cancel':
+        if (goalState?.active) goalCancelledRef.current = true;
+        setMode('idle');
+        return true;
       case 'quit':
       case 'exit': requestExit(); return true;
       case 'toggleSidebar': setSidebarHidden((h) => !h); return true;
       case 'toggleAgentMode': setAgentMode((prev) => (prev === 'build' ? 'plan' : 'build')); return true;
+      case 'cycleExecutionMode': {
+        const order = ['interactive', 'auto', 'goal'] as const;
+        const idx = order.indexOf(executionModeRef.current);
+        const next = order[(idx + 1) % order.length]!;
+        applyExecutionMode(next);
+        addSystemMsg(
+          next === 'goal'
+            ? 'Execution mode: goal — type your goal and press Enter.'
+            : next === 'auto'
+              ? 'Execution mode: auto — tools run without confirmation.'
+              : 'Execution mode: interactive — you confirm each operation.',
+        );
+        return true;
+      }
       case 'help': addSystemMsg('Keys:\n' + keybindingManager.getHelpText()); return true;
       case 'historyPrev': historyPrev(); return true;
       case 'historyNext': historyNext(); return true;
@@ -501,10 +643,20 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
       default:
         return false;
     }
-  }, [startNewSession, setMessages, inputState.text, openFilePicker, requestExit, addSystemMsg, keybindingManager, historyPrev, historyNext]);
+  }, [startNewSession, setMessages, inputState.text, openFilePicker, requestExit, addSystemMsg, keybindingManager, historyPrev, historyNext, applyExecutionMode, goalState]);
 
   // Keyboard input handling via Ink's useInput.
   useInput((input: string, key: any) => {
+    // Inline permission confirmation owns the keyboard while a request is
+    // pending in interactive mode: Enter=allow, A=always, Esc=deny. Everything
+    // else is swallowed so keystrokes never leak into the editor mid-decision.
+    if (permissionRequest) {
+      if (key.return) { permissionRequest.onDecide('allow'); return; }
+      if (input === 'a' || input === 'A') { permissionRequest.onDecide('allow_always'); return; }
+      if (key.escape) { permissionRequest.onDecide('deny'); return; }
+      return;
+    }
+
     // Overlays own their input; block background handling while one is open.
     if (overlayOpen) return;
 
@@ -518,6 +670,11 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
       if (command && dispatchCommand(command)) return;
 
       if (key.escape) {
+        if (goalState?.active) {
+          goalCancelledRef.current = true;
+          addSystemMsg('[Goal mode] Stopping after the current step...');
+          return;
+        }
         // No binding matched: dismiss the newest active error, if any.
         const lastActive = errors
           .map((_, i) => i)
@@ -573,7 +730,11 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
       }
       if (text) {
         setInputState(createInputState());
-        submitMessage(text);
+        if (executionModeRef.current === 'goal' && !goalState?.active) {
+          void runGoal(text);
+        } else {
+          submitMessage(text);
+        }
       }
       return;
     }
@@ -614,16 +775,50 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
     }
   });
 
-  const sessionDuration = Date.now() - sessionStartTime;
+  const sessionDuration = nowTick - sessionStartTime;
   const hasError = activeErrors.length > 0;
+
+  // Operation summary strip above the editor. Interactive mode shows the
+  // pending tool as a confirm affordance; auto/goal show what is running live
+  // (auto-approved, no confirmation). Steps/expected collapse on compact widths.
+  const { width: termWidth } = useTerminalSize();
+  const operationCompact = getBreakpoint(termWidth).density === 'compact';
+  const operationSummaryNode = useMemo(() => {
+    if (permissionRequest && executionMode === 'interactive') {
+      const op = synthesizeOperation(
+        permissionRequest.toolName,
+        permissionRequest.inputSummary,
+        permissionRequest.diffs,
+      );
+      return <OperationSummary operations={[op]} mode="confirm" compact={operationCompact} />;
+    }
+    if (executionMode !== 'interactive') {
+      const ops = operationsFromTools(sidebarData.tools ?? []);
+      if (ops.length > 0) {
+        return <OperationSummary operations={ops} mode="live" compact={operationCompact} autoApproved />;
+      }
+    }
+    return null;
+  }, [permissionRequest, executionMode, sidebarData.tools, operationCompact]);
+
+  // Status-bar live fields: the most recent running tool and overall progress.
+  // Progress is iteration-based while a goal is active, otherwise turn-based.
+  const currentOperation = useMemo(() => {
+    const running = (sidebarData.tools ?? []).filter((t) => t.status === 'running');
+    return running.length > 0 ? running[running.length - 1]!.name : undefined;
+  }, [sidebarData.tools]);
+  const progressPercent = goalState?.active
+    ? (goalState.iteration / Math.max(1, goalState.maxIterations)) * 100
+    : (turnCount / Math.max(1, maxTurns)) * 100;
 
   return (
     <Layout
       sidebarHidden={sidebarHidden}
-      headerBar={<HeaderBar provider={provider} model={model} agentMode={agentMode} />}
+      headerBar={<HeaderBar provider={provider} model={model} agentMode={agentMode} executionMode={executionMode} />}
       errorBar={
         hasError ? <ErrorBar errors={activeErrors} onDismiss={dismissError} /> : null
       }
+      operationSummary={operationSummaryNode}
       chatPanel={
         <ChatPanel
           messages={messages}
@@ -657,12 +852,12 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
           turnCount={turnCount}
           maxTurns={maxTurns}
           tokensUsed={totalTokensUsed}
+          currentOperation={currentOperation}
+          progressPercent={progressPercent}
         />
       }
       overlay={
-        permissionRequest ? (
-          <PermissionDialog request={permissionRequest} />
-        ) : showPalette ? (
+        showPalette ? (
           <CommandPalette commands={paletteCommands} onClose={() => setShowPalette(false)} />
         ) : showFilePicker ? (
           <FilePicker files={fileItems} onSelect={onFileSelect} onCancel={() => setShowFilePicker(false)} />

@@ -8,6 +8,7 @@ interface LayoutProps {
   chatPanel: ReactNode;
   editor: ReactNode;
   errorBar?: ReactNode;
+  operationSummary?: ReactNode;
   sessionInfo: ReactNode;
   sidebar: ReactNode;
   statusBar: ReactNode;
@@ -16,16 +17,19 @@ interface LayoutProps {
   sidebarHidden?: boolean;
 }
 
-export function Layout({ headerBar, chatPanel, editor, errorBar, sessionInfo, sidebar, statusBar, overlay, sidebarHidden }: LayoutProps) {
+export function Layout({ headerBar, chatPanel, editor, errorBar, operationSummary, sessionInfo, sidebar, statusBar, overlay, sidebarHidden }: LayoutProps) {
   const { width, height } = useTerminalSize();
-  const dims: OpenCodeLayout = computeOpenCodeLayout(width, height, { errorVisible: errorBar != null });
+  const dims: OpenCodeLayout = computeOpenCodeLayout(width, height, {
+    errorVisible: errorBar != null,
+    operationVisible: operationSummary != null,
+  });
   const sidebarVisible = dims.sidebarVisible && !sidebarHidden;
   const rightPanelWidth = sidebarVisible ? dims.rightPanelWidth : 0;
   // The sidebar occupies the main content row minus the session-info block
   // above it; pass that budget down so it can size its item lists.
   const sidebarHeight = Math.max(
     1,
-    dims.contentHeight + dims.editorHeight + dims.errorBarHeight - dims.sessionInfoHeight,
+    dims.contentHeight + dims.editorHeight + dims.errorBarHeight + dims.operationHeight - dims.sessionInfoHeight,
   );
   const sidebarWithSize = React.isValidElement(sidebar)
     ? React.cloneElement(sidebar as React.ReactElement<any>, {
@@ -42,7 +46,7 @@ export function Layout({ headerBar, chatPanel, editor, errorBar, sessionInfo, si
       )}
 
       {/* Main area: left (chat + editor) + right (session info + sidebar) */}
-      <Box flexDirection="row" height={dims.contentHeight + dims.editorHeight + dims.errorBarHeight}>
+      <Box flexDirection="row" height={dims.contentHeight + dims.editorHeight + dims.errorBarHeight + dims.operationHeight}>
         {/* Left pane */}
         <Box flexDirection="column" flexGrow={1} width={width - rightPanelWidth}>
           {/* Chat panel */}
@@ -51,6 +55,10 @@ export function Layout({ headerBar, chatPanel, editor, errorBar, sessionInfo, si
               visible near the input without scrolling the chat output. */}
           {errorBar != null && (
             <Box height={dims.errorBarHeight}>{errorBar}</Box>
+          )}
+          {/* Operation summary: what is about to run / running, above the editor. */}
+          {operationSummary != null && (
+            <Box height={dims.operationHeight}>{operationSummary}</Box>
           )}
           {/* Editor */}
           <Box height={dims.editorHeight}>{editor}</Box>
