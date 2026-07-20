@@ -1,6 +1,21 @@
 import { Command } from 'commander';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
-export const VERSION = '0.1.0';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+function readVersion(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf-8'));
+    return pkg.version;
+  } catch {
+    return '0.0.0';
+  }
+}
+
+export const VERSION = readVersion();
 
 export interface CLIDelegates {
   onRunAgent: (prompt: string | undefined, opts: Record<string, any>) => Promise<void>;
@@ -26,7 +41,7 @@ export function createProgram(delegates: CLIDelegates): Command {
     .option('-v, --verbose', 'Enable verbose output')
     .option('--print', 'Print response and exit (non-interactive)')
     .option('--bare', 'Minimal mode: skip hooks and heavy initialization')
-    .option('--bypass-permissions', 'Bypass all permission checks')
+    .option('--bypass-permissions', 'Bypass all permission checks (requires KC_ALLOW_BYPASS=1)')
     .option('--profile', 'Show startup profile')
     .option('--json', 'Output events as NDJSON (for IDE integration)')
     .option('--json-pretty', 'Output events as formatted JSON (for debugging)')

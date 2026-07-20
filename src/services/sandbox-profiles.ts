@@ -153,12 +153,14 @@ export class SeccompSandbox implements SandboxBackend {
   readonly name = 'seccomp';
 
   isAvailable(): boolean {
-    // Available on Linux with seccomp support
     try {
-      execSync('which timeout', { stdio: 'ignore' });
-      // Check for seccomp support in kernel
-      execSync('grep -q CONFIG_SECCOMP=y /boot/config-$(uname -r) 2>/dev/null || true', { stdio: 'ignore' });
-      return true;
+      // Only supported on Linux
+      if (process.platform !== 'linux') return false;
+      // Verify timeout command is available
+      execSync('which timeout', { stdio: 'ignore', timeout: 2000 });
+      // Verify seccomp is enabled in kernel via the standard API
+      const seccompAvail = fs.readFileSync('/proc/sys/kernel/seccomp/actions_avail', 'utf-8');
+      return seccompAvail.includes('errno');
     } catch {
       return false;
     }

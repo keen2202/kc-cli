@@ -10,6 +10,7 @@ import type {
 } from './types';
 import { StdioTransport } from './transports/stdio';
 import { HttpTransport } from './transports/http';
+import { VERSION } from '../bootstrap/cli-config';
 
 interface ServerConnection {
   config: MCPServerConfig;
@@ -196,7 +197,7 @@ export class MCPClientManager {
       capabilities: {},
       clientInfo: {
         name: 'kc-cli',
-        version: '0.1.0',
+        version: VERSION,
       },
     });
 

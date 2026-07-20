@@ -41,6 +41,33 @@ KC-CLI follows a layered architecture with clear module boundaries enforced by p
 └─────────────────────────────────────────────────────┘
 ```
 
+## Module Source Paths
+
+| Layer | Module | Path |
+|-------|--------|------|
+| Presentation | UI Components | `src/ui/components/` |
+| Presentation | Terminal Renderer | `src/ui/renderer.ts` |
+| Presentation | Layout Manager | `src/ui/layout.ts` |
+| Presentation | Theme System | `src/ui/theme.ts` |
+| Application | QueryEngine | `src/query/QueryEngine.ts` |
+| Application | Orchestrator | `src/orchestrator/agent-orchestrator.ts` |
+| Application | AGP | `src/agp/` |
+| Application | Commands | `src/commands/` |
+| Domain | Tools | `src/tools/` (20 built-in) |
+| Domain | Permissions | `src/permissions/engine.ts` |
+| Domain | Memory | `src/memory/` |
+| Infrastructure | API Clients | `src/api/` (11 providers) |
+| Infrastructure | Sandbox | `src/services/sandbox*.ts` |
+| Infrastructure | LSP | `src/lsp/` |
+| Infrastructure | MCP | `src/mcp/` |
+| Infrastructure | Cache | `src/services/cache/` |
+| Infrastructure | Budget | `src/services/budget.ts` |
+| Foundation | State Store | `src/state/store.ts` |
+| Foundation | Error Types | `src/utils/errors.ts`, `src/utils/result.ts` |
+| Foundation | ExecutionEnv | `src/services/execution-env.ts` |
+| Foundation | Config | `src/bootstrap/config.ts` |
+| Foundation | Logging | `src/services/logger.ts` |
+
 ## Initialization Sequence (main.ts)
 
 The entry point performs 5 phases in order:

@@ -34,7 +34,7 @@ const dbCache = getCacheManager().getOrCreate<any>('sql-connections', 'tool', {
       if (entry.value && typeof entry.value.close === 'function') {
         entry.value.close();
       }
-    } catch {}
+    } catch { /* best-effort close */ }
   },
 });
 

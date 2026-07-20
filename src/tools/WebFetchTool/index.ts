@@ -7,6 +7,7 @@ import type { PermissionResult } from '../../permissions/protocol';
 import { secondsToMs } from '../../utils/timeout';
 import { isInternalUrl } from '../../utils/ssrf';
 import { wrapIfUntrustedSource } from '../../utils/toolResultBoundary';
+import { VERSION } from '../../bootstrap/cli-config';
 import * as https from 'https';
 import * as http from 'http';
 
@@ -39,7 +40,7 @@ export const tool = buildTool<WebFetchInput, string>({
       const options: http.RequestOptions = {
         method: input.method,
         headers: {
-          'User-Agent': 'kc-cli/0.1.0',
+          'User-Agent': `kc-cli/${VERSION}`,
           ...input.headers,
         },
         timeout: timeoutMs,

@@ -4,7 +4,7 @@ Setup, conventions, and workflows for contributing to KC-CLI.
 
 ## Prerequisites
 
-- Node.js 16.20.2+
+- Node.js 20+
 - npm or yarn
 - API key for at least one LLM provider
 

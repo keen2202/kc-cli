@@ -9,7 +9,7 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 - 🎨 **Redesigned UI**: Sidebar with file tree (LSP markers), diff preview, command palette, model selector, theme system, mouse support, multi-panel layout
 - 🔌 **LSP Integration**: Code completions, diagnostics, go-to-definition, find references, rename, quick fixes for 9 languages
 - 🧠 **Smart Model Adaptation**: Provider-specific prompts, dynamic parameter tuning, tiktoken-based token estimation
-- 🧪 **3899 Tests**: Comprehensive test suite across 178 files
+- 🧪 **4207 Tests**: Comprehensive test suite across 208 files
 - 🛡️ **Runtime Monitoring**: Sandbox resource monitoring (Docker stats, /proc), image management, and probe-based isolation verification
 - 🪟 **Windows Sandbox**: Native Windows sandbox support via job objects
 - 🌳 **Session Tree**: Non-linear conversations with branching, checkout, merge, and branch summaries
@@ -23,7 +23,7 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 
 ## Features
 
-- **Modular Tools**: 21 built-in tools with two-phase execution (prepare/execute/finalize) — Bash, file I/O, search, Git, SQL, Docker, deployment, task management, and sub-agent spawning
+- **Modular Tools**: 20 built-in tools with two-phase execution (prepare/execute/finalize) — Bash, file I/O, search, Git, SQL, Docker, deployment, task management, and sub-agent spawning
 - **Multi-LLM Support**: Anthropic Claude, OpenAI GPT, Qwen (DashScope), GLM (Zhipu AI), Google Gemini, DeepSeek, and Ollama (local); 9 stream event types including thinking_delta
 - **Permission System**: 6-step deny-first security with bypass-immune safety checks, protected paths, auto-classifier, and plugin-contributed rules (Step 1.5)
 - **Sandbox Isolation**: Docker/Bubblewrap/seccomp backends with per-tool policies, seccomp profiles, and resource limits
@@ -348,7 +348,7 @@ src/
 │       ├── prompt-adapter.ts       # Prompt adapter
 │       └── tool-adapter.ts         # Tool adapter
 │
-├── tools/                          # 21 built-in tool implementations
+├── tools/                          # 20 built-in tool implementations
 │   ├── AgentTool/                  # Sub-agent spawning
 │   ├── AskUserTool/                # Interactive user prompts
 │   ├── BashTool/                   # Shell execution with dangerous-command detection
@@ -441,6 +441,8 @@ src/
 - `dontAsk` — Convert asks to denies
 
 ## Security
+
+**Bypass gating**: `--bypass-permissions` requires explicit opt-in via `KC_ALLOW_BYPASS=1` environment variable. Without it, bypass requests are denied with a warning — even when `--bypass-permissions` is passed on the CLI.
 
 The permission system implements defense-in-depth:
 
@@ -539,7 +541,7 @@ npm run test:coverage # Run tests with coverage report
 - [Home](docs/repowiki/Home.md) — Overview, architecture diagram, quick start
 - [Architecture](docs/repowiki/Architecture.md) — Layer diagram, init sequence, data flow
 - [Query Engine](docs/repowiki/Query-Engine.md) — State machine, streaming, steering
-- [Tools System](docs/repowiki/Tools-System.md) — 21 tools, registry, two-phase execution
+- [Tools System](docs/repowiki/Tools-System.md) — 20 tools, registry, two-phase execution
 - [API Clients](docs/repowiki/API-Clients.md) — 11 providers, prompt system
 - [Permission System](docs/repowiki/Permission-System.md) — 6-step deny-first, rule system
 - [Sandbox](docs/repowiki/Sandbox.md) — Isolation backends, HMAC signing, compaction

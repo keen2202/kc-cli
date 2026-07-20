@@ -6,6 +6,7 @@ import { formatBanner } from '../ui';
 import { setLogLevel } from '../services/logger';
 import { updateStatus } from '../ui/statusline';
 import { runWithScopedState } from './state';
+import { VERSION } from './cli-config';
 
 // Re-export for backward compatibility (moved to Bootstrap.ts)
 export { buildSystemPrompt } from './Bootstrap';
@@ -43,7 +44,7 @@ export interface RunAgentOptions {
 export async function runAgent(options: RunAgentOptions): Promise<void> {
   const { prompt, opts } = options;
 
-  console.log(formatBanner('0.1.0'));
+  console.log(formatBanner(VERSION));
   profileCheckpoint('banner');
 
   // ── Phase 1-4: Delegate composition to Bootstrap ──

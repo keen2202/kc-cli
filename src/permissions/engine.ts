@@ -1,4 +1,4 @@
-// Three-layer permission decision engine
+// 6-step deny-first permission decision engine with plugin-contributed rules
 
 import * as fs from 'fs';
 import type {

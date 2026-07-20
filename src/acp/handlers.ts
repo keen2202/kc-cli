@@ -6,6 +6,7 @@ import { toolRegistry, registerBuiltInTools } from '../tools';
 import { initializeState, getState } from '../bootstrap/state';
 import type { GlobalState } from '../bootstrap/state';
 import { loadConfig } from '../bootstrap/config';
+import { VERSION } from '../bootstrap/cli-config';
 import type { AgentEvent } from '../state/types';
 import type { StreamEvent } from '../query/protocol';
 import type { LLMProvider } from '../api';
@@ -49,7 +50,7 @@ export async function handleInitialize(request: ACPRequest, state: ACPHandlerSta
 
   state.sendResult(request.id, {
     protocolVersion: '1.0',
-    serverInfo: { name: 'kc-cli', version: '0.1.0' },
+    serverInfo: { name: 'kc-cli', version: VERSION },
     capabilities: { tools: true, streaming: true },
   });
 }

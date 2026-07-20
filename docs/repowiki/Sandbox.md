@@ -89,6 +89,18 @@ The tool executor verifies the signature before trusting that a command was sand
 - Logs warning about missing sandbox
 - Used when `failIfNoSandbox` is false and no backend available
 
+## Platform Isolation Strength
+
+Isolation guarantees vary significantly by platform:
+
+| Platform | Available Backends | Isolation Strength | Notes |
+|----------|-------------------|-------------------|-------|
+| **Linux** | bubblewrap, seccomp, Docker | **Strong** | Namespace isolation (PID, IPC, network, mount), syscall filtering, resource limits, capabilities dropping |
+| **macOS** | noop (fallback) | **None** | No native sandbox backend available. Commands run on host with `NO ISOLATION` warning. Set `sandbox.failIfNoSandbox` to hard-fail. |
+| **Windows** | windows-sandbox (job objects) | **Partial** | Process-level isolation via `CreateJobObject` with resource limits. No filesystem isolation, no network isolation, no syscall filtering. Less comprehensive than Linux backends. |
+
+**Recommendation**: Use Linux for production and security-sensitive workloads. macOS is suitable for development with `failIfNoSandbox: false`. Windows provides basic resource limiting but weaker overall isolation than Linux.
+
 ## Per-Tool Policies
 
 `src/services/sandbox-policy.ts`:

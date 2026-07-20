@@ -208,7 +208,7 @@ export function createAPIClient(config: APIClientFactoryConfig): BaseApiClient {
       });
 
     default:
-      throw new Error(`Unknown LLM provider: ${provider}. Supported: openai, qwen, glm, deepseek, openai-compatible, anthropic, ollama`);
+      throw new Error(`Unknown LLM provider: ${provider}. Supported: openai, qwen, glm, deepseek, mimo, kimi, step, gemini, openai-compatible, anthropic, ollama`);
   }
 }
 

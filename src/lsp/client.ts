@@ -228,7 +228,7 @@ export class LSPClientManager {
     this.servers.forEach((server) => {
       try {
         server.process.kill('SIGTERM');
-      } catch {}
+      } catch { /* process may already be dead */ }
     });
     this.servers.clear();
     this.diagnosticCache.clear();
@@ -282,7 +282,7 @@ export class LSPClientManager {
       try {
         const message: LSPMessage = JSON.parse(messageStr);
         this.handleMessage(server, message);
-      } catch {}
+      } catch { /* skip malformed messages */ }
     }
   }
 

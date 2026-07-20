@@ -45,6 +45,19 @@ export default defineConfig({
         branches: 50,
         functions: 60,
         lines: 60,
+        // Security-critical modules: higher bar
+        'src/permissions/**/*.ts': {
+          statements: 75,
+          branches: 65,
+          functions: 75,
+          lines: 75,
+        },
+        'src/services/sandbox*.ts': {
+          statements: 65,
+          branches: 55,
+          functions: 65,
+          lines: 65,
+        },
       },
     },
     testTimeout: 15000,
