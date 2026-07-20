@@ -55,21 +55,7 @@ export class SessionManager {
    */
   async loadSession(
     sessionId: string
-  ): Promise<{
-    messages: ChatMessage[];
-    state: {
-      cwd: string;
-      model: string;
-      provider: string;
-      turnCount: number;
-      totalTokensUsed: number;
-    };
-    metadata: {
-      createdAt: number;
-      lastModified: number;
-      toolsUsed: string[];
-    };
-  } | null> {
+  ): Promise<(SessionSnapshot & { sessionId: string }) | null> {
     const snapshot = await this.memoryService.loadSession(sessionId);
     if (!snapshot) {
       return null;
@@ -79,6 +65,7 @@ export class SessionManager {
       messages: snapshot.messages,
       state: snapshot.state,
       metadata: snapshot.metadata,
+      sessionId: snapshot.sessionId || sessionId,
     };
   }
 

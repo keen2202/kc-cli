@@ -580,14 +580,18 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
             addSystemMsg(`Session not found: ${sub}`);
             break;
           }
-          queryEngine.messages = loaded.messages;
-          setMessages(() => engineMessagesToUiMessages(loaded.messages));
-          setTurnCount(loaded.state.turnCount);
-          if (loaded.state.model) setModel(loaded.state.model);
-          updateState({ sessionId: sub });
-          setSessionId(sub);
-          setHistoryIndex(null);
-          addSystemMsg(`Loaded session: ${sub} (${loaded.messages.length} message(s)).`);
+          try {
+            const restoredTurnCount = queryEngine.restoreSession(loaded);
+            setMessages(() => engineMessagesToUiMessages(loaded.messages));
+            setTurnCount(restoredTurnCount);
+            if (loaded.state.model) setModel(loaded.state.model);
+            updateState({ sessionId: sub });
+            setSessionId(sub);
+            setHistoryIndex(null);
+            addSystemMsg(`Loaded session: ${sub} (${loaded.messages.length} message(s)).`);
+          } catch (err) {
+            addSystemMsg(`Failed to restore session: ${err instanceof Error ? err.message : err}. Current session unchanged.`);
+          }
         }
         break;
       }

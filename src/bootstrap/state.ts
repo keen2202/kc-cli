@@ -26,18 +26,23 @@ export interface GlobalState {
 const scopedStateStorage = new AsyncLocalStorage<GlobalState>();
 
 /**
- * Transitional fallback for code paths not yet migrated to ALS.
- * TODO(A1): Remove once all callers use runWithScopedState().
+ * Root-level state set by initializeState().
+ * Used as a fallback when no ALS context is active (e.g. in tests, REPL, or
+ * code paths that haven't been migrated to runWithScopedState yet).
+ * Sub-agents MUST use runWithScopedState + createScopedState for isolation;
+ * they must never mutate this shared root reference.
  */
-let _fallbackState: GlobalState | null = null;
+let _rootState: GlobalState | null = null;
 
 /**
  * Create a scoped copy of global state with overridden fields.
- * Used to provide per-agent isolated state for sub-agents.
- * Returns a new object so mutations by the child do not affect the parent.
+ * Uses structuredClone for deep isolation so nested objects (config, etc.)
+ * are not shared between parent and child agents. Mutations by the child
+ * cannot pollute the parent or sibling agents.
  */
 export function createScopedState(parent: GlobalState, overrides: Partial<GlobalState>): GlobalState {
-  return { ...parent, ...overrides };
+  const cloned = structuredClone(parent) as GlobalState;
+  return Object.assign(cloned, overrides);
 }
 
 /**
@@ -50,14 +55,14 @@ export function runWithScopedState<T>(state: GlobalState, fn: () => T): T {
 }
 
 export function getState(): GlobalState {
-  // Check for scoped state (per-agent isolation for sub-agents)
   const scoped = scopedStateStorage.getStore();
   if (scoped) {
     return scoped;
   }
-  // Transitional fallback for code paths not yet migrated to ALS.
-  if (_fallbackState) {
-    return _fallbackState;
+  // Root-level fallback for code paths not yet wrapped in runWithScopedState
+  // (e.g. tests, REPL, legacy callers). Sub-agents always use ALS.
+  if (_rootState) {
+    return _rootState;
   }
   throw new Error(
     'GlobalState not initialized. Call initializeState() and wrap with runWithScopedState().'
@@ -65,7 +70,7 @@ export function getState(): GlobalState {
 }
 
 export function initializeState(overrides: Partial<GlobalState> = {}): GlobalState {
-  _fallbackState = {
+  _rootState = {
     cwd: process.cwd(),
     projectRoot: findProjectRoot(process.cwd()),
     sessionId: generateSessionId(),
@@ -78,7 +83,7 @@ export function initializeState(overrides: Partial<GlobalState> = {}): GlobalSta
     config: null,
     ...overrides,
   };
-  return _fallbackState;
+  return _rootState;
 }
 
 export function updateState(updates: Partial<GlobalState>): void {
@@ -87,12 +92,12 @@ export function updateState(updates: Partial<GlobalState>): void {
 }
 
 /**
- * Reset global state (for testing isolation).
- * Clears the transitional fallback. Tests should migrate to initializeState()
- * with runWithScopedState() for proper per-test state isolation.
+ * Reset root state (for testing isolation between test cases).
+ * Clears the root-level fallback. Tests should call initializeState() in
+ * beforeEach to set up fresh state for each case.
  */
 export function resetState(): void {
-  _fallbackState = null;
+  _rootState = null;
 }
 
 function findProjectRoot(dir: string): string | null {

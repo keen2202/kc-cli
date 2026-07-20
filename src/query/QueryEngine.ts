@@ -5,6 +5,7 @@ import { logger } from '../services/logger';
 // handle specific phases to keep QueryEngine as a facade.
 
 import type { ChatMessage, StreamEvent, AssistantMessage, ToolCall, ToolResult } from '../query/protocol';
+import type { SessionSnapshot } from '../memory/protocol';
 import type { ToolDefinition, ToolUseContext } from '../tools/protocol';
 import { AgentStateMachine } from '../state/machine';
 import { ObservableStateStore, createInitialState } from '../state/store';
@@ -22,6 +23,7 @@ import { estimateTaskComplexity } from '../api/prompts/task-prompts';
 import { autoStageFile, autoCommitAll } from '../utils/git';
 import { KCError } from '../utils/errors';
 import { validateApiKey } from '../utils/api-key';
+import { BudgetEnforcer, DEFAULT_BUDGET_CONFIG, type BudgetConfig } from '../services/budget';
 import { spawn } from 'child_process';
 
 // Sub-modules
@@ -148,6 +150,9 @@ export class QueryEngine {
   private zeroPatchRetries = 0;
   private verificationRetries = 0;
 
+  // T3: Budget enforcement
+  private budgetEnforcer: BudgetEnforcer;
+
   constructor(config: QueryEngineConfig, tools: ToolDefinition[]) {
     this.config = config;
     this.abortController = new AbortController();
@@ -204,6 +209,14 @@ export class QueryEngine {
 
     // Initialize planning phase handler
     this.planningHandler = new PlanningPhaseHandler(config.planningPhase || {});
+
+    // Initialize budget enforcer
+    this.budgetEnforcer = new BudgetEnforcer({
+      sessionTokenLimit: config.maxBudgetUsd
+        ? Math.ceil(config.maxBudgetUsd / 0.00001) // rough token-per-dollar estimate
+        : DEFAULT_BUDGET_CONFIG.sessionTokenLimit,
+      costLimitUsd: config.maxBudgetUsd ?? null,
+    });
 
     // Link planning handler to tool executor for defense-in-depth filtering
     this.toolExecutor.setToolBlockCheck((toolName: string) => {
@@ -413,6 +426,9 @@ export class QueryEngine {
             }
 
             yield* this.streamingPhase();
+            // T3: If budget exceeded (or other terminal event) during streaming,
+            // stop the loop immediately to avoid re-entering deciding.
+            if (this.stateMachine.isTerminal()) break;
             turnCount++;
 
             // Area 3: Context Efficiency — tag each turn for smart compaction
@@ -684,6 +700,21 @@ export class QueryEngine {
   private async *streamingPhase(): AsyncGenerator<StreamEvent | AgentEvent> {
     const maxRetries = 10;
 
+    // T3: Budget check before provider call
+    const estimatedTokens = this.conversation.getTokenEstimate();
+    const budgetCheck = this.budgetEnforcer.checkTurnBudget(estimatedTokens);
+    if (!budgetCheck.allowed) {
+      logger.query.warn(`[QueryEngine] Budget exceeded: ${budgetCheck.reason}`);
+      yield {
+        type: 'agent:budget_exceeded',
+        reason: budgetCheck.reason,
+        remaining: budgetCheck.remaining,
+        timestamp: Date.now(),
+      } as AgentEvent;
+      this.stateMachine.forceTransitionTo('completed');
+      return;
+    }
+
     // Cache tool definitions outside retry loop
     const toolsDef = this.toolExecutor.getRegisteredTools().map(toolName => {
       const tool = this.toolExecutor.getTool(toolName);
@@ -734,6 +765,7 @@ export class QueryEngine {
       try {
         yield* this.streamLLMResponse(requestConfig, toolsDef);
         this.errorHandler.recordApiSuccess();
+        this.budgetEnforcer.recordUsage(estimatedTokens);
         return;
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
@@ -1271,9 +1303,63 @@ export class QueryEngine {
     this.readHistory.clear();
     this.editHistory.clear();
     this.abortController = new AbortController();
+    this.budgetEnforcer.reset();
     if (this.stateMachine.currentState !== 'idle') {
       this.stateMachine.forceTransitionTo('idle');
     }
+  }
+
+  /**
+   * Restore session from a snapshot (e.g. loaded from disk).
+   *
+   * Replaces the current conversation with the snapshot's messages, resets
+   * compaction cursors and internal counters, and validates that the snapshot
+   * contains at minimum the first system+user message pair. On failure the
+   * current session is left untouched.
+   *
+   * @returns The restored turnCount for UI synchronization.
+   * @throws {Error} If the snapshot is missing required messages.
+   */
+  restoreSession(snapshot: SessionSnapshot): number {
+    // Validate snapshot integrity — must have at least system + user messages
+    const msgs = snapshot.messages;
+    if (!msgs || msgs.length === 0) {
+      throw new Error('Session snapshot is empty');
+    }
+    const hasSystem = msgs.some(m => m.role === 'system');
+    const hasUser = msgs.some(m => m.role === 'user');
+    if (!hasSystem || !hasUser) {
+      throw new Error('Session snapshot is missing required system or user message');
+    }
+
+    // Reset all internal state to a clean slate
+    this.compaction.reset();
+    this.errorHandler.reset();
+    this._aborted = false;
+    this.steerQueue = [];
+    this.followUpQueue = [];
+    this.modifiedFiles.clear();
+    this.lastModifiedTurn = 0;
+    this.zeroPatchRetries = 0;
+    this.verificationRetries = 0;
+    this.planningHandler.reset();
+    this.fileContentCache.invalidateAll();
+    this.readHistory.clear();
+    this.editHistory.clear();
+    this.abortController = new AbortController();
+    this.budgetEnforcer.reset();
+
+    // Replace messages via the controlled API — this also resets the
+    // SessionTree active branch and recalculates the token estimate.
+    this.conversation.setMessages([...msgs]);
+
+    // Reset state machine to idle so the next query starts fresh
+    if (this.stateMachine.currentState !== 'idle') {
+      this.stateMachine.forceTransitionTo('idle');
+    }
+
+    logger.query.info(`[QueryEngine] Session restored: ${snapshot.sessionId}, ${msgs.length} messages, turnCount=${snapshot.state.turnCount}`);
+    return snapshot.state.turnCount;
   }
 
   // ── Dual-Queue Steering System ──
@@ -1414,6 +1500,11 @@ export class QueryEngine {
   /** Get the underlying SessionTree instance (for branch label management). */
   getSessionTree() {
     return this.conversation.getSessionTree();
+  }
+
+  /** Get the budget enforcer (for testing and UI). */
+  getBudgetEnforcer(): BudgetEnforcer {
+    return this.budgetEnforcer;
   }
 
   /** Get tracked modified files */

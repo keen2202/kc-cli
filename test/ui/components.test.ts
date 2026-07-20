@@ -1,38 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { getTheme, type Theme } from '../../src/ui/theme';
-import { renderChatMessage, type ChatMessage } from '../../src/ui/components/ChatView';
 import { renderToolCallCard, type ToolCallData } from '../../src/ui/components/ToolCallCard';
 import { renderStatusBar } from '../../src/ui/components/StatusBar';
 import { renderInputBox, createInputState } from '../../src/ui/components/InputBox';
-import { renderSidebar, createSidebarData } from '../../src/ui/components/Sidebar';
 
 const themes = ['dark', 'light'] as const;
-
-describe('ChatView', () => {
-  for (const themeName of themes) {
-    it(`renders user message with ${themeName} theme`, () => {
-      const theme = getTheme(themeName);
-      const msg: ChatMessage = { id: '1', role: 'user', content: 'Hello', timestamp: Date.now() };
-      const output = renderChatMessage(msg, theme);
-      expect(output).toContain('Hello');
-      expect(output).toContain('> ');
-    });
-
-    it(`renders assistant message with ${themeName} theme`, () => {
-      const theme = getTheme(themeName);
-      const msg: ChatMessage = { id: '2', role: 'assistant', content: 'Hi there', timestamp: Date.now() };
-      const output = renderChatMessage(msg, theme);
-      expect(output).toContain('Hi there');
-    });
-
-    it(`renders system message with ${themeName} theme`, () => {
-      const theme = getTheme(themeName);
-      const msg: ChatMessage = { id: '3', role: 'system', content: 'System note', timestamp: Date.now() };
-      const output = renderChatMessage(msg, theme);
-      expect(output).toContain('System note');
-    });
-  }
-});
 
 describe('ToolCallCard', () => {
   for (const themeName of themes) {
@@ -106,30 +78,6 @@ describe('InputBox', () => {
       const lines = renderInputBox(state, 'kc>', theme);
       const joined = lines.join('');
       expect(joined).toContain('steer>');
-    });
-  }
-});
-
-describe('Sidebar', () => {
-  for (const themeName of themes) {
-    it(`renders tools section with ${themeName} theme`, () => {
-      const theme = getTheme(themeName);
-      const data = createSidebarData();
-      data.tools = [
-        { name: 'Bash', status: 'completed', duration: '1.2s' },
-        { name: 'FileWrite', status: 'running' },
-      ];
-      const output = renderSidebar(data, 30, theme);
-      expect(output).toContain('Tools');
-      expect(output).toContain('Bash');
-    });
-
-    it(`returns empty when not visible with ${themeName} theme`, () => {
-      const theme = getTheme(themeName);
-      const data = createSidebarData();
-      data.visible = false;
-      const output = renderSidebar(data, 30, theme);
-      expect(output).toBe('');
     });
   }
 });

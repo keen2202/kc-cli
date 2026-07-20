@@ -5,6 +5,7 @@ import { QueryEngine } from '../query/QueryEngine';
 import { formatBanner } from '../ui';
 import { setLogLevel } from '../services/logger';
 import { updateStatus } from '../ui/statusline';
+import { runWithScopedState } from './state';
 
 // Re-export for backward compatibility (moved to Bootstrap.ts)
 export { buildSystemPrompt } from './Bootstrap';
@@ -62,6 +63,9 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
 
   const result = await bootstrap.compose();
 
+  // Wrap post-compose execution in scoped state so getState() works for all
+  // downstream code paths (REPL, interactive UI, single-prompt, JSON mode).
+  return runWithScopedState(result.state, async () => {
   const { queryEngine, provider, model, apiKey, apiBaseUrl, config, layers, tools, imBridge, state } = result;
   const maxTurns = state.maxTurns || 80;
 
@@ -121,4 +125,5 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
   if (opts.profile) {
     console.log('\n' + getProfileReport());
   }
+  }); // runWithScopedState(result.state, ...)
 }

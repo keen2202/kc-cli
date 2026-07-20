@@ -1,7 +1,5 @@
 // Real ink sidebar panel — consumes live SidebarData collected by
 // useStreamingEvents. Replaces the static SidebarPlaceholder in AppRoot.
-// The string-rendering counterpart (renderSidebar in Sidebar.ts) belongs to
-// the legacy dead path and is intentionally left untouched.
 
 import React from 'react';
 import { Box, Text } from 'ink';

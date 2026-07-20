@@ -2,6 +2,7 @@
 // Single source of truth for agent and orchestrator event types
 
 import type { ChatMessage, ToolCall, ToolResult, PlanningFinding } from '../query/protocol';
+import type { BudgetSnapshot } from '../services/budget';
 
 /**
  * Token usage tracking
@@ -89,4 +90,5 @@ export type AgentEvent =
   | { type: 'agent:planning_started'; timestamp: number }
   | { type: 'agent:planning_turn'; turn: number; timestamp: number }
   | { type: 'agent:planning_complete'; findings: PlanningFinding[]; timestamp: number }
+  | { type: 'agent:budget_exceeded'; reason: string; remaining: BudgetSnapshot; timestamp: number }
   | MultiAgentEvent;

@@ -227,6 +227,16 @@ export class BudgetEnforcer {
       costUsd: this.sessionCostUsd,
     };
   }
+
+  /**
+   * Fully reset all counters (session + turn). Use when clearing or restoring
+   * a session so the new conversation starts with a fresh budget.
+   */
+  reset(): void {
+    this.sessionTokens = 0;
+    this.turnTokens = 0;
+    this.sessionCostUsd = 0;
+  }
 }
 
 /**
