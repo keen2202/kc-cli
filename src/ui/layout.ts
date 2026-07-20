@@ -94,10 +94,11 @@ const STATUS_BAR_HEIGHT = 1;
 const ERROR_BAR_HEIGHT = 4;
 // Operation summary strip. Sized to the tallest content it can render so it
 // never overflows the fixed-height slot and shifts the layout:
-//   normal  = border(2) + title + op-name + steps + expected + confirm = 7
-//   compact = border(2) + title + op-name + confirm                    = 5
-// (compact hides the steps/expected detail lines.)
-const OPERATION_HEIGHT = 7;
+//   normal  = border(2) + title + op-name + diff-summary + 2 diff lines + confirm = 8
+//             (or title + op-name + steps + expected + confirm when there is no diff)
+//   compact = border(2) + title + op-name + confirm                              = 5
+// (compact hides the steps/expected/diff detail lines.)
+const OPERATION_HEIGHT = 8;
 const OPERATION_HEIGHT_COMPACT = 5;
 // Minimum chat rows to keep visible; the editor is shrunk (below its nominal
 // minimum if necessary) before the chat content is squeezed on short terminals.

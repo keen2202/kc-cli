@@ -249,6 +249,22 @@ export class QueryEngine {
   }
 
   /**
+   * Switch the active model at runtime (e.g., from the /model command).
+   * Recreates the API client under the current provider/key/baseUrl so the
+   * next turn uses the new model. Returns the applied model name.
+   */
+  setModel(model: string): string {
+    this.config.model = model;
+    this.apiClient = createAPIClient({
+      provider: this.config.provider,
+      apiKey: this.config.apiKey,
+      baseUrl: this.config.apiBaseUrl,
+      model,
+    });
+    return model;
+  }
+
+  /**
    * Main query entry point - uses state machine to manage lifecycle
    */
   async *submitMessage(userMessage: string): AsyncGenerator<StreamEvent | AgentEvent> {

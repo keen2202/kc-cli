@@ -10,7 +10,7 @@ import { SessionInfo } from './SessionInfo';
 import { Editor, openExternalEditor } from './Editor';
 import { StatusBar } from './StatusBarView.js';
 import { SidebarPanel } from './SidebarPanel';
-import { type PermissionRequest, type PermissionDecision } from './PermissionDialog';
+import { PermissionDialog, type PermissionRequest, type PermissionDecision } from './PermissionDialog';
 import { OperationSummary, synthesizeOperation, operationsFromTools } from './OperationSummary';
 import { CommandPalette, type CommandItem } from './CommandPalette';
 import { FilePicker } from '../dialogs/FilePicker';
@@ -40,6 +40,10 @@ import { toolRegistry } from '../../tools';
 import { UserProfileService } from '../../services/userProfile';
 import type { UserLevel } from '../../services/userProfile';
 import type { PermissionMode, UIPermissionRequest } from '../../permissions/protocol';
+import { SessionManager } from '../../services/sessionManager';
+import { FileMemoryService } from '../../memory/FileMemoryService';
+import { engineMessagesToUiMessages } from '../session-mapper';
+import type { AgentState } from '../../state/types';
 
 interface FileItem {
   name: string;
@@ -147,10 +151,21 @@ function toKeypressEvent(input: string, key: any): KeypressEvent {
   return { name, ctrl: !!key.ctrl, meta: !!key.meta, shift: !!key.shift };
 }
 
-function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProps) {
+function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: AppOpenCodeProps) {
   // Create event bus and keybinding manager (stable across renders)
   const eventBus = useMemo(() => new UIEventBus(), []);
   const keybindingManager = useMemo(() => createDefaultKeybindings(), []);
+
+  // The active model is promotable at runtime via /model, so it lives in state
+  // (seeded from the prop) and drives the header/status bars after a switch.
+  const [model, setModel] = useState(initialModel);
+
+  // Session persistence + history switching (/session). SessionManager wraps the
+  // filesystem-backed memory service; the service is initialized lazily on first
+  // use (see ensureSessionInit) so startup stays cheap.
+  const memoryService = useMemo(() => new FileMemoryService(), []);
+  const sessionManager = useMemo(() => new SessionManager(memoryService), [memoryService]);
+  const sessionInitRef = useRef(false);
 
   // Streaming state from the event bus
   const {
@@ -199,6 +214,8 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [fileItems, setFileItems] = useState<FileItem[]>([]);
   const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
+  // Ctrl+O expands the pending permission request into a full DiffPreview overlay.
+  const [showDiffDetail, setShowDiffDetail] = useState(false);
 
   // Input history (↑/↓ recall of previously submitted messages)
   const [submittedHistory, setSubmittedHistory] = useState<string[]>([]);
@@ -213,8 +230,8 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
   // Active errors (not dismissed)
   const activeErrors = errors.filter((_, i) => !dismissedErrors.has(i));
 
-  // Get session ID from global state
-  const sessionId = getState().sessionId;
+  // Session ID lives in state so /session new|<id> can swap it and re-render.
+  const [sessionId, setSessionId] = useState(() => getState().sessionId);
 
   // A pending tool authorization is confirmed inline above the editor (not as a
   // modal overlay), so it is deliberately excluded from overlayOpen; useInput
@@ -242,6 +259,7 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
           onDecide: (decision) => {
             resolve(decision);
             setPermissionRequest(null);
+            setShowDiffDetail(false);
           },
         });
       }),
@@ -288,6 +306,37 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
     updateState({ permissionMode: next === 'interactive' ? 'default' : 'auto' });
   }, []);
 
+  // Lazily create the ~/.kc-cli/sessions directory the first time we touch it.
+  const ensureSessionInit = useCallback(async () => {
+    if (sessionInitRef.current) return;
+    await memoryService.initialize();
+    sessionInitRef.current = true;
+  }, [memoryService]);
+
+  // Persist the current conversation to disk (best-effort). Called after each
+  // completed turn so an interrupted session can be resumed via /session.
+  const saveCurrentSession = useCallback(async () => {
+    const engineMessages = queryEngine.getMessages();
+    if (engineMessages.length === 0) return; // never write an empty session
+    try {
+      await ensureSessionInit();
+      const toolsUsed = Array.from(new Set((sidebarData.tools ?? []).map((t) => t.name)));
+      // saveSession only reads cwd/model/provider/turnCount/totalTokensUsed/
+      // createdAt off the state, so construct just those fields.
+      const stateSnapshot = {
+        cwd: getState().cwd,
+        model,
+        provider,
+        turnCount,
+        totalTokensUsed,
+        createdAt: sessionStartTime,
+      } as unknown as AgentState;
+      await sessionManager.saveSession(getState().sessionId, engineMessages, stateSnapshot, toolsUsed);
+    } catch {
+      // Persistence is best-effort; a save failure must never break the session.
+    }
+  }, [queryEngine, sessionManager, ensureSessionInit, sidebarData.tools, model, provider, turnCount, totalTokensUsed, sessionStartTime]);
+
   // Run one engine invocation: add the user + assistant messages, stream the
   // events onto the bus, and return the assistant's accumulated text so callers
   // (notably the goal loop) can inspect the outcome.
@@ -327,9 +376,10 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
       );
     } finally {
       setMode('idle');
+      void saveCurrentSession();
     }
     return assistantText;
-  }, [queryEngine, eventBus, addMessage, setMessages]);
+  }, [queryEngine, eventBus, addMessage, setMessages, saveCurrentSession]);
 
   // Goal mode: iterate the engine toward a high-level goal until the model
   // signals GOAL_ACHIEVED, the iteration cap is hit, or the user cancels (Esc).
@@ -385,6 +435,8 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
           '  /help          - Show help\n' +
           '  /key <api-key> - Set API key\n' +
           '  /clear         - Clear conversation\n' +
+          '  /model [name]  - Show or switch the active model\n' +
+          '  /session [id]  - List sessions, load one, or /session new\n' +
           '  /mode <mode>   - Set permission mode (default|acceptEdits|plan|bypassPermissions)\n' +
           '  /auto          - Autonomous mode (run tools without confirmation)\n' +
           '  /goal <text>   - Goal mode (iterate autonomously toward a goal)\n' +
@@ -483,6 +535,63 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
         break;
       }
 
+      case '/model': {
+        const name = parts.slice(1).join(' ').trim();
+        if (name) {
+          const applied = queryEngine.setModel(name);
+          setModel(applied);
+          addSystemMsg(`Model switched to: ${applied}`);
+        } else {
+          addSystemMsg(`Current model: ${model}\nUsage: /model <name>`);
+        }
+        break;
+      }
+
+      case '/session': {
+        const sub = (parts[1] || 'list').trim();
+        if (sub === 'list') {
+          await ensureSessionInit();
+          const sessions = await sessionManager.listRecentSessions(10);
+          if (sessions.length === 0) {
+            addSystemMsg('No saved sessions yet.');
+          } else {
+            const lines = sessions.map((s) => {
+              const when = new Date(s.metadata.lastModified).toLocaleString();
+              return `  ${s.sessionId}  \u00b7  ${when}  \u00b7  ${s.messages.length} msg(s)`;
+            });
+            addSystemMsg(
+              `Recent sessions:\n${lines.join('\n')}\n\n` +
+              'Use /session <id> to load, or /session new to start fresh.',
+            );
+          }
+        } else if (sub === 'new') {
+          const newId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+          queryEngine.clear();
+          setMessages(() => []);
+          setTurnCount(0);
+          setHistoryIndex(null);
+          updateState({ sessionId: newId });
+          setSessionId(newId);
+          addSystemMsg(`Started new session: ${newId}`);
+        } else {
+          await ensureSessionInit();
+          const loaded = await sessionManager.loadSession(sub);
+          if (!loaded) {
+            addSystemMsg(`Session not found: ${sub}`);
+            break;
+          }
+          queryEngine.messages = loaded.messages;
+          setMessages(() => engineMessagesToUiMessages(loaded.messages));
+          setTurnCount(loaded.state.turnCount);
+          if (loaded.state.model) setModel(loaded.state.model);
+          updateState({ sessionId: sub });
+          setSessionId(sub);
+          setHistoryIndex(null);
+          addSystemMsg(`Loaded session: ${sub} (${loaded.messages.length} message(s)).`);
+        }
+        break;
+      }
+
       case '/exit':
         process.exit(0);
         break;
@@ -490,7 +599,7 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
       default:
         addSystemMsg(`Unknown command: ${cmd}. Type /help to see the list of available commands.`);
     }
-  }, [queryEngine, addSystemMsg, setMessages, keybindingManager, applyExecutionMode, runGoal]);
+  }, [queryEngine, addSystemMsg, setMessages, keybindingManager, applyExecutionMode, runGoal, model, sessionManager, ensureSessionInit]);
 
   const submitMessage = useCallback(async (text: string) => {
     // Record for ↑/↓ history recall.
@@ -582,6 +691,8 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
     { id: 'tools', label: '/tools — List tools', keywords: '工具', run: () => handleSlashCommand('/tools') },
     { id: 'status', label: '/status — Show status', keywords: '状态', run: () => handleSlashCommand('/status') },
     { id: 'level', label: '/level — User level', keywords: '级别', run: () => handleSlashCommand('/level') },
+    { id: 'model', label: '/model — Show/switch model', keywords: 'model 模型', run: () => handleSlashCommand('/model') },
+    { id: 'session', label: '/session — List/switch sessions', keywords: 'session 会话', run: () => handleSlashCommand('/session') },
     { id: 'exit', label: '/exit — Exit', keywords: '退出 quit', run: () => handleSlashCommand('/exit') },
     { id: 'toggle-sidebar', label: 'Toggle Sidebar', keywords: 'sidebar panel', run: () => setSidebarHidden((h) => !h) },
     { id: 'file-picker', label: 'File Picker', keywords: 'attach file', run: () => { void openFilePicker(); } },
@@ -651,6 +762,15 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
     // pending in interactive mode: Enter=allow, A=always, Esc=deny. Everything
     // else is swallowed so keystrokes never leak into the editor mid-decision.
     if (permissionRequest) {
+      // While the expanded diff overlay is open, PermissionDialog owns the
+      // keyboard (Y/A/N/Esc); swallow everything else here so keys never leak.
+      if (showDiffDetail) return;
+      // Ctrl+O expands the pending request into a full DiffPreview overlay,
+      // but only when there is a diff to review.
+      if (key.ctrl && (input === 'o' || input === 'O')) {
+        if (permissionRequest.diffs && permissionRequest.diffs.length > 0) setShowDiffDetail(true);
+        return;
+      }
       if (key.return) { permissionRequest.onDecide('allow'); return; }
       if (input === 'a' || input === 'A') { permissionRequest.onDecide('allow_always'); return; }
       if (key.escape) { permissionRequest.onDecide('deny'); return; }
@@ -823,7 +943,7 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
         <ChatPanel
           messages={messages}
           thinkingChains={thinkingChains}
-          isModalOpen={overlayOpen}
+          isModalOpen={overlayOpen || (showDiffDetail && permissionRequest != null)}
         />
       }
       editor={
@@ -857,7 +977,9 @@ function AppOpenCode({ queryEngine, provider, model, maxTurns }: AppOpenCodeProp
         />
       }
       overlay={
-        showPalette ? (
+        showDiffDetail && permissionRequest ? (
+          <PermissionDialog request={permissionRequest} onClose={() => setShowDiffDetail(false)} />
+        ) : showPalette ? (
           <CommandPalette commands={paletteCommands} onClose={() => setShowPalette(false)} />
         ) : showFilePicker ? (
           <FilePicker files={fileItems} onSelect={onFileSelect} onCancel={() => setShowFilePicker(false)} />

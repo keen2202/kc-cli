@@ -39,11 +39,31 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
   const [errors, setErrors] = useState<string[]>([]);
   const [totalTokensUsed, setTotalTokensUsed] = useState(0);
 
-  const syncRender = useCallback(() => {
+  // Pending coalesced render timer. High-frequency delta events (text/thinking)
+  // only schedule a flush instead of cloning the whole message tree per token;
+  // lifecycle events flush immediately. This keeps long conversations from
+  // paying an O(n) array/Map clone + full reconciliation on every streamed token.
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushRender = useCallback(() => {
+    if (flushTimerRef.current !== null) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
     setMessages([...messagesRef.current]);
     setThinkingChains(new Map(thinkingChainsRef.current));
     setSidebarData({ ...sidebarDataRef.current });
   }, []);
+
+  // Schedule a coalesced render on the next frame (~33ms) so bursts of delta
+  // events collapse into a single React update.
+  const scheduleRender = useCallback(() => {
+    if (flushTimerRef.current !== null) return;
+    flushTimerRef.current = setTimeout(() => {
+      flushTimerRef.current = null;
+      flushRender();
+    }, 33);
+  }, [flushRender]);
 
   useEffect(() => {
     const unsubscribe = eventBus.on('*', (event: AgentEvent | StreamEvent) => {
@@ -58,10 +78,11 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
           const msgs = messagesRef.current;
           const idx = msgs.findIndex((m) => m.id === assistantId);
           if (idx >= 0) {
+            // Mutate the entry in place; the coalesced flush produces the single
+            // fresh array copy React needs (avoids a clone per streamed token).
             msgs[idx] = { ...msgs[idx], content: (msgs[idx].content || '') + ev.text };
-            messagesRef.current = [...msgs];
           }
-          syncRender();
+          scheduleRender();
           break;
         }
 
@@ -78,7 +99,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
             rawContent,
             steps: classifyThinkingSteps(rawContent),
           };
-          syncRender();
+          scheduleRender();
           break;
         }
 
@@ -98,7 +119,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
             }
           }
           sidebarDataRef.current.tools.push({ name: ev.toolCall.toolName, status: 'running' });
-          syncRender();
+          flushRender();
           break;
         }
 
@@ -123,7 +144,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
               messagesRef.current = [...msgs];
             }
           }
-          syncRender();
+          flushRender();
           break;
         }
 
@@ -142,7 +163,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
             setTotalTokensUsed(totalTokensUsedRef.current);
           }
 
-          syncRender();
+          flushRender();
           break;
         }
 
@@ -156,14 +177,20 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
           currentAssistantIdRef.current = null;
           currentThinkingChainRef.current = null;
           setIsStreaming(false);
-          syncRender();
+          flushRender();
           break;
         }
       }
     });
 
-    return () => unsubscribe();
-  }, [eventBus, syncRender]);
+    return () => {
+      unsubscribe();
+      if (flushTimerRef.current !== null) {
+        clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+    };
+  }, [eventBus, flushRender, scheduleRender]);
 
   const addMessage = useCallback((msg: ChatMessage) => {
     messagesRef.current = [...messagesRef.current, msg];

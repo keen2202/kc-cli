@@ -14,6 +14,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { useTheme } from '../hooks/useTheme';
 import { truncate } from '../layout';
+import { computeDiff } from '../diff-viewer';
 import type { FilePatchPreview } from '../../permissions/protocol';
 
 export interface OperationItem {
@@ -77,6 +78,38 @@ export function operationsFromTools(tools: SidebarToolLike[]): OperationItem[] {
     .map((t) => ({ toolName: t.name, steps: [], expected: '', status: t.status }));
 }
 
+export interface CondensedDiff {
+  adds: number;
+  removes: number;
+  fileCount: number;
+  /** First few changed lines (add/remove only) for an at-a-glance preview. */
+  sampleLines: Array<{ type: 'add' | 'remove'; content: string }>;
+}
+
+/**
+ * Summarize pending file patches into total +/- counts and a bounded sample of
+ * changed lines, so the fixed-height confirm strip can show an at-a-glance diff
+ * without overflowing its layout budget. Kept pure and exported for testing.
+ */
+export function condenseDiffs(diffs: FilePatchPreview[], maxSampleLines: number): CondensedDiff {
+  let adds = 0;
+  let removes = 0;
+  const sampleLines: CondensedDiff['sampleLines'] = [];
+  for (const d of diffs) {
+    const lines = computeDiff(d.oldContent ?? '', d.newContent);
+    for (const line of lines) {
+      if (line.type === 'add') {
+        adds++;
+        if (sampleLines.length < maxSampleLines) sampleLines.push({ type: 'add', content: line.content });
+      } else if (line.type === 'remove') {
+        removes++;
+        if (sampleLines.length < maxSampleLines) sampleLines.push({ type: 'remove', content: line.content });
+      }
+    }
+  }
+  return { adds, removes, fileCount: diffs.length, sampleLines };
+}
+
 interface OperationSummaryProps {
   operations: OperationItem[];
   mode: 'confirm' | 'live';
@@ -96,6 +129,9 @@ export function OperationSummary({ operations, mode, compact = false, autoApprov
   // shows up to 3 one-line ops, or a single op on compact widths.
   const maxVisible = mode === 'confirm' ? 1 : compact ? 1 : 3;
   const visible = operations.slice(0, maxVisible);
+  // Whether any visible op carries file diffs, so the confirm bar can advertise
+  // the Ctrl+O expand affordance only when there is something to expand.
+  const hasPendingDiffs = mode === 'confirm' && visible.some((op) => !!op.diffs && op.diffs.length > 0);
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor={colors.border} paddingLeft={1} paddingRight={1}>
@@ -103,21 +139,44 @@ export function OperationSummary({ operations, mode, compact = false, autoApprov
         <Text bold color={colors.primary}>{title}</Text>
         {mode === 'live' && autoApproved ? <Text color={colors.muted}> · auto-approved</Text> : null}
       </Box>
-      {visible.map((op, i) => (
-        <Box key={`${op.toolName}-${i}`} flexDirection="column">
-          <Box>
-            <Text color={colors.success}>{op.status === 'running' ? '● ' : '→ '}</Text>
-            <Text bold>{op.toolName}</Text>
-            {op.summary ? <Text color={colors.muted}> {truncate(op.summary, 48)}</Text> : null}
+      {visible.map((op, i) => {
+        const opDiffs = mode === 'confirm' ? op.diffs : undefined;
+        const hasDiffs = !!opDiffs && opDiffs.length > 0;
+        // Sample at most 2 changed lines on normal widths (fits the 8-row
+        // budget: title + op-name + summary + 2 lines + confirm); none on compact.
+        const condensed = hasDiffs ? condenseDiffs(opDiffs!, compact ? 0 : 2) : null;
+        return (
+          <Box key={`${op.toolName}-${i}`} flexDirection="column">
+            <Box>
+              <Text color={colors.success}>{op.status === 'running' ? '● ' : '→ '}</Text>
+              <Text bold>{op.toolName}</Text>
+              {condensed ? (
+                <Text color={colors.muted}> +{condensed.adds} -{condensed.removes}</Text>
+              ) : op.summary ? (
+                <Text color={colors.muted}> {truncate(op.summary, 48)}</Text>
+              ) : null}
+            </Box>
+            {condensed && !compact ? (
+              <>
+                <Text color={colors.muted}>
+                  {'  '}{condensed.fileCount} file(s) · +{condensed.adds} -{condensed.removes}
+                </Text>
+                {condensed.sampleLines.map((line, li) => (
+                  <Text key={`diff-${li}`} color={line.type === 'add' ? colors.success : colors.error}>
+                    {'  '}{line.type === 'add' ? '+' : '-'} {truncate(line.content, 58)}
+                  </Text>
+                ))}
+              </>
+            ) : null}
+            {!condensed && !compact && op.steps.length > 0 ? (
+              <Text color={colors.muted}>  steps: {truncate(op.steps.slice(0, 3).join(' \u2192 '), 60)}</Text>
+            ) : null}
+            {!condensed && !compact && op.expected ? (
+              <Text color={colors.muted}>  expected: {truncate(op.expected, 60)}</Text>
+            ) : null}
           </Box>
-          {!compact && op.steps.length > 0 ? (
-            <Text color={colors.muted}>  steps: {truncate(op.steps.slice(0, 3).join(' → '), 60)}</Text>
-          ) : null}
-          {!compact && op.expected ? (
-            <Text color={colors.muted}>  expected: {truncate(op.expected, 60)}</Text>
-          ) : null}
-        </Box>
-      ))}
+        );
+      })}
       {mode === 'confirm' ? (
         <Box>
           <Text color={colors.success} bold>[Enter]</Text>
@@ -126,6 +185,13 @@ export function OperationSummary({ operations, mode, compact = false, autoApprov
           <Text color={colors.muted}> Always  </Text>
           <Text color={colors.error} bold>[Esc]</Text>
           <Text color={colors.muted}> Cancel</Text>
+          {hasPendingDiffs ? (
+            <>
+              <Text color={colors.muted}>  </Text>
+              <Text color={colors.primary} bold>[Ctrl+O]</Text>
+              <Text color={colors.muted}> Expand diff</Text>
+            </>
+          ) : null}
         </Box>
       ) : null}
     </Box>
