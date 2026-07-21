@@ -278,9 +278,39 @@ export class QueryEngine {
   }
 
   /**
+   * Reset per-query control state so a new user message starts a fresh query
+   * loop while preserving the conversation history.
+   *
+   * Without this, the state machine stays in a terminal state ('completed' or
+   * 'error') after the previous turn, and the `while (!isTerminal())` guard in
+   * submitMessage() short-circuits immediately — yielding zero events (the UI
+   * shows a running state but produces no output/stream). A prior stream
+   * timeout or user abort would likewise leave `_aborted`/`abortController`
+   * poisoned for every subsequent query.
+   *
+   * Unlike clear()/restoreSession(), this does NOT touch messages, so multi-turn
+   * context is retained.
+   */
+  private resetForNewQuery(): void {
+    // A previous timeout/abort must not poison the new query.
+    if (this._aborted || this.abortController.signal.aborted) {
+      this._aborted = false;
+      this.abortController = new AbortController();
+    }
+    // Return the loop to a runnable state from any terminal/leftover state.
+    if (this.stateMachine.currentState !== 'idle') {
+      this.stateMachine.forceTransitionTo('idle');
+    }
+  }
+
+  /**
    * Main query entry point - uses state machine to manage lifecycle
    */
   async *submitMessage(userMessage: string): AsyncGenerator<StreamEvent | AgentEvent> {
+    // Reset per-query control state (state machine + abort) before starting a
+    // new loop. Conversation history is preserved.
+    this.resetForNewQuery();
+
     // Add user message
     const userMsg: ChatMessage = {
       id: uuidv4(),

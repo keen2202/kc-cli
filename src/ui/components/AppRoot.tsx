@@ -452,8 +452,12 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
       case '/key': {
         const key = parts[1];
         if (key) {
-          queryEngine.setApiKey(key);
-          addSystemMsg('API key updated.');
+          const validationError = queryEngine.setApiKey(key);
+          if (validationError) {
+            addSystemMsg(`Invalid API key: ${validationError}`);
+          } else {
+            addSystemMsg('API key updated.');
+          }
         } else {
           addSystemMsg('Usage: /key <api-key>');
         }
