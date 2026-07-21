@@ -19,7 +19,7 @@ import { UserProfileService } from '../services/userProfile';
 import { getSystemPromptAdaptation } from '../services/behavioralAdapter';
 import { PromptCacheMetrics } from '../services/promptCacheMetrics';
 import { CachePrefixService, buildCacheStrategy } from '../services/cachePrefix';
-import { estimateTaskComplexity } from '../api/prompts/task-prompts';
+import { estimateTaskComplexity, isConversationalMessage } from '../api/prompts/task-prompts';
 import { autoStageFile, autoCommitAll } from '../utils/git';
 import { KCError } from '../utils/errors';
 import { validateApiKey } from '../utils/api-key';
@@ -434,13 +434,21 @@ export class QueryEngine {
             break;
           }
 
-          case 'idle':
-            if (this.planningHandler.isEnabled) {
+          case 'idle': {
+            // Skip planning phase for conversational messages (greetings, small
+            // talk, simple questions) — they don't need code exploration.
+            const lastUserMsg = this.conversation.findLastUserMessage();
+            const isConversational = lastUserMsg?.content
+              ? isConversationalMessage(lastUserMsg.content)
+              : false;
+
+            if (this.planningHandler.isEnabled && !isConversational) {
               this.stateMachine.transitionTo('planning');
             } else {
               this.stateMachine.transitionTo('compacting');
             }
             break;
+          }
 
           case 'compacting':
             yield* this.compactingPhase();
