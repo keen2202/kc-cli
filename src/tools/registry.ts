@@ -45,32 +45,32 @@ export interface ToolManifestEntry {
  */
 export const TOOL_MANIFEST = [
   // CRITICAL — always eagerly loaded
-  { name: 'Bash', modulePath: './tools/BashTool/index.js', priority: ToolPriority.CRITICAL, eager: true },
-  { name: 'FileRead', modulePath: './tools/FileReadTool/index.js', priority: ToolPriority.CRITICAL, eager: true },
+  { name: 'Bash', modulePath: './BashTool/index.js', priority: ToolPriority.CRITICAL, eager: true },
+  { name: 'FileRead', modulePath: './FileReadTool/index.js', priority: ToolPriority.CRITICAL, eager: true },
   // HIGH — core tools
-  { name: 'FileWrite', modulePath: './tools/FileWriteTool/index.js', priority: ToolPriority.HIGH, eager: true },
-  { name: 'WebSearch', modulePath: './tools/WebSearchTool/index.js', priority: ToolPriority.HIGH, eager: true },
-  { name: 'FileEdit', modulePath: './tools/FileEditTool/index.js', priority: ToolPriority.HIGH, eager: true },
-  { name: 'Grep', modulePath: './tools/GrepTool/index.js', priority: ToolPriority.HIGH, eager: true },
-  { name: 'Glob', modulePath: './tools/GlobTool/index.js', priority: ToolPriority.HIGH, eager: true },
-  { name: 'WebFetch', modulePath: './tools/WebFetchTool/index.js', priority: ToolPriority.HIGH, eager: true },
-  { name: 'Git', modulePath: './tools/GitTool/index.js', priority: ToolPriority.HIGH, eager: true },
-  { name: 'Run', modulePath: './tools/RunTool/index.js', priority: ToolPriority.HIGH, eager: true },
+  { name: 'FileWrite', modulePath: './FileWriteTool/index.js', priority: ToolPriority.HIGH, eager: true },
+  { name: 'WebSearch', modulePath: './WebSearchTool/index.js', priority: ToolPriority.HIGH, eager: true },
+  { name: 'FileEdit', modulePath: './FileEditTool/index.js', priority: ToolPriority.HIGH, eager: true },
+  { name: 'Grep', modulePath: './GrepTool/index.js', priority: ToolPriority.HIGH, eager: true },
+  { name: 'Glob', modulePath: './GlobTool/index.js', priority: ToolPriority.HIGH, eager: true },
+  { name: 'WebFetch', modulePath: './WebFetchTool/index.js', priority: ToolPriority.HIGH, eager: true },
+  { name: 'Git', modulePath: './GitTool/index.js', priority: ToolPriority.HIGH, eager: true },
+  { name: 'Run', modulePath: './RunTool/index.js', priority: ToolPriority.HIGH, eager: true },
   // MEDIUM — system tools
-  { name: 'Sql', modulePath: './tools/SqlTool/index.js', priority: ToolPriority.MEDIUM, eager: false },
-  { name: 'Docker', modulePath: './tools/DockerTool/index.js', priority: ToolPriority.MEDIUM, eager: false },
-  { name: 'Monitor', modulePath: './tools/MonitorTool/index.js', priority: ToolPriority.MEDIUM, eager: false },
-  { name: 'Config', modulePath: './tools/ConfigTool/index.js', priority: ToolPriority.MEDIUM, eager: false },
+  { name: 'Sql', modulePath: './SqlTool/index.js', priority: ToolPriority.MEDIUM, eager: false },
+  { name: 'Docker', modulePath: './DockerTool/index.js', priority: ToolPriority.MEDIUM, eager: false },
+  { name: 'Monitor', modulePath: './MonitorTool/index.js', priority: ToolPriority.MEDIUM, eager: false },
+  { name: 'Config', modulePath: './ConfigTool/index.js', priority: ToolPriority.MEDIUM, eager: false },
   // LOW — task management
-  { name: 'TodoWrite', modulePath: './tools/TodoWriteTool/index.js', priority: ToolPriority.LOW, eager: false },
-  { name: 'TaskCreate', modulePath: './tools/TaskCreateTool/index.js', priority: ToolPriority.LOW, eager: false },
-  { name: 'TaskGet', modulePath: './tools/TaskGetTool/index.js', priority: ToolPriority.LOW, eager: false },
-  { name: 'AskUser', modulePath: './tools/AskUserTool/index.js', priority: ToolPriority.LOW, eager: false },
+  { name: 'TodoWrite', modulePath: './TodoWriteTool/index.js', priority: ToolPriority.LOW, eager: false },
+  { name: 'TaskCreate', modulePath: './TaskCreateTool/index.js', priority: ToolPriority.LOW, eager: false },
+  { name: 'TaskGet', modulePath: './TaskGetTool/index.js', priority: ToolPriority.LOW, eager: false },
+  { name: 'AskUser', modulePath: './AskUserTool/index.js', priority: ToolPriority.LOW, eager: false },
   // DEFERRED — advanced tools, always lazy
-  { name: 'Agent', modulePath: './tools/AgentTool/index.js', priority: ToolPriority.DEFERRED, eager: false },
-  { name: 'Deploy', modulePath: './tools/DeployTool/index.js', priority: ToolPriority.DEFERRED, eager: false },
-  { name: 'TeamCreate', modulePath: './orchestrator/team-create-tool.js', priority: ToolPriority.DEFERRED, eager: false },
-  { name: 'LSP', modulePath: './lsp/tool.js', priority: ToolPriority.DEFERRED, eager: false },
+  { name: 'Agent', modulePath: './AgentTool/index.js', priority: ToolPriority.DEFERRED, eager: false },
+  { name: 'Deploy', modulePath: './DeployTool/index.js', priority: ToolPriority.DEFERRED, eager: false },
+  { name: 'TeamCreate', modulePath: '../orchestrator/team-create-tool.js', priority: ToolPriority.DEFERRED, eager: false },
+  { name: 'LSP', modulePath: '../lsp/tool.js', priority: ToolPriority.DEFERRED, eager: false },
 ] as const;
 
 /**

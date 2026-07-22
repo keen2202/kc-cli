@@ -11,7 +11,7 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 - 🧠 **Smart Model Adaptation**: Provider-specific prompts, dynamic parameter tuning, tiktoken-based token estimation
 - 🧪 **4207 Tests**: Comprehensive test suite across 208 files
 - 🛡️ **Runtime Monitoring**: Sandbox resource monitoring (Docker stats, /proc), image management, and probe-based isolation verification
-- 🪟 **Windows Sandbox**: Native Windows sandbox support via job objects
+- 🪟 **Windows Sandbox**: Native isolation via Windows Sandbox (WSB)
 - 🌳 **Session Tree**: Non-linear conversations with branching, checkout, merge, and branch summaries
 - 🎯 **Budget Enforcement**: Proactive token budget limits per session, turn, tool result, and sub-agent
 - ⚡ **Tiered Compaction**: Four-engine compaction system (CachedMicro, Snip, Full, Force) with priority-based selection
@@ -23,7 +23,7 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 
 ## Features
 
-- **Modular Tools**: 20 built-in tools with two-phase execution (prepare/execute/finalize) — Bash, file I/O, search, Git, SQL, Docker, deployment, task management, and sub-agent spawning
+- **Modular Tools**: 22 built-in tools with two-phase execution (prepare/execute/finalize) — Bash, file I/O, search, Git, SQL, Docker, deployment, task management, sub-agent spawning, team orchestration, and LSP code intelligence
 - **Multi-LLM Support**: Anthropic Claude, OpenAI GPT, Qwen (DashScope), GLM (Zhipu AI), Google Gemini, DeepSeek, and Ollama (local); 9 stream event types including thinking_delta
 - **Permission System**: 6-step deny-first security with bypass-immune safety checks, protected paths, auto-classifier, and plugin-contributed rules (Step 1.5)
 - **Sandbox Isolation**: Docker/Bubblewrap/seccomp backends with per-tool policies, seccomp profiles, and resource limits
@@ -317,7 +317,7 @@ src/
 │   ├── sandbox-probe.ts            # Sandbox escape detection probes
 │   ├── sandbox-monitor.ts          # Runtime resource monitoring (Docker stats, /proc)
 │   ├── sandbox-images.ts           # Docker image management
-│   ├── sandbox-windows.ts          # Windows sandbox backend (job objects)
+│   ├── sandbox-windows.ts          # Windows sandbox backend (Windows Sandbox / WSB)
 │   ├── sandbox-policy.ts           # Per-tool sandbox policies
 │   └── sandbox-profiles.ts         # Seccomp profiles and shell escaping
 │
@@ -433,9 +433,11 @@ src/
 | Grep | Content search in files | ✓ |
 | Monitor | System resource monitoring | ✓ |
 | Run | Compile, test, and run programs | ✗ |
+| LSP | Code intelligence (completions, diagnostics, definitions) | ✓ |
 | Sql | Database queries | ✗ |
 | TaskCreate | Create tasks for progress tracking | ✓ |
 | TaskGet | Retrieve task details | ✓ |
+| TeamCreate | Create and orchestrate multi-agent teams | ✗ |
 | TodoWrite | Manage task lists | ✗ |
 | WebFetch | Fetch content from URLs | ✓ |
 | WebSearch | Web search via configurable providers | ✓ |
@@ -550,7 +552,7 @@ npm run test:coverage # Run tests with coverage report
 - [Home](docs/repowiki/Home.md) — Overview, architecture diagram, quick start
 - [Architecture](docs/repowiki/Architecture.md) — Layer diagram, init sequence, data flow
 - [Query Engine](docs/repowiki/Query-Engine.md) — State machine, streaming, steering
-- [Tools System](docs/repowiki/Tools-System.md) — 20 tools, registry, two-phase execution
+- [Tools System](docs/repowiki/Tools-System.md) — 22 tools, registry, two-phase execution
 - [API Clients](docs/repowiki/API-Clients.md) — 11 providers, prompt system
 - [Permission System](docs/repowiki/Permission-System.md) — 6-step deny-first, rule system
 - [Sandbox](docs/repowiki/Sandbox.md) — Isolation backends, HMAC signing, compaction

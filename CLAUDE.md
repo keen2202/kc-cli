@@ -17,7 +17,7 @@ npm run kc             # Start interactive REPL
 
 - **Entry**: `src/main.ts` → REPL + CLI command handling
 - **Core loop**: `src/query/QueryEngine.ts` — Facade over 4 sub-modules (State, Compaction, Memory, Error); idle→compact→stream→decide→execute state machine with steering support; protocol types in `query/protocol.ts`
-- **Tools**: `src/tools/` — 21 built-in tools using `buildTool()` factory with Zod schemas, two-phase execution (prepare/execute/finalize)
+- **Tools**: `src/tools/` — 22 built-in tools using `buildTool()` factory with Zod schemas, two-phase execution (prepare/execute/finalize)
 - **API clients**: `src/api/` — 11 providers (Anthropic, OpenAI, DeepSeek, Qwen, GLM, Mimo, Kimi, Step, Gemini, OpenAI-compatible, Ollama); extend `BaseApiClient`; protocol types in `api/protocol.ts`
 - **Permissions**: `src/permissions/` — 6-step deny-first with bypass-immune protected paths + plugin-contributed rules (Step 1.5)
 - **Sandbox**: `src/services/sandbox*.ts` — Docker/Bubblewrap/seccomp backends with fallback chain

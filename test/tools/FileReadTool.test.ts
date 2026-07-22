@@ -30,7 +30,7 @@ function makeTestEnv(): ExecutionEnv {
 
 function makeContext(overrides: Partial<{ cwd: string }> = {}) {
   return {
-    cwd: overrides.cwd ?? '/',
+    cwd: overrides.cwd ?? os.tmpdir(),
     abortController: new AbortController(),
     sandbox: undefined,
     env: makeTestEnv(),
@@ -130,8 +130,9 @@ describe('FileReadTool streaming', () => {
   });
 
   it('returns error for non-existent files', async () => {
+    const missingPath = path.join(os.tmpdir(), `kc-missing-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`);
     const result = await FileReadTool.call!(
-      { path: '/nonexistent/file/path.txt' },
+      { path: missingPath },
       makeContext()
     );
     expect(result.isError).toBe(true);

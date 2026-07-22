@@ -484,7 +484,14 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
       case '/tools': {
         const tools = toolRegistry.getAllTools();
         const lines = tools.map((t) => {
-          const ro = t.isReadOnly ? ' [read-only]' : '';
+          // isReadOnly is an input-dependent predicate function, not a boolean.
+          let readOnly = false;
+          try {
+            readOnly = t.isReadOnly?.({} as any) === true;
+          } catch {
+            readOnly = false;
+          }
+          const ro = readOnly ? ' [read-only]' : '';
           return `  - ${t.name}${ro}`;
         });
         addSystemMsg(`Tools:\n${lines.join('\n')}`);

@@ -82,7 +82,15 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
   if (opts.verbose) {
     console.log(chalk.gray(`\nLoaded ${tools.length} tools:`));
     for (const tool of tools) {
-      const readOnly = tool.isReadOnly ? '(read-only)' : '';
+      // isReadOnly is an input-dependent predicate function, not a boolean.
+      // Probe it with empty input and fall back to false if it throws.
+      let isReadOnly = false;
+      try {
+        isReadOnly = tool.isReadOnly?.({} as any) === true;
+      } catch {
+        isReadOnly = false;
+      }
+      const readOnly = isReadOnly ? '(read-only)' : '';
       console.log(chalk.gray(`  - ${tool.name} ${readOnly}`));
     }
     console.log(chalk.gray(`\nLLM Provider: ${provider}`));

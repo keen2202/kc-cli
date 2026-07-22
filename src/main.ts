@@ -303,15 +303,18 @@ async function handleCommand(
       break;
     }
 
-    case '/tools':
+    case '/tools': {
+      // Load lazily-registered tools so the full set is listed, not just eager ones.
+      await toolRegistry.preloadAllTools();
       const tools = toolRegistry.getAllTools();
       console.log(chalk.bold('\n🔧 Available Tools:'));
       for (const tool of tools) {
-        const readOnly = tool.isReadOnly ? chalk.green(' [read-only]') : '';
+        const readOnly = evalToolFlag(tool.isReadOnly, false) ? chalk.green(' [read-only]') : '';
         console.log(chalk.gray(`  - ${tool.name}${readOnly}`));
       }
       console.log();
       break;
+    }
 
     case '/status': {
       const state = getState();
@@ -395,15 +398,34 @@ async function showConfig() {
 
 // ── Subcommand: list tools ──
 
+/**
+ * Safely evaluate an input-dependent tool predicate (isReadOnly / isConcurrencySafe)
+ * for display. These are functions that may inspect the tool input, so we probe with
+ * empty input and fall back if evaluation throws (e.g. reading `input.command`).
+ * NOTE: the previous code tested the function reference for truthiness, which is
+ * always true — every tool wrongly showed "read-only". This evaluates the predicate.
+ */
+function evalToolFlag(fn: ((input: any) => boolean) | undefined, fallback: boolean): boolean {
+  if (typeof fn !== 'function') return fallback;
+  try {
+    return fn({}) === true;
+  } catch {
+    return fallback;
+  }
+}
+
 async function listTools() {
   await registerBuiltInTools();
+  // Load lazily-registered tools (Sql, Docker, Config, Agent, LSP, …) so the full
+  // tool set is listed, not just the eagerly-registered ones.
+  await toolRegistry.preloadAllTools();
   const tools = toolRegistry.getAllTools();
 
   console.log(chalk.bold('\n🔧 Available Tools:\n'));
 
   for (const tool of tools) {
-    const readOnly = tool.isReadOnly ? chalk.green('✓') : chalk.red('✗');
-    const concurrent = tool.isConcurrencySafe ? chalk.green('✓') : chalk.red('✗');
+    const readOnly = evalToolFlag(tool.isReadOnly, false) ? chalk.green('✓') : chalk.red('✗');
+    const concurrent = evalToolFlag(tool.isConcurrencySafe, true) ? chalk.green('✓') : chalk.red('✗');
 
     console.log(chalk.cyan.bold(`  ${tool.name}`));
     console.log(chalk.gray(`    ${tool.description}`));

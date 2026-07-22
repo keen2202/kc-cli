@@ -196,6 +196,11 @@ export class Bootstrap {
     // ── Phase 3a: Register built-in tools ──
     if (!bareMode) {
       await registerBuiltInTools();
+      // Load the lazily-registered tools (Sql, Docker, Config, Agent, LSP, …) so
+      // the full tool set is present in the pool assembled below. Without this,
+      // getAllTools() only returns the eagerly-registered tools and the model
+      // never sees the deferred ones.
+      await toolRegistry.preloadAllTools();
     }
     profileCheckpoint('tools_registered');
 

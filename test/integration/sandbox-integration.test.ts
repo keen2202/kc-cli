@@ -19,6 +19,9 @@ describe('Sandbox Integration', () => {
       workDir: '/tmp',
       enabled: true,
       backend: 'bubblewrap',
+      // Don't hard-fail when no real backend is present (e.g. Windows dev boxes);
+      // these tests only assert fallback/policy behavior.
+      failIfNoSandbox: false,
     });
     backendName = manager.getBackendName();
   });
@@ -141,6 +144,7 @@ describe('Sandbox Backend Fallback Chain', () => {
       workDir: '/tmp',
       enabled: true,
       backend: 'docker', // May not be available
+      failIfNoSandbox: false,
     });
     // Should resolve to something valid
     expect(['docker', 'bubblewrap', 'seccomp', 'noop']).toContain(manager.getBackendName());
@@ -152,6 +156,7 @@ describe('Sandbox Backend Fallback Chain', () => {
       workDir: '/tmp',
       enabled: true,
       backend: 'docker',
+      failIfNoSandbox: false,
     });
 
     // If docker is not available and we fell back, there should be a warning

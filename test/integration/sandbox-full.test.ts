@@ -148,7 +148,14 @@ describe('SandboxManager Full Integration', () => {
 
       // Stop monitor
       const metrics = manager.stopMonitor();
-      expect(metrics.length).toBeGreaterThanOrEqual(1);
+      // The 'proc' collector reads /proc, which only exists on Linux. On other
+      // platforms (Windows/macOS) no samples are collected, so only assert a
+      // sample was captured where /proc is available.
+      if (process.platform === 'linux') {
+        expect(metrics.length).toBeGreaterThanOrEqual(1);
+      } else {
+        expect(Array.isArray(metrics)).toBe(true);
+      }
 
       // Check thresholds with collected metrics
       const status = manager.checkThresholds();

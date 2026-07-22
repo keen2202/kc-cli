@@ -200,6 +200,7 @@ describe('Sandbox E2E Security Verification', () => {
         workDir: '/tmp',
         enabled: true,
         backend: 'docker',
+        failIfNoSandbox: false,
       });
       const backend = dockerManager.getBackendName();
       expect(['docker', 'bubblewrap', 'seccomp', 'noop']).toContain(backend);
@@ -210,6 +211,7 @@ describe('Sandbox E2E Security Verification', () => {
         workDir: '/tmp',
         enabled: true,
         backend: 'bubblewrap',
+        failIfNoSandbox: false,
       });
       if (!noopManager.isAvailable()) {
         expect(noopManager.getBackendName()).toBe('noop');
@@ -242,6 +244,7 @@ describe('Sandbox Policy Enforcement E2E', () => {
       workDir: '/tmp',
       enabled: true,
       backend: 'docker',
+      failIfNoSandbox: false,
     });
     const policy = manager.getToolSandboxPolicy('WebFetch');
     expect(policy.allowNetwork).toBe(true);

@@ -24,6 +24,7 @@ vi.mock('../tools', () => ({
   registerBuiltInTools: vi.fn().mockResolvedValue(undefined),
   toolRegistry: {
     getAllTools: () => [],
+    preloadAllTools: vi.fn().mockResolvedValue(undefined),
   },
 }));
 

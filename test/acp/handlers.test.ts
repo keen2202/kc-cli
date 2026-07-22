@@ -23,6 +23,7 @@ vi.mock('../../src/bootstrap/config', () => ({
 vi.mock('../../src/tools', () => ({
   toolRegistry: {
     getAllTools: vi.fn(() => []),
+    preloadAllTools: vi.fn().mockResolvedValue(undefined),
   },
   registerBuiltInTools: vi.fn().mockResolvedValue(undefined),
 }));
