@@ -312,11 +312,14 @@ const WRITE_CAPABLE_TOOLS = new Set([
  * WebFetch url (SSRF internal-network) — in addition to path/command.
  */
 /**
- * Rough check whether a string looks like a file path (starts with / or ./ or ~/)
+ * Rough check whether a string looks like a file path.
+ * Covers Unix (`/`, `./`, `../`, `~/`), Windows drive-letter (`C:\`, `C:/`),
+ * and UNC (`\\server\share`) prefixes so drive/UNC paths also reach
+ * `tryRealpath` for symlink/junction resolution.
  * Avoids calling realpath on things that are clearly not paths (e.g. SQL queries).
  */
 function looksLikePath(value: string): boolean {
-  return /^(\/|\.\/|\.\.\/|~\/)/.test(value);
+  return /^(\/|\.\/|\.\.\/|~\/|[a-zA-Z]:[\\/]|\\\\)/.test(value);
 }
 
 /**

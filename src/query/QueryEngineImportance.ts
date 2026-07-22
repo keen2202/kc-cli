@@ -1,4 +1,5 @@
 import type { ChatMessage, AssistantMessage, TurnImportance, TurnTag } from './protocol';
+import { buildSourcePathRegex } from '../constants';
 
 /**
  * Auto-tagging heuristics engine.
@@ -89,7 +90,7 @@ export class ImportanceTagger {
 
   private extractFilePaths(msg: AssistantMessage, outputs: string[]): string[] {
     const combined = [msg.content || '', ...outputs].join('\n');
-    const matches = combined.match(/[\w./-]+\.(?:py|ts|tsx|js|jsx|go|rs|java|rb)/g) || [];
+    const matches = combined.match(buildSourcePathRegex()) || [];
     return [...new Set(matches)].slice(0, 15);
   }
 

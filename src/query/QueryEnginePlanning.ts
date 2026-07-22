@@ -1,4 +1,5 @@
 import type { AssistantMessage, PlanningFinding, PlanningPhaseConfig } from './protocol';
+import { buildSourcePathRegex } from '../constants';
 
 const PLANNING_SYSTEM_PROMPT = `## PLANNING PHASE
 
@@ -97,9 +98,7 @@ export class PlanningPhaseHandler {
       const hypothesisMatch = content.match(
         /(?:hypothesis|plan|root cause|the (?:bug|issue|problem) is)[:\s]+(.+?)(?:\n|$)/i
       );
-      const fileMatches = content.match(
-        /[\w./-]+\.(?:py|ts|tsx|js|go|rs|java)\b/g
-      );
+      const fileMatches = content.match(buildSourcePathRegex());
       const errorMatch = content.match(
         /(?:Error|AssertionError|FAILED)[:\s]+(.+?)(?:\n|$)/i
       );

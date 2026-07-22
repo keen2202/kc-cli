@@ -4,7 +4,7 @@ import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ToolCall, ToolResult } from '../query/protocol';
-import type { ToolDefinition, ToolUseContext } from '../tools/protocol';
+import type { ToolDefinition, ToolUseContext, UserInteractionHandler } from '../tools/protocol';
 import type {
   PermissionResult,
   UIPermissionRequest,
@@ -147,6 +147,10 @@ export class ToolExecutor {
   // 'ask' permission decisions are routed to the user instead of silently
   // proceeding. In non-interactive (CLI) contexts this stays null.
   private permissionRequestHandler: UIPermissionRequestHandler | null = null;
+  // Optional interactive clarification handler (set by the UI or a CLI stdin
+  // implementation). When present, tools like AskUser route through it to
+  // block for real user input. Null in non-interactive contexts.
+  private userInteractionHandler: UserInteractionHandler | null = null;
 
   constructor(
     tools: ToolDefinition[],
@@ -460,6 +464,7 @@ export class ToolExecutor {
       abortController: toolAbortController,
       sandbox: this.sandboxManager,
       env: context.env ?? this.executionEnv,
+      interaction: context.interaction ?? this.userInteractionHandler ?? undefined,
     });
 
     // Race between timeout and execution
@@ -521,6 +526,7 @@ export class ToolExecutor {
       ...context,
       sandbox: this.sandboxManager,
       env: context.env ?? this.executionEnv,
+      interaction: context.interaction ?? this.userInteractionHandler ?? undefined,
     };
 
     // Group tools by concurrency safety
@@ -698,6 +704,14 @@ export class ToolExecutor {
    */
   setPermissionRequestHandler(handler: UIPermissionRequestHandler | null): void {
     this.permissionRequestHandler = handler;
+  }
+
+  /**
+   * Register an interactive clarification handler (H4). When set, tools such as
+   * AskUser route through it to block for real user input. Pass null to detach.
+   */
+  setUserInteractionHandler(handler: UserInteractionHandler | null): void {
+    this.userInteractionHandler = handler;
   }
 
   /** Current permission mode from global state (defaults to 'default'). */

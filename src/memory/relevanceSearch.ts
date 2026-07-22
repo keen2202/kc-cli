@@ -3,6 +3,7 @@
 import type { MemoryManifestEntry, MemoryEntry } from './types';
 import { getAgeText } from '../utils/format';
 import { getCacheManager } from '../services/cache';
+import { tokenize } from '../utils/tokenize';
 
 // Feedback tracking: maps memory fileName to reference count, bounded by LRU cache
 const feedbackMap = getCacheManager().getOrCreate<{ loaded: number; referenced: number }>(
@@ -18,6 +19,27 @@ const scoreCache = getCacheManager().getOrCreate<number>('memory-relevance', 'me
 let staleThresholdDays = 30;
 
 /**
+ * Optional semantic scorer extension point (H2).
+ * Returning `undefined` falls back to the keyword/token-overlap path.
+ * No embedding implementation is shipped in this phase; this is the seam for one.
+ */
+export interface SemanticScorer {
+  score(query: string, entry: MemoryManifestEntry): number | undefined;
+}
+
+let semanticScorer: SemanticScorer | undefined;
+
+/** Register (or clear) the optional semantic scorer. */
+export function setSemanticScorer(scorer: SemanticScorer | undefined): void {
+  semanticScorer = scorer;
+}
+
+/** Stable, order-/case-independent signature of a query's token set (cache key). */
+function querySignatureOf(tokens: string[]): string {
+  return [...tokens].sort().join('\u0001');
+}
+
+/**
  * Find relevant memories using heuristic keyword matching
  * Returns up to `limit` most relevant memory file names
  */
@@ -29,15 +51,16 @@ export function findRelevantMemories(
 ): string[] {
   if (memories.length === 0) return [];
 
-  // Pre-compute query words once (shared across all memories)
+  // Pre-compute query tokens once (shared across all memories).
+  // Uses the CJK-aware tokenizer so Chinese/Japanese/Korean queries retrieve too.
   const queryLower = query.toLowerCase();
-  const queryWords = queryLower.split(/\s+/).filter((w) => w.length > 2);
+  const queryTokens = tokenize(query);
   const recentToolsLower = recentTools?.map(t => t.toLowerCase());
 
-  // Calculate relevance scores (using internal function to avoid re-computing query words)
+  // Calculate relevance scores (using internal function to avoid re-computing query tokens)
   const scored = memories.map((memory) => ({
     fileName: memory.fileName,
-    score: calculateRelevanceScoreInner(queryLower, queryWords, memory, recentToolsLower),
+    score: calculateRelevanceScoreInner(queryLower, queryTokens, memory, recentToolsLower),
   }));
 
   // Sort by score descending
@@ -96,40 +119,44 @@ export function calculateRelevanceScore(
   memoryOrRecent?: MemoryManifestEntry | string[],
   recentToolsOrUndefined?: string[]
 ): number {
-  // Support both old signature (query, memory, recentTools) and new (queryLower, queryWords, memory, recentToolsLower)
+  // Support both old signature (query, memory, recentTools) and new (queryLower, queryTokens, memory, recentToolsLower)
   let queryLower: string;
-  let queryWords: string[];
+  let queryTokens: string[];
   let memory: MemoryManifestEntry;
   let recentToolsLower: string[] | undefined;
 
   if (Array.isArray(memoryOrWords)) {
-    // New signature: (queryLower, queryWords, memory, recentToolsLower)
+    // New signature: (queryLower, queryTokens, memory, recentToolsLower)
     queryLower = queryOrLower;
-    queryWords = memoryOrWords;
+    queryTokens = memoryOrWords;
     memory = memoryOrRecent as MemoryManifestEntry;
     recentToolsLower = recentToolsOrUndefined;
   } else {
     // Old signature: (query, memory, recentTools)
     queryLower = queryOrLower.toLowerCase();
-    queryWords = queryLower.split(/\s+/).filter((w) => w.length > 2);
+    queryTokens = tokenize(queryOrLower);
     memory = memoryOrWords;
     recentToolsLower = (memoryOrRecent as string[] | undefined)?.map(t => t.toLowerCase());
   }
 
-  return calculateRelevanceScoreInner(queryLower, queryWords, memory, recentToolsLower);
+  return calculateRelevanceScoreInner(queryLower, queryTokens, memory, recentToolsLower);
 }
 
 /**
  * Internal relevance score calculation with pre-computed values.
+ * Combines exact-substring match (high weight), per-token description/filename
+ * matches, and a token-overlap ratio bonus (CJK-aware), then applies type,
+ * recency, feedback and confidence multipliers.
  */
 function calculateRelevanceScoreInner(
   queryLower: string,
-  queryWords: string[],
+  queryTokens: string[],
   memory: MemoryManifestEntry,
   recentToolsLower?: string[]
 ): number {
-  // Check cache first
-  const cacheKey = `${queryLower}:${memory.fileName}`;
+  // Cache key uses a normalized token signature so case/word-order variants
+  // of the same query share cache entries (avoids cache churn).
+  const cacheKey = `${querySignatureOf(queryTokens)}:${memory.fileName}`;
   const cached = scoreCache.get(cacheKey);
   if (cached !== undefined) {
     return cached;
@@ -139,23 +166,44 @@ function calculateRelevanceScoreInner(
 
   const description = memory.description.toLowerCase();
   const fileName = memory.fileName.toLowerCase();
+  const descTokens = new Set(tokenize(memory.description));
+  const fileTokens = new Set(tokenize(memory.fileName));
 
   // Exact match in description (high weight)
-  if (description.includes(queryLower)) {
+  if (queryLower && description.includes(queryLower)) {
     score += 50;
   }
 
-  // Word matches in description
-  for (const word of queryWords) {
-    if (description.includes(word)) {
+  // Per-token matches in description
+  for (const token of queryTokens) {
+    if (description.includes(token)) {
       score += 10;
     }
   }
 
-  // File name matches
-  for (const word of queryWords) {
-    if (fileName.includes(word)) {
+  // Per-token matches in file name
+  for (const token of queryTokens) {
+    if (fileName.includes(token)) {
       score += 15;
+    }
+  }
+
+  // Token-overlap ratio bonus: rewards higher query coverage (CJK-aware).
+  if (queryTokens.length > 0) {
+    let matched = 0;
+    for (const token of queryTokens) {
+      if (descTokens.has(token) || fileTokens.has(token)) matched++;
+    }
+    if (matched > 0) {
+      score += Math.round((matched / queryTokens.length) * 20);
+    }
+  }
+
+  // Optional semantic signal (extension point; no-op by default)
+  if (semanticScorer) {
+    const sem = semanticScorer.score(queryLower, memory);
+    if (sem !== undefined) {
+      score += sem;
     }
   }
 
@@ -251,6 +299,7 @@ export function resetRelevanceState(): void {
   feedbackMap.clear();
   scoreCache.clear();
   staleThresholdDays = 30;
+  semanticScorer = undefined;
 }
 
 /**

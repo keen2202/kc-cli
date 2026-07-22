@@ -12,6 +12,25 @@ export interface SandboxManagerLike {
   shouldSandboxTool(toolName: string): 'run-sandboxed' | 'run-unsandboxed' | 'deny';
 }
 
+/** A request for interactive clarification from the user (H4). */
+export interface UserInteractionRequest {
+  /** The question to present to the user. */
+  question: string;
+  /** Optional list of choices; the resolved answer may be one of these. */
+  options?: string[];
+  /** Default answer used when the user provides none. */
+  default?: string;
+}
+
+/**
+ * Abstraction for blocking user interaction (H4). Registered by the UI or a
+ * CLI stdin implementation. `ask` resolves with the user's answer.
+ * Mirrors the `permissionRequestHandler` wiring pattern on the executor.
+ */
+export interface UserInteractionHandler {
+  ask(request: UserInteractionRequest): Promise<string>;
+}
+
 export interface ToolUseContext {
   cwd: string;
   abortController: AbortController;
@@ -20,6 +39,8 @@ export interface ToolUseContext {
   sandbox?: SandboxManagerLike;
   /** Execution environment abstraction for filesystem and shell access. */
   env: ExecutionEnv;
+  /** Optional handler for blocking user clarification (H4). Undefined in non-interactive runs. */
+  interaction?: UserInteractionHandler;
   onProgress?: (progress: ToolCallProgress) => void;
   appendSystemMessage?: (message: string) => void;
 }

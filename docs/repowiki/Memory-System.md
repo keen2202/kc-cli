@@ -112,6 +112,24 @@ function findRelevantMemories(
 ): MemoryEntry[];
 ```
 
+### Multilingual Retrieval (CJK-aware)
+
+Both the query and each memory are tokenized with the shared CJK-aware
+tokenizer (`src/utils/tokenize.ts`) instead of a plain whitespace split, so
+Chinese/Japanese/Korean queries retrieve matching memories. Scoring combines:
+
+- exact-substring match (high weight),
+- per-token description / filename matches,
+- a **token-overlap ratio bonus** rewarding higher query coverage,
+- the existing type / recency / feedback / confidence multipliers.
+
+An unrelated query that shares no tokens still scores `0` (relevance is never
+inflated). The score cache key is a normalized, order-independent token
+signature, so case- and word-order variants of the same query share cache
+entries. A `SemanticScorer` seam (`setSemanticScorer`) is available as an
+optional extension point; returning `undefined` falls back to the keyword path
+(no embedding implementation ships in this phase).
+
 ## Memory Integration
 
 `src/memory/integration.ts`:

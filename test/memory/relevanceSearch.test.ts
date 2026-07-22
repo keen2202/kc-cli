@@ -457,4 +457,72 @@ describe('relevanceSearch', () => {
       expect(getStaleThreshold()).toBe(30);
     });
   });
+
+  describe('CJK / token-overlap (H2)', () => {
+    it('recalls memories for a Chinese query', () => {
+      const memories = [
+        makeManifest({ fileName: 'unrelated.md', description: '烹饪菜谱与饮食' }),
+        makeManifest({ fileName: 'auth.md', description: '用户登录认证模块的设计决策' }),
+      ];
+
+      const result = findRelevantMemories('登录认证', memories, undefined, 2);
+      expect(result[0]).toBe('auth.md');
+    });
+
+    it('gives a positive score for CJK token overlap', () => {
+      const memory = makeManifest({
+        fileName: 'db.md',
+        description: '数据库连接池配置说明',
+      });
+      const score = calculateRelevanceScore('数据库配置', memory);
+      expect(score).toBeGreaterThan(0);
+    });
+
+    it('scores CJK-relevant memory above an unrelated one', () => {
+      const relevant = makeManifest({ fileName: 'a.md', description: '错误处理与日志记录' });
+      const unrelated = makeManifest({ fileName: 'b.md', description: '前端样式与主题' });
+
+      invalidateScoreCache();
+      const relevantScore = calculateRelevanceScore('错误日志', relevant);
+      invalidateScoreCache();
+      const unrelatedScore = calculateRelevanceScore('错误日志', unrelated);
+
+      expect(relevantScore).toBeGreaterThan(unrelatedScore);
+    });
+  });
+
+  describe('cache signature (H2)', () => {
+    it('shares cache across word-order and case variants', () => {
+      const memory = makeManifest({
+        fileName: 'sig.md',
+        description: 'TypeScript configuration guide',
+      });
+
+      const a = calculateRelevanceScore('TypeScript configuration', memory);
+      const b = calculateRelevanceScore('configuration typescript', memory);
+      expect(a).toBe(b);
+    });
+  });
+
+  describe('SemanticScorer extension point (H2)', () => {
+    it('adds the semantic signal when a scorer is registered', async () => {
+      const { setSemanticScorer } = await import('../../src/memory/relevanceSearch');
+      const memory = makeManifest({
+        fileName: 'sem.md',
+        description: 'unrelated content',
+        mtime: Date.now() - 365 * 24 * 60 * 60 * 1000, // old: no recency boost
+      });
+
+      invalidateScoreCache();
+      const base = calculateRelevanceScore('nothing matches here', memory);
+      expect(base).toBe(0);
+
+      setSemanticScorer({ score: () => 42 });
+      invalidateScoreCache();
+      const boosted = calculateRelevanceScore('nothing matches here', memory);
+      expect(boosted).toBe(42);
+
+      setSemanticScorer(undefined);
+    });
+  });
 });

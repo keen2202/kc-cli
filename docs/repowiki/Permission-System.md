@@ -95,6 +95,31 @@ Fields:
 
 Even in `bypassPermissions` mode, accessing these paths triggers an ASK.
 
+### Cross-Platform Coverage (Windows)
+
+Protected-path and system-directory checks are platform-agnostic. Before
+matching, paths are run through `normalizePathForMatch()`, which:
+
+- converts backslashes to forward slashes (covers `C:\...` and UNC `\\server\share`),
+- lower-cases the drive letter (`C:/` → `c:/`),
+- expands `%USERPROFILE%` to the `~` home marker.
+
+On top of the Unix patterns, `WINDOWS_PROTECTED_PATTERNS` adds credential and
+system-sensitive coverage matched against the normalized form:
+
+```
+%USERPROFILE%\.ssh\, .aws\credentials, .azure\, .kube\config, .docker\config.json
+C:\Windows\System32\config\  (SAM/SYSTEM hives)
+C:\Windows\System32\drivers\etc\hosts
+Microsoft\Crypto\, .gnupg\
+```
+
+`SYSTEM_WRITE_DIRECTORIES` likewise covers `C:\Windows\`, `C:\Program Files\`,
+`C:\Program Files (x86)\` and `C:\ProgramData\` in addition to `/etc`, `/usr`,
+`/bin`, `/sbin`. `engine.ts`'s `looksLikePath` recognizes drive-letter (`C:\`)
+and UNC prefixes so those paths still flow through realpath resolution and the
+deny-first / bypass-immune decision order (unchanged).
+
 ## Plugin Permission Rules
 
 Plugins can contribute rules via `PluginPermissionRule`:
