@@ -9,6 +9,8 @@ export interface LanguageInfo {
   buildCommands: string[];
   testCommands: string[];
   lintCommands: string[];
+  /** Command that performs type/compile checking (empty if none). */
+  typeCheckCommand: string;
 }
 
 interface LanguageMarker {
@@ -28,6 +30,7 @@ const LANGUAGE_MARKERS: LanguageMarker[] = [
       buildCommands: ['go build ./...'],
       testCommands: ['go test ./...'],
       lintCommands: ['go vet ./...'],
+      typeCheckCommand: 'go build ./...',
     },
   },
   {
@@ -37,6 +40,7 @@ const LANGUAGE_MARKERS: LanguageMarker[] = [
       buildCommands: ['cargo build'],
       testCommands: ['cargo test'],
       lintCommands: ['cargo clippy'],
+      typeCheckCommand: 'cargo check',
     },
   },
   {
@@ -46,6 +50,7 @@ const LANGUAGE_MARKERS: LanguageMarker[] = [
       buildCommands: ['mvn compile'],
       testCommands: ['mvn test'],
       lintCommands: [],
+      typeCheckCommand: 'mvn compile',
     },
   },
   {
@@ -55,6 +60,7 @@ const LANGUAGE_MARKERS: LanguageMarker[] = [
       buildCommands: ['gradle build', './gradlew build'],
       testCommands: ['gradle test', './gradlew test'],
       lintCommands: [],
+      typeCheckCommand: 'gradle compileJava',
     },
   },
   {
@@ -64,6 +70,7 @@ const LANGUAGE_MARKERS: LanguageMarker[] = [
       buildCommands: [],
       testCommands: ['python -m pytest'],
       lintCommands: ['python -m mypy .', 'ruff check .'],
+      typeCheckCommand: 'python -m mypy .',
     },
   },
   {
@@ -73,6 +80,7 @@ const LANGUAGE_MARKERS: LanguageMarker[] = [
       buildCommands: [],
       testCommands: ['python -m pytest'],
       lintCommands: ['python -m mypy .'],
+      typeCheckCommand: 'python -m mypy .',
     },
   },
   {
@@ -82,6 +90,7 @@ const LANGUAGE_MARKERS: LanguageMarker[] = [
       buildCommands: ['npx tsc --noEmit', 'npm run build'],
       testCommands: ['npm test', 'npx vitest run', 'npx jest'],
       lintCommands: ['npx eslint .'],
+      typeCheckCommand: 'npx tsc --noEmit',
     },
   },
   {
@@ -91,6 +100,7 @@ const LANGUAGE_MARKERS: LanguageMarker[] = [
       buildCommands: ['npm run build'],
       testCommands: ['npm test', 'npx vitest run', 'npx jest'],
       lintCommands: ['npx eslint .'],
+      typeCheckCommand: 'npx tsc --noEmit',
     },
   },
   {
@@ -100,6 +110,7 @@ const LANGUAGE_MARKERS: LanguageMarker[] = [
       buildCommands: ['make'],
       testCommands: ['make test'],
       lintCommands: [],
+      typeCheckCommand: '',
     },
   },
   {
@@ -109,6 +120,7 @@ const LANGUAGE_MARKERS: LanguageMarker[] = [
       buildCommands: ['cmake --build build'],
       testCommands: ['ctest'],
       lintCommands: [],
+      typeCheckCommand: '',
     },
   },
 ];

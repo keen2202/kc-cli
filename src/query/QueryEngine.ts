@@ -24,6 +24,7 @@ import { autoStageFile, autoCommitAll } from '../utils/git';
 import { KCError } from '../utils/errors';
 import { validateApiKey } from '../utils/api-key';
 import { BudgetEnforcer, DEFAULT_BUDGET_CONFIG, type BudgetConfig } from '../services/budget';
+import { detectProjectLanguage } from '../utils/project-detect';
 import { spawn } from 'child_process';
 
 // Sub-modules
@@ -48,6 +49,16 @@ type VerificationResult = {
   canExit: boolean;
   reason: 'tests_pass' | 'tests_fail' | 'tests_not_found' | 'timeout';
   failures?: string[];
+  output?: string;
+};
+
+/**
+ * Result of pre-exit type-check (compile) verification.
+ */
+type TypeCheckResult = {
+  canExit: boolean;
+  reason: 'typecheck_pass' | 'typecheck_fail' | 'typecheck_not_found' | 'timeout';
+  failures?: string;
   output?: string;
 };
 
@@ -152,6 +163,7 @@ export class QueryEngine {
   // Area 2: Patch Guarantee — zero-patch detection
   private zeroPatchRetries = 0;
   private verificationRetries = 0;
+  private typeCheckRetries = 0;
 
   // T3: Budget enforcement
   private budgetEnforcer: BudgetEnforcer;
@@ -953,6 +965,9 @@ export class QueryEngine {
         maxVerificationRetries: this.config.patchGuarantee?.maxVerificationRetries ?? 2,
         verificationTimeout: this.config.patchGuarantee?.verificationTimeout ?? 60,
         testCommand: this.config.patchGuarantee?.testCommand ?? 'pytest {test_names} -x',
+        typeCheck: this.config.patchGuarantee?.typeCheck ?? true,
+        typeCheckCommand: this.config.patchGuarantee?.typeCheckCommand ?? '',
+        maxTypeCheckRetries: this.config.patchGuarantee?.maxTypeCheckRetries ?? 2,
       };
 
       if (!pgConfig.enabled) return hasToolCalls;
@@ -987,18 +1002,55 @@ export class QueryEngine {
       }
     }
 
-    // B2: Pre-exit test verification
-    // Only when agent has modifications and test names are available
+    // B2/B3: Pre-exit verification (type-check + tests)
+    // Runs whenever the agent modified files and is about to exit.
     if (this.modifiedFiles.size > 0) {
-      const testNames = this.extractFailToPassTests();
       const pgConfig: PatchGuaranteeConfig = {
         enabled: this.config.patchGuarantee?.enabled ?? true,
         maxZeroPatchRetries: this.config.patchGuarantee?.maxZeroPatchRetries ?? 3,
         maxVerificationRetries: this.config.patchGuarantee?.maxVerificationRetries ?? 2,
         verificationTimeout: this.config.patchGuarantee?.verificationTimeout ?? 60,
         testCommand: this.config.patchGuarantee?.testCommand ?? 'pytest {test_names} -x',
+        typeCheck: this.config.patchGuarantee?.typeCheck ?? true,
+        typeCheckCommand: this.config.patchGuarantee?.typeCheckCommand ?? '',
+        maxTypeCheckRetries: this.config.patchGuarantee?.maxTypeCheckRetries ?? 2,
       };
 
+      // B3: Pre-exit type-check verification. Gated on exit intent (no pending
+      // tool calls) so `tsc`/`mypy` don't run on every mid-task turn. Unlike
+      // test verification, this does not require FAIL_TO_PASS test names.
+      if (!hasToolCalls && pgConfig.enabled && pgConfig.typeCheck
+          && this.typeCheckRetries < pgConfig.maxTypeCheckRetries) {
+        const tcResult = await this.verifyTypeCheckBeforeExit(pgConfig);
+
+        if (!tcResult.canExit && tcResult.reason === 'typecheck_fail') {
+          this.typeCheckRetries++;
+          const steerMsg = [
+            `## TYPE-CHECK FAILED (${this.typeCheckRetries}/${pgConfig.maxTypeCheckRetries})`,
+            '',
+            'Your changes do not pass type/compile checking:',
+            '```',
+            tcResult.failures || '(no output captured)',
+            '```',
+            'Please fix these type errors before exiting.',
+          ].join('\n');
+
+          this.steer(steerMsg);
+          this.conversation.addMessage({
+            id: `typecheck_failed_${Date.now()}`,
+            role: 'user',
+            content: steerMsg,
+            timestamp: Date.now(),
+          });
+
+          return true; // Force continuation
+        } else if (tcResult.canExit && tcResult.reason === 'typecheck_pass') {
+          logger.query.info('[QueryEngine] Pre-exit type-check: passed');
+        }
+      }
+
+      // B2: Pre-exit test verification
+      const testNames = this.extractFailToPassTests();
       if (pgConfig.enabled && testNames.length > 0 && this.verificationRetries < pgConfig.maxVerificationRetries) {
         const result = await this.verifyBeforeExit(testNames, pgConfig);
 
@@ -1115,6 +1167,92 @@ export class QueryEngine {
   // Validate test names contain only safe characters (SEC-06)
   private isValidTestName(name: string): boolean {
     return /^[a-zA-Z0-9_\-./:]+$/.test(name);
+  }
+
+  /**
+   * Determine the type-check command: explicit config wins, otherwise
+   * auto-detect from the project language. Empty string means "no command".
+   */
+  private resolveTypeCheckCommand(config: PatchGuaranteeConfig): string {
+    const explicit = config.typeCheckCommand?.trim();
+    if (explicit) return explicit;
+    const langInfo = detectProjectLanguage(getState().cwd);
+    return langInfo?.typeCheckCommand?.trim() || '';
+  }
+
+  /**
+   * Validate a type-check/compile command against a runner allowlist and reject
+   * shell metacharacters that enable command chaining or injection (SEC-06).
+   */
+  private isStaticCommandSafe(command: string): boolean {
+    if (/[;&|`$(){}\n\r<>\\]/.test(command)) {
+      return false;
+    }
+    const allowedRunners = [
+      'npx tsc', 'tsc', 'npm run build', 'npm run typecheck', 'npm run type-check',
+      'go build', 'cargo check', 'cargo build',
+      'mvn compile', 'gradle compileJava', './gradlew compileJava',
+      'python -m mypy', 'mypy', 'pyright', 'npx pyright',
+    ];
+    const trimmed = command.trim();
+    return allowedRunners.some(runner => trimmed.startsWith(runner));
+  }
+
+  /**
+   * Run the project's type-check/compile command before allowing exit.
+   * Pass/fail is determined by process exit code (0 = pass), which is more
+   * reliable than parsing tool output across languages.
+   */
+  private async verifyTypeCheckBeforeExit(
+    config: PatchGuaranteeConfig
+  ): Promise<TypeCheckResult> {
+    const command = this.resolveTypeCheckCommand(config);
+    if (!command) {
+      return { canExit: true, reason: 'typecheck_not_found' };
+    }
+
+    if (!this.isStaticCommandSafe(command)) {
+      logger.query.warn(`[QueryEngine] Unsafe type-check command rejected: ${command.slice(0, 100)}`);
+      return { canExit: true, reason: 'typecheck_not_found' };
+    }
+
+    const cwd = getState().cwd;
+
+    try {
+      const result = await new Promise<{ stdout: string; stderr: string; code: number }>(
+        (resolve, reject) => {
+          const child = spawn('bash', ['-c', command], {
+            cwd,
+            timeout: config.verificationTimeout * 1000,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+
+          let stdout = '';
+          let stderr = '';
+
+          child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+          child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+          child.on('close', (code: number) => resolve({ stdout, stderr, code: code ?? 1 }));
+          child.on('error', reject);
+        }
+      );
+
+      if (result.code === 0) {
+        return { canExit: true, reason: 'typecheck_pass' };
+      }
+
+      // Non-zero exit — surface the tail of the output as failure detail.
+      const output = (result.stdout + result.stderr).trim();
+      return {
+        canExit: false,
+        reason: 'typecheck_fail',
+        failures: output.slice(-1500) || `Type-check command exited with code ${result.code}`,
+        output,
+      };
+    } catch {
+      // On infra failure (timeout, spawn error), don't block exit.
+      return { canExit: true, reason: 'timeout' };
+    }
   }
 
   /**
@@ -1341,6 +1479,7 @@ export class QueryEngine {
     this.lastModifiedTurn = 0;
     this.zeroPatchRetries = 0;
     this.verificationRetries = 0;
+    this.typeCheckRetries = 0;
     this.planningHandler.reset();
     this.fileContentCache.invalidateAll();
     this.readHistory.clear();
@@ -1385,6 +1524,7 @@ export class QueryEngine {
     this.lastModifiedTurn = 0;
     this.zeroPatchRetries = 0;
     this.verificationRetries = 0;
+    this.typeCheckRetries = 0;
     this.planningHandler.reset();
     this.fileContentCache.invalidateAll();
     this.readHistory.clear();

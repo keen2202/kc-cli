@@ -110,6 +110,12 @@ export interface PatchGuaranteeConfig {
   maxVerificationRetries: number;
   verificationTimeout: number;
   testCommand: string;
+  /** Enable pre-exit type-check verification (compile/type errors). */
+  typeCheck: boolean;
+  /** Type-check command; empty string means auto-detect from project language. */
+  typeCheckCommand: string;
+  /** Maximum retries when the type-check fails before allowing exit. */
+  maxTypeCheckRetries: number;
 }
 
 /** Configuration for context window efficiency. */
