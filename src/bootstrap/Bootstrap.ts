@@ -30,6 +30,7 @@ import {
 } from '../mcp';
 import { getGlobalRegistry } from '../agp/registry';
 import { detectProjectLanguage } from '../utils/project-detect';
+import { isInsideGitRepo } from '../utils/git';
 import { withTimeout } from '../utils/async-helpers';
 import type { IMBridge } from '../im/im-bridge';
 
@@ -48,6 +49,11 @@ export interface BootstrapOptions {
   autoExtendTurns?: boolean;
   /** Enable IM bridge mode (--im CLI flag) */
   im?: boolean;
+  /**
+   * T1 (H1): --dangerously-skip-permissions. When true, non-interactive 'ask'
+   * decisions are auto-approved ('proceed') instead of the default fail-safe deny.
+   */
+  dangerouslySkipPermissions?: boolean;
 }
 
 export interface BootstrapResult {
@@ -146,6 +152,18 @@ export class Bootstrap {
   constructor(private readonly options: BootstrapOptions) {}
 
   /**
+   * T1 (H1): Resolve the effective non-interactive 'ask' fail-safe policy.
+   * Explicit --dangerously-skip-permissions forces 'proceed' (operator accepts
+   * risk); otherwise honor the config value (default 'deny').
+   */
+  private resolveNoninteractiveAskPolicy(config: Config): 'deny' | 'allow' | 'proceed' {
+    if (this.options.dangerouslySkipPermissions) {
+      return 'proceed';
+    }
+    return config.noninteractiveAskPolicy ?? 'deny';
+  }
+
+  /**
    * Run the full initialization sequence and return wired services.
    *
    * Phases:
@@ -192,6 +210,24 @@ export class Bootstrap {
     const apiKey = config.apiKey;
     const apiBaseUrl = config.apiBaseUrl;
     profileCheckpoint('config_load');
+
+    // ── Phase 2.5: Probe Git rollback safety net (T4 / H4) ──
+    // A non-Git workspace means autoStageFile/autoCommitAll cannot provide a
+    // recovery history. Surface a one-time warning so the user knows rollback
+    // depends solely on the T2 `.kc-cli/backups/` snapshots (via FileRestore),
+    // instead of the safety net failing silently.
+    const isGitRepo = await isInsideGitRepo(cwd);
+    updateState({ isGitRepo });
+    if (!isGitRepo && !bareMode) {
+      console.warn(
+        chalk.yellow(
+          'Warning: no Git repository detected in this workspace. ' +
+            'The auto-stage/commit safety net is unavailable; file rollback will rely on ' +
+            '.kc-cli/backups/ snapshots (use the FileRestore tool to undo edits).',
+        ),
+      );
+    }
+    profileCheckpoint('git_detect');
 
     // ── Phase 3a: Register built-in tools ──
     if (!bareMode) {
@@ -379,6 +415,7 @@ export class Bootstrap {
               maxBudgetUsd: getState().maxBudgetUsd,
               systemPrompt: buildSystemPrompt(sessionTools),
               sandboxFailIfNoSandbox: config.sandbox?.failIfNoSandbox,
+              noninteractiveAskPolicy: this.resolveNoninteractiveAskPolicy(config),
               permissionRules: {
                 deny: config.permissions.deny,
                 ask: config.permissions.ask,
@@ -420,6 +457,11 @@ export class Bootstrap {
     const autoExtend = this.options.autoExtendTurns ?? config.autoExtendTurns ?? false;
     const maxTurnsCeiling = config.maxTurnsCeiling ?? 100;
 
+    // T1 (H1): resolve the non-interactive 'ask' fail-safe policy. Explicit
+    // --dangerously-skip-permissions forces 'proceed'; otherwise honor config
+    // (default 'deny'). This flows into every QueryEngine's ToolExecutor.
+    const noninteractiveAskPolicy = this.resolveNoninteractiveAskPolicy(config);
+
     const queryEngine = new QueryEngine(
       {
         model,
@@ -432,6 +474,7 @@ export class Bootstrap {
         autoExtendTurns: autoExtend,
         maxTurnsCeiling,
         sandboxFailIfNoSandbox: config.sandbox?.failIfNoSandbox,
+        noninteractiveAskPolicy,
         permissionRules: {
           deny: config.permissions.deny,
           ask: config.permissions.ask,

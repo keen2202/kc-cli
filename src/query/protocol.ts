@@ -116,6 +116,13 @@ export interface PatchGuaranteeConfig {
   typeCheckCommand: string;
   /** Maximum retries when the type-check fails before allowing exit. */
   maxTypeCheckRetries: number;
+  /**
+   * T5 (H5): when true, a type-check that cannot be executed (spawn/toolchain
+   * infrastructure failure, e.g. the runner is missing) blocks exit instead of
+   * giving way, so the verification gap is surfaced rather than silently passed.
+   * Defaults to false (give way on infra failure; genuine type errors always block).
+   */
+  typeCheckStrict?: boolean;
 }
 
 /** Configuration for context window efficiency. */

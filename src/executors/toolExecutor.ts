@@ -7,6 +7,7 @@ import type { ToolCall, ToolResult } from '../query/protocol';
 import type { ToolDefinition, ToolUseContext, UserInteractionHandler } from '../tools/protocol';
 import type {
   PermissionResult,
+  PermissionAskDecision,
   UIPermissionRequest,
   UIPermissionRequestHandler,
   FilePatchPreview,
@@ -26,6 +27,7 @@ import { DEFAULT_TOOL_TIMEOUT_MS } from '../constants';
 import { getErrorMessage } from '../utils/errors';
 import { logger } from '../services/logger';
 import { classifyToolError } from '../services/error-classifier';
+import { getOperationAuditLog } from '../services/operation-audit-log';
 
 /**
  * Key used to mark tool input that has already had its command
@@ -121,6 +123,42 @@ const DEFAULT_GLOBAL_TOOL_CONCURRENCY = Math.max(4, os.cpus().length);
 export const GLOBAL_TOOL_SEMAPHORE = new Semaphore(DEFAULT_GLOBAL_TOOL_CONCURRENCY);
 
 /**
+ * T6 (M1): high-risk tools whose executions are recorded to the unified
+ * operation audit log (writes/deletes, command and network tools). Read-only
+ * tools (FileRead/Grep/Glob/…) are intentionally excluded to avoid noise.
+ */
+const AUDITED_TOOLS = new Set<string>([
+  'FileWrite', 'FileEdit', 'FileRestore', 'Bash', 'Run', 'Sql', 'WebFetch', 'Git',
+]);
+
+/**
+ * Build a short, content-free summary of a tool's input for the audit log.
+ * Only the operation target (path/command/url/args) is surfaced — never file
+ * content — and the caller redacts + length-caps the result.
+ */
+function summarizeToolInput(toolName: string, input: Record<string, unknown>): string {
+  switch (toolName) {
+    case 'Bash':
+    case 'Run':
+      return String(input.command ?? '');
+    case 'FileWrite':
+      return String(input.path ?? '');
+    case 'FileEdit':
+      return String(input.file_path ?? '');
+    case 'FileRestore':
+      return `${String(input.action ?? '')} ${String(input.file ?? '')}`.trim();
+    case 'Sql':
+      return String(input.query ?? '');
+    case 'WebFetch':
+      return String(input.url ?? '');
+    case 'Git':
+      return String(input.args ?? '');
+    default:
+      return '';
+  }
+}
+
+/**
  * Tool executor that supports both sequential and parallel tool execution
  * with timeout protection and sandbox isolation to prevent infinite hangs.
  */
@@ -151,6 +189,12 @@ export class ToolExecutor {
   // implementation). When present, tools like AskUser route through it to
   // block for real user input. Null in non-interactive contexts.
   private userInteractionHandler: UserInteractionHandler | null = null;
+  // T1 (H1): Fail-safe policy for 'ask' permission decisions when NO interactive
+  // handler is registered (headless: ACP/IM/programmatic). Default 'deny' so
+  // non-interactive runs never silently proceed on an 'ask'. 'allow'/'proceed'
+  // require explicit opt-in (config or CLI --dangerously-skip-permissions) and
+  // are treated as user-accepted risk with an explicit log record.
+  private noninteractiveAskPolicy: 'deny' | 'allow' | 'proceed' = 'deny';
 
   constructor(
     tools: ToolDefinition[],
@@ -202,14 +246,25 @@ export class ToolExecutor {
   }
 
   /**
-   * Execute a single tool call with timeout protection
+   * Execute a single tool call with timeout protection.
+   *
+   * Public entry point: delegates to the implementation, then records a T6
+   * operation-audit entry for high-risk tools (best-effort, never throws).
    */
   async executeSingle(
     toolCall: ToolCall,
     context: ToolUseContext
   ): Promise<ToolResult> {
     const startTime = Date.now();
+    const result = await this.executeSingleImpl(toolCall, context);
+    this.recordOperationAudit(toolCall, result, startTime);
+    return result;
+  }
 
+  private async executeSingleImpl(
+    toolCall: ToolCall,
+    context: ToolUseContext
+  ): Promise<ToolResult> {
     try {
       // 1. Find tool
       const tool = this.tools.get(toolCall.toolName);
@@ -297,31 +352,41 @@ export class ToolExecutor {
       }
 
       // 3a. Interactive authorization for 'ask' decisions.
-      // Without a registered UI handler we preserve legacy behavior (proceed),
-      // so non-interactive/CLI runs do not regress. When a handler is present
-      // the user explicitly approves or denies each 'ask'.
-      if (permissionResult.behavior === 'ask' && this.permissionRequestHandler) {
+      // When a UI handler is registered, the user explicitly approves or denies
+      // each 'ask'. Without a handler (headless: ACP/IM/programmatic), T1's
+      // fail-safe policy applies — default 'deny' so we never silently proceed.
+      if (permissionResult.behavior === 'ask') {
         const isEditTool = toolCall.toolName === 'FileWrite' || toolCall.toolName === 'FileEdit';
-        // acceptEdits mode approves file writes/edits without prompting.
+        // acceptEdits mode approves file writes/edits without prompting (kept
+        // for both interactive and headless paths).
         const autoAcceptEdits = isEditTool && this.getPermissionMode() === 'acceptEdits';
         if (!autoAcceptEdits) {
-          const request: UIPermissionRequest = {
-            toolName: toolCall.toolName,
-            inputSummary: permissionResult.message,
-            diffs: await this.buildDiffPreview(toolCall.toolName, effectiveInput),
-          };
-          const decision = await this.permissionRequestHandler(request);
-          if (decision === 'deny') {
-            return {
-              toolCallId: toolCall.id,
-              output: `Permission denied by user: ${toolCall.toolName}`,
-              isError: true,
+          if (this.permissionRequestHandler) {
+            const request: UIPermissionRequest = {
+              toolName: toolCall.toolName,
+              inputSummary: permissionResult.message,
+              diffs: await this.buildDiffPreview(toolCall.toolName, effectiveInput),
             };
+            const decision = await this.permissionRequestHandler(request);
+            if (decision === 'deny') {
+              return {
+                toolCallId: toolCall.id,
+                output: `Permission denied by user: ${toolCall.toolName}`,
+                isError: true,
+              };
+            }
+            if (decision === 'allow_always') {
+              this.addSessionAllowRule(toolCall.toolName);
+            }
+            // 'allow' / 'allow_always' fall through to execution.
+          } else {
+            // T1 (H1): no interactive handler → fail-safe by policy.
+            const failSafe = this.resolveNoninteractiveAsk(toolCall, permissionResult);
+            if (failSafe) {
+              return failSafe;
+            }
+            // 'allow' / 'proceed' fall through to execution (explicit opt-in).
           }
-          if (decision === 'allow_always') {
-            this.addSessionAllowRule(toolCall.toolName);
-          }
-          // 'allow' / 'allow_always' fall through to execution.
         }
       }
 
@@ -421,6 +486,55 @@ export class ToolExecutor {
   }
 
   /**
+   * T6 (M1): record a high-risk tool operation to the unified audit log.
+   * Best-effort and fully swallowed — auditing must never disrupt execution.
+   */
+  private recordOperationAudit(toolCall: ToolCall, result: ToolResult, startTime: number): void {
+    if (!AUDITED_TOOLS.has(toolCall.toolName)) return;
+    try {
+      const metadata = (result.metadata ?? {}) as Record<string, unknown>;
+      getOperationAuditLog().record({
+        sessionId: this.getSessionIdSafe(),
+        tool: toolCall.toolName,
+        inputSummary: summarizeToolInput(
+          toolCall.toolName,
+          toolCall.input as Record<string, unknown>,
+        ),
+        permissionDecision: this.classifyAuditDecision(result),
+        sandboxed: metadata.sandboxed === true,
+        isError: result.isError === true,
+        durationMs: Date.now() - startTime,
+        backupPath: typeof metadata.backupPath === 'string' ? metadata.backupPath : undefined,
+        timedOut: result.timedOut === true ? true : undefined,
+      });
+    } catch {
+      // Auditing is best-effort; swallow all errors.
+    }
+  }
+
+  /** Classify the permission-gate outcome from the tool result output. */
+  private classifyAuditDecision(result: ToolResult): 'allow' | 'deny' {
+    const out = typeof result.output === 'string' ? result.output : '';
+    if (
+      result.isError &&
+      (out.startsWith('Permission denied') ||
+        out.includes('requires sandbox but no sandbox backend'))
+    ) {
+      return 'deny';
+    }
+    return 'allow';
+  }
+
+  /** Read the active session ID, defaulting to 'unknown' when state is absent. */
+  private getSessionIdSafe(): string {
+    try {
+      return getState().sessionId;
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  /**
    * Execute tool with timeout protection using AbortSignal.
    * Returns a timeout result with the original toolCallId and timedOut flag.
    */
@@ -478,6 +592,12 @@ export class ToolExecutor {
         toolCallId: toolCallId || '',
         output: toolResult.output ?? '',
         isError: toolResult.isError || false,
+        // T3/T6: preserve the tool's own metadata (path, oldContent, backupPath,
+        // …) and message so the QueryEngine undo journal and the operation audit
+        // log can consume them. Previously this object dropped metadata, leaving
+        // the journal's backupPath/oldContent null in the real execution path.
+        ...(toolResult.metadata !== undefined ? { metadata: toolResult.metadata } : {}),
+        ...(toolResult.message !== undefined ? { message: toolResult.message } : {}),
       };
     } catch (error) {
       if (timedOut) {
@@ -704,6 +824,50 @@ export class ToolExecutor {
    */
   setPermissionRequestHandler(handler: UIPermissionRequestHandler | null): void {
     this.permissionRequestHandler = handler;
+  }
+
+  /**
+   * T1 (H1): Configure the fail-safe policy applied to 'ask' permission
+   * decisions in non-interactive contexts (no UI handler registered).
+   * - 'deny'    (default): refuse the operation with an explicit reason.
+   * - 'allow' / 'proceed': explicit opt-in to run the operation unattended
+   *   (e.g. --dangerously-skip-permissions); logged as accepted risk.
+   */
+  setNoninteractiveAskPolicy(policy: 'deny' | 'allow' | 'proceed'): void {
+    this.noninteractiveAskPolicy = policy;
+  }
+
+  /**
+   * Resolve an 'ask' decision when there is no interactive handler.
+   * Returns a deny ToolResult under the default fail-safe policy, or null to
+   * let execution proceed when the operator has explicitly opted in.
+   */
+  private resolveNoninteractiveAsk(
+    toolCall: ToolCall,
+    permissionResult: PermissionAskDecision,
+  ): ToolResult | null {
+    const policy = this.noninteractiveAskPolicy;
+    if (policy === 'deny') {
+      logger.permissions.warn(
+        `[perm] non-interactive 'ask' denied (fail-safe): ${toolCall.toolName}`,
+        { tool: toolCall.toolName, policy, ts: Date.now() }
+      );
+      const reason = permissionResult.message || 'requires interactive approval';
+      return {
+        toolCallId: toolCall.id,
+        output:
+          `Permission denied (non-interactive): ${toolCall.toolName} ${reason}. ` +
+          'No interactive approval handler is available in this context. ' +
+          'Re-run with --dangerously-skip-permissions (accepts risk) or an explicit allow rule to proceed.',
+        isError: true,
+      };
+    }
+    // 'allow' | 'proceed' — explicit operator opt-in; record the bypass.
+    logger.permissions.warn(
+      `[perm] non-interactive 'ask' auto-approved by policy='${policy}': ${toolCall.toolName}`,
+      { tool: toolCall.toolName, policy, ts: Date.now() }
+    );
+    return null;
   }
 
   /**

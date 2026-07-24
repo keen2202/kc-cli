@@ -20,6 +20,13 @@ export interface GlobalState {
   config: Config | null;
   /** AGP Global Registry (initialized lazily) */
   agpRegistry?: GlobalRegistry;
+  /**
+   * T4 (H4): whether `cwd` is inside a Git work tree, probed once at bootstrap.
+   * `undefined` = not yet probed (e.g. tests / legacy callers); `false` means
+   * the Git auto-stage/commit safety net is unavailable and rollback relies on
+   * the T2 `.kc-cli/backups/` snapshots surfaced via FileRestore.
+   */
+  isGitRepo?: boolean;
 }
 
 // Scoped state for per-agent isolation (used by sub-agents)

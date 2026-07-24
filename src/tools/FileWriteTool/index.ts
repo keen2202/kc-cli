@@ -48,7 +48,14 @@ export const tool = buildTool<FileWriteInput, string>({
           // File doesn't exist yet, just write
         }
       }
-      await context.env.fs.writeFile(filePath, writeContent);
+      // T2 (H2): atomic write with a best-effort timestamped backup so a
+      // crash mid-write cannot truncate the target and the prior content is
+      // recoverable (backupPath feeds T3 undo + UI diff/restore).
+      const { backupPath, backupFailed } = await context.env.fs.writeFileAtomic(
+        filePath,
+        writeContent,
+        { cwd: context.cwd },
+      );
 
       return toolResult(
         input.append
@@ -61,6 +68,8 @@ export const tool = buildTool<FileWriteInput, string>({
             appended: input.append,
             oldContent,
             newContent: input.content,
+            backupPath,
+            backupFailed,
           },
         }
       );

@@ -107,10 +107,33 @@ describe('ToolExecutor — interactive authorization', () => {
     expect(result.isError).toBe(false);
   });
 
-  it('preserves legacy behavior (proceeds) when no handler is registered', async () => {
+  it('fail-safe denies an ask when no handler is registered (T1 default)', async () => {
     const tool = makeTool();
     const executor = makeExecutor([tool]);
-    // No handler set — non-interactive/CLI runs must not regress.
+    // No handler set — headless/non-interactive runs must NOT silently proceed.
+
+    const result = await executor.executeSingle(makeToolCall(), makeContext());
+
+    expect(tool.call).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('Permission denied (non-interactive)');
+  });
+
+  it('proceeds on an ask with no handler when policy is proceed (opt-in)', async () => {
+    const tool = makeTool();
+    const executor = makeExecutor([tool]);
+    executor.setNoninteractiveAskPolicy('proceed');
+
+    const result = await executor.executeSingle(makeToolCall(), makeContext());
+
+    expect(tool.call).toHaveBeenCalledTimes(1);
+    expect(result.isError).toBe(false);
+  });
+
+  it('proceeds on an ask with no handler when policy is allow (opt-in)', async () => {
+    const tool = makeTool();
+    const executor = makeExecutor([tool]);
+    executor.setNoninteractiveAskPolicy('allow');
 
     const result = await executor.executeSingle(makeToolCall(), makeContext());
 

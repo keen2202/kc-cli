@@ -2,9 +2,17 @@
 
 import { spawn } from 'child_process';
 import { DEFAULT_MAX_BUFFER } from '../constants';
+import { createLogger } from '../services/logger';
 
 // Shell metacharacters and control chars that could enable command injection
 const SHELL_METACHAR_REGEX = /[;&|`$(){}!#~<>\n\r]/;
+
+const gitLogger = createLogger('git');
+
+// T4 (H4): debounce flags so a broken/absent Git safety net is surfaced exactly
+// once per process instead of being silently swallowed (or spamming the log).
+let autoStageWarned = false;
+let autoCommitWarned = false;
 
 /**
  * Parse a git command string into safe argument array.
@@ -126,8 +134,33 @@ export function spawnGit(
 }
 
 /**
- * Auto-stage a file via git add (fire-and-forget).
- * Errors are silently ignored — this is best-effort.
+ * T4 (H4): Detect whether `cwd` is inside a Git work tree.
+ * Returns false when git is unavailable or the directory is not a repository,
+ * so callers can surface a rollback-safety-net warning at bootstrap.
+ */
+export async function isInsideGitRepo(cwd: string): Promise<boolean> {
+  try {
+    const { stdout } = await spawnGit('rev-parse --is-inside-work-tree', cwd, 5000);
+    return stdout.trim() === 'true';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Reset the auto-stage/commit warn debounce flags. Intended for tests that need
+ * to assert the "warn exactly once" behavior in isolation.
+ */
+export function resetGitWarnDebounce(): void {
+  autoStageWarned = false;
+  autoCommitWarned = false;
+}
+
+/**
+ * Auto-stage a file via git add (fire-and-forget, best-effort).
+ * T4 (H4): the FIRST failure (spawn error or non-zero exit) is surfaced via a
+ * debounced logger.warn so a broken Git safety net is observable rather than
+ * silently swallowed. Subsequent failures stay quiet to avoid log spam.
  */
 export function autoStageFile(filePath: string, cwd: string): void {
   const child = spawn('git', ['add', filePath], {
@@ -136,12 +169,22 @@ export function autoStageFile(filePath: string, cwd: string): void {
     windowsHide: true,
     timeout: 10000,
   });
-  child.on('error', () => {}); // silent failure
+  const warnOnce = (reason: string): void => {
+    if (autoStageWarned) return;
+    autoStageWarned = true;
+    gitLogger.warn('auto-stage failed; Git rollback safety net may be unavailable', { reason });
+  };
+  child.on('error', (err) => warnOnce(err instanceof Error ? err.message : String(err)));
+  child.on('close', (code) => {
+    if (code !== 0) warnOnce(`git add exited with code ${code}`);
+  });
 }
 
 /**
  * Auto-commit all staged changes (best-effort).
  * Only commits if there are staged changes.
+ * T4 (H4): the FIRST failure is surfaced via a debounced logger.warn instead of
+ * being silently swallowed.
  */
 export async function autoCommitAll(cwd: string): Promise<boolean> {
   try {
@@ -152,7 +195,13 @@ export async function autoCommitAll(cwd: string): Promise<boolean> {
       return true;
     }
     return false;
-  } catch {
+  } catch (err) {
+    if (!autoCommitWarned) {
+      autoCommitWarned = true;
+      gitLogger.warn('auto-commit failed; Git rollback safety net may be unavailable', {
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
     // Auto-commit failure is non-fatal
     return false;
   }

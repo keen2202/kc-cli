@@ -65,8 +65,14 @@ export const tool = buildTool<FileEditInput, string>({
         });
       }
 
-      // Write file via ExecutionEnv abstraction
-      await context.env.fs.writeFile(filePath, content);
+      // T2 (H2): atomic write with a best-effort timestamped backup so a
+      // crash mid-write cannot truncate the target and the pre-edit content is
+      // recoverable (backupPath feeds T3 undo + UI diff/restore).
+      const { backupPath, backupFailed } = await context.env.fs.writeFileAtomic(
+        filePath,
+        content,
+        { cwd: context.cwd },
+      );
 
       return toolResult(
         `Applied ${changes.length} edit(s) to ${input.file_path}:\n${changes.join('\n')}`,
@@ -78,6 +84,8 @@ export const tool = buildTool<FileEditInput, string>({
             new_size: content.length,
             oldContent: originalContent,
             newContent: content,
+            backupPath,
+            backupFailed,
           },
         }
       );

@@ -10,6 +10,7 @@ import type { ToolDefinition, ToolUseContext } from '../tools/protocol';
 import { AgentStateMachine } from '../state/machine';
 import { ObservableStateStore, createInitialState } from '../state/store';
 import { ToolExecutor } from '../executors/toolExecutor';
+import { FileOperationJournal } from '../state/file-operation-journal';
 import type { AgentEvent } from '../state/types';
 import { hasPermissionsToUseTool, buildPermissionContext } from '../permissions/engine';
 import { getState } from '../bootstrap/state';
@@ -26,6 +27,13 @@ import { validateApiKey } from '../utils/api-key';
 import { BudgetEnforcer, DEFAULT_BUDGET_CONFIG, type BudgetConfig } from '../services/budget';
 import { detectProjectLanguage } from '../utils/project-detect';
 import { spawn } from 'child_process';
+import { queryOperationAudit } from '../services/operation-audit-log';
+import {
+  buildAcceptanceReport,
+  writeAcceptanceReport,
+  skippedGate,
+  type VerificationGateReport,
+} from './completion-report';
 
 // Sub-modules
 import { ConversationState } from './QueryEngineState';
@@ -57,7 +65,7 @@ type VerificationResult = {
  */
 type TypeCheckResult = {
   canExit: boolean;
-  reason: 'typecheck_pass' | 'typecheck_fail' | 'typecheck_not_found' | 'timeout';
+  reason: 'typecheck_pass' | 'typecheck_fail' | 'typecheck_not_found' | 'timeout' | 'typecheck_infra_error';
   failures?: string;
   output?: string;
 };
@@ -103,6 +111,13 @@ export interface QueryEngineConfig {
 
   /** Sandbox failIfNoSandbox — passed through to SandboxManager */
   sandboxFailIfNoSandbox?: boolean;
+
+  /**
+   * T1 (H1): Fail-safe policy for 'ask' permission decisions in non-interactive
+   * contexts (no UI approval handler). Default 'deny'. 'allow'/'proceed' require
+   * explicit opt-in (config or CLI --dangerously-skip-permissions).
+   */
+  noninteractiveAskPolicy?: 'deny' | 'allow' | 'proceed';
 }
 
 /**
@@ -150,6 +165,8 @@ export class QueryEngine {
   // File modification tracking (for incremental memory and patch guarantee)
   private modifiedFiles: Set<string> = new Set();
   private lastModifiedTurn: number = 0;
+  // T3 (H3): session-scoped undo journal, consumed by the FileRestore tool.
+  private fileJournal: FileOperationJournal = new FileOperationJournal();
 
   // Area 3: Context efficiency components
   private fileContentCache: FileContentCache;
@@ -164,6 +181,11 @@ export class QueryEngine {
   private zeroPatchRetries = 0;
   private verificationRetries = 0;
   private typeCheckRetries = 0;
+
+  // T7 (M2): last pre-exit verification gate outcomes, captured so the
+  // completion report reflects the final type-check / test result at exit.
+  private lastTypeCheckGate: VerificationGateReport | null = null;
+  private lastTestGate: VerificationGateReport | null = null;
 
   // T3: Budget enforcement
   private budgetEnforcer: BudgetEnforcer;
@@ -208,6 +230,9 @@ export class QueryEngine {
     }, undefined, {
       failIfNoSandbox: config.sandboxFailIfNoSandbox,
     });
+
+    // T1 (H1): inject the non-interactive 'ask' fail-safe policy (default 'deny').
+    this.toolExecutor.setNoninteractiveAskPolicy(config.noninteractiveAskPolicy ?? 'deny');
 
     // Initialize user profile (level-based adaptation)
     this.userProfile = new UserProfileService();
@@ -682,7 +707,7 @@ export class QueryEngine {
                 // Restore state machine back to completed after evolution
                 this.stateMachine.transitionTo('completed');
               }
-              yield this.createCompleteEvent();
+              yield this.createCompleteEvent(turnCount);
             }
             break;
 
@@ -1014,6 +1039,7 @@ export class QueryEngine {
         typeCheck: this.config.patchGuarantee?.typeCheck ?? true,
         typeCheckCommand: this.config.patchGuarantee?.typeCheckCommand ?? '',
         maxTypeCheckRetries: this.config.patchGuarantee?.maxTypeCheckRetries ?? 2,
+        typeCheckStrict: this.config.patchGuarantee?.typeCheckStrict ?? false,
       };
 
       // B3: Pre-exit type-check verification. Gated on exit intent (no pending
@@ -1022,17 +1048,25 @@ export class QueryEngine {
       if (!hasToolCalls && pgConfig.enabled && pgConfig.typeCheck
           && this.typeCheckRetries < pgConfig.maxTypeCheckRetries) {
         const tcResult = await this.verifyTypeCheckBeforeExit(pgConfig);
+        // T7 (M2): capture the gate outcome for the completion report.
+        this.lastTypeCheckGate = this.toTypeCheckGateReport(tcResult, pgConfig);
 
-        if (!tcResult.canExit && tcResult.reason === 'typecheck_fail') {
+        if (!tcResult.canExit &&
+            (tcResult.reason === 'typecheck_fail' || tcResult.reason === 'typecheck_infra_error')) {
           this.typeCheckRetries++;
+          const isInfra = tcResult.reason === 'typecheck_infra_error';
           const steerMsg = [
-            `## TYPE-CHECK FAILED (${this.typeCheckRetries}/${pgConfig.maxTypeCheckRetries})`,
+            `## ${isInfra ? 'TYPE-CHECK COULD NOT RUN' : 'TYPE-CHECK FAILED'} (${this.typeCheckRetries}/${pgConfig.maxTypeCheckRetries})`,
             '',
-            'Your changes do not pass type/compile checking:',
+            isInfra
+              ? 'The type-check command could not be executed:'
+              : 'Your changes do not pass type/compile checking:',
             '```',
             tcResult.failures || '(no output captured)',
             '```',
-            'Please fix these type errors before exiting.',
+            isInfra
+              ? 'Ensure the type-check toolchain is available before exiting.'
+              : 'Please fix these type errors before exiting.',
           ].join('\n');
 
           this.steer(steerMsg);
@@ -1053,6 +1087,8 @@ export class QueryEngine {
       const testNames = this.extractFailToPassTests();
       if (pgConfig.enabled && testNames.length > 0 && this.verificationRetries < pgConfig.maxVerificationRetries) {
         const result = await this.verifyBeforeExit(testNames, pgConfig);
+        // T7 (M2): capture the gate outcome for the completion report.
+        this.lastTestGate = this.toTestGateReport(result, pgConfig);
 
         if (!result.canExit && result.reason === 'tests_fail') {
           this.verificationRetries++;
@@ -1114,8 +1150,23 @@ export class QueryEngine {
           if (filePath) {
             this.modifiedFiles.add(filePath);
             this.lastModifiedTurn = this.stateStore.get().turnCount;
-            // Auto-stage file (fire-and-forget git add)
-            autoStageFile(filePath, getState().cwd);
+            // T3 (H3): record the mutation in the session undo journal so the
+            // FileRestore tool can revert it. old/new content + backupPath are
+            // supplied by the T2 atomic-write metadata.
+            this.fileJournal.record({
+              filePath,
+              operation: toolName === 'FileWrite' ? 'write' : 'edit',
+              oldContent: (metadata?.oldContent ?? null) as string | null,
+              newContent: (metadata?.newContent ?? null) as string | null,
+              backupPath: (metadata?.backupPath ?? null) as string | null,
+              turn: this.stateStore.get().turnCount,
+            });
+            // Auto-stage file (fire-and-forget git add). T4 (H4): skip when the
+            // workspace is known to be non-Git so we don't spawn a doomed
+            // `git add` (Bootstrap already surfaced the safety-net warning once).
+            if (getState().isGitRepo !== false) {
+              autoStageFile(filePath, getState().cwd);
+            }
           }
         }
       }
@@ -1219,39 +1270,81 @@ export class QueryEngine {
     const cwd = getState().cwd;
 
     try {
-      const result = await new Promise<{ stdout: string; stderr: string; code: number }>(
-        (resolve, reject) => {
-          const child = spawn('bash', ['-c', command], {
-            cwd,
-            timeout: config.verificationTimeout * 1000,
-            stdio: ['ignore', 'pipe', 'pipe'],
-          });
+      const result = await new Promise<{
+        stdout: string;
+        stderr: string;
+        code: number | null;
+        timedOut: boolean;
+      }>((resolve, reject) => {
+        // T5 (H5): run the command through the platform's default shell
+        // (Windows: cmd.exe, *nix: /bin/sh) instead of hard-coding `bash`, which
+        // does not exist on Windows and made this gate a silent no-op there.
+        // The command was validated by isStaticCommandSafe (runner allowlist +
+        // shell-metacharacter rejection), so `shell: true` cannot be abused for
+        // injection here.
+        const child = spawn(command, {
+          cwd,
+          timeout: config.verificationTimeout * 1000,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          shell: true,
+          windowsHide: true,
+        });
 
-          let stdout = '';
-          let stderr = '';
+        let stdout = '';
+        let stderr = '';
+        let timedOut = false;
 
-          child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
-          child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
-          child.on('close', (code: number) => resolve({ stdout, stderr, code: code ?? 1 }));
-          child.on('error', reject);
-        }
-      );
+        child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+        child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+        child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
+          // The `timeout` option kills the child (SIGTERM) once exceeded; detect
+          // that so a timeout is never misreported as a pass or a type error.
+          if (child.killed || signal === 'SIGTERM') timedOut = true;
+          resolve({ stdout, stderr, code, timedOut });
+        });
+        // spawn-infrastructure failure (shell/runner missing, ENOENT, …) is NOT a
+        // type-check result — reject so it is classified distinctly below.
+        child.on('error', reject);
+      });
+
+      if (result.timedOut) {
+        // Verification could not complete in time — give way (don't block) but
+        // mark it distinctly rather than pretending it passed.
+        logger.query.warn(
+          `[QueryEngine] Type-check verification timed out after ${config.verificationTimeout}s: ${command}`
+        );
+        return { canExit: true, reason: 'timeout' };
+      }
 
       if (result.code === 0) {
         return { canExit: true, reason: 'typecheck_pass' };
       }
 
-      // Non-zero exit — surface the tail of the output as failure detail.
+      // Non-zero exit — the command ran and reported type/compile errors.
       const output = (result.stdout + result.stderr).trim();
       return {
         canExit: false,
         reason: 'typecheck_fail',
-        failures: output.slice(-1500) || `Type-check command exited with code ${result.code}`,
+        failures: output.slice(-1500) || `Type-check command exited with code ${result.code ?? 'unknown'}`,
         output,
       };
-    } catch {
-      // On infra failure (timeout, spawn error), don't block exit.
-      return { canExit: true, reason: 'timeout' };
+    } catch (error) {
+      // T5 (H5): distinguish spawn-infrastructure failure from a genuine result.
+      // A missing toolchain/shell must NOT be treated as a pass. By default we
+      // warn and give way so a broken environment doesn't wedge the agent; with
+      // `typeCheckStrict` the gap blocks exit so it stays visible.
+      const message = error instanceof Error ? error.message : String(error);
+      logger.query.warn(
+        `[QueryEngine] Type-check verification could not run (infrastructure error): ${message}`
+      );
+      if (config.typeCheckStrict) {
+        return {
+          canExit: false,
+          reason: 'typecheck_infra_error',
+          failures: `Type-check could not be executed: ${message}`,
+        };
+      }
+      return { canExit: true, reason: 'typecheck_infra_error' };
     }
   }
 
@@ -1417,6 +1510,7 @@ export class QueryEngine {
       permissions: buildPermissionContext(),
       sandbox: this.toolExecutor.getSandboxManager(),
       env: this.toolExecutor.getExecutionEnv(),
+      journal: this.fileJournal,
     };
   }
 
@@ -1450,8 +1544,85 @@ export class QueryEngine {
     return { type: 'agent:tool_failed', toolCall, error, timestamp: Date.now() };
   }
 
-  private createCompleteEvent(): AgentEvent {
-    return { type: 'agent:complete', timestamp: Date.now() };
+  /**
+   * T7 (M2): map a pre-exit type-check gate result to a report gate. `ran` is
+   * true only when the gate produced a definitive pass/fail verdict; timeout,
+   * infra failure and not-found are reported honestly as not-run.
+   */
+  private toTypeCheckGateReport(
+    tc: TypeCheckResult,
+    config: PatchGuaranteeConfig,
+  ): VerificationGateReport {
+    const command = this.resolveTypeCheckCommand(config) || null;
+    switch (tc.reason) {
+      case 'typecheck_pass':
+        return { ran: true, command, result: 'pass' };
+      case 'typecheck_fail':
+        return { ran: true, command, result: 'fail', details: tc.failures };
+      case 'timeout':
+        return { ran: false, command, result: 'timeout' };
+      case 'typecheck_infra_error':
+        return { ran: false, command, result: 'infra_error', details: tc.failures };
+      case 'typecheck_not_found':
+      default:
+        return { ran: false, command, result: 'not_found' };
+    }
+  }
+
+  /** T7 (M2): map a pre-exit test gate result to a report gate. */
+  private toTestGateReport(
+    v: VerificationResult,
+    config: PatchGuaranteeConfig,
+  ): VerificationGateReport {
+    const command = config.testCommand || null;
+    switch (v.reason) {
+      case 'tests_pass':
+        return { ran: true, command, result: 'pass' };
+      case 'tests_fail':
+        return { ran: true, command, result: 'fail', details: (v.failures || []).join('\n\n') };
+      case 'timeout':
+        return { ran: false, command, result: 'timeout' };
+      case 'tests_not_found':
+      default:
+        return { ran: false, command, result: 'not_found' };
+    }
+  }
+
+  /**
+   * T7 (M2): build the task-completion acceptance report from already-tracked
+   * signals (no extra LLM call) and attach it to the `agent:complete` event.
+   * Best-effort disk persistence to `.kc-cli/reports/` is fire-and-forget.
+   */
+  private createCompleteEvent(turnCount: number): AgentEvent {
+    let report: ReturnType<typeof buildAcceptanceReport> | undefined;
+    try {
+      const sessionId = this.getReportSessionId();
+      const usage = this.budgetEnforcer.getSessionUsage();
+      report = buildAcceptanceReport({
+        sessionId,
+        turnCount,
+        modifiedFiles: Array.from(this.modifiedFiles),
+        journalEntries: this.fileJournal.list(),
+        typeCheck: this.lastTypeCheckGate ?? skippedGate(),
+        tests: this.lastTestGate ?? skippedGate(),
+        auditEntries: queryOperationAudit({ sessionId }),
+        tokens: { inputTokens: 0, outputTokens: 0, totalTokens: usage.tokens },
+      });
+      // Optional persistence — never blocks or fails completion.
+      void writeAcceptanceReport(report, getState().cwd);
+    } catch {
+      report = undefined;
+    }
+    return { type: 'agent:complete', timestamp: Date.now(), ...(report ? { report } : {}) };
+  }
+
+  /** Resolve the session ID for the report, defaulting when state is absent. */
+  private getReportSessionId(): string {
+    try {
+      return getState().sessionId;
+    } catch {
+      return this.stateStore.get().sessionId ?? 'unknown';
+    }
   }
 
   private _aborted = false;
@@ -1480,6 +1651,8 @@ export class QueryEngine {
     this.zeroPatchRetries = 0;
     this.verificationRetries = 0;
     this.typeCheckRetries = 0;
+    this.lastTypeCheckGate = null;
+    this.lastTestGate = null;
     this.planningHandler.reset();
     this.fileContentCache.invalidateAll();
     this.readHistory.clear();
@@ -1525,6 +1698,8 @@ export class QueryEngine {
     this.zeroPatchRetries = 0;
     this.verificationRetries = 0;
     this.typeCheckRetries = 0;
+    this.lastTypeCheckGate = null;
+    this.lastTestGate = null;
     this.planningHandler.reset();
     this.fileContentCache.invalidateAll();
     this.readHistory.clear();

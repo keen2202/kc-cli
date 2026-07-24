@@ -46,6 +46,10 @@ function makeTestEnv(): any {
     fs: {
       readFile: async (p: string, _encoding?: string) => fs.readFileSync(p, 'utf-8'),
       writeFile: async (p: string, content: string) => { fs.writeFileSync(p, content); },
+      writeFileAtomic: async (p: string, content: string) => {
+        fs.writeFileSync(p, content);
+        return { backupPath: null, backupFailed: false };
+      },
       exists: async (p: string) => fs.existsSync(p),
       stat: async (p: string) => {
         const s = fs.statSync(p);

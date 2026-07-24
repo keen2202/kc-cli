@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import type { PermissionResult, PermissionContext } from '../permissions/protocol';
 import type { ExecutionEnv } from '../services/execution-env';
+import type { FileOperationJournalReader } from '../state/file-operation-journal';
 
 // Forward reference to avoid circular import
 export interface SandboxManagerLike {
@@ -39,6 +40,11 @@ export interface ToolUseContext {
   sandbox?: SandboxManagerLike;
   /** Execution environment abstraction for filesystem and shell access. */
   env: ExecutionEnv;
+  /**
+   * Session-scoped file-operation journal (T3 / H3). Present when the run is
+   * driven by a QueryEngine; enables the FileRestore tool to undo edits.
+   */
+  journal?: FileOperationJournalReader;
   /** Optional handler for blocking user clarification (H4). Undefined in non-interactive runs. */
   interaction?: UserInteractionHandler;
   onProgress?: (progress: ToolCallProgress) => void;

@@ -21,6 +21,9 @@ export const ConfigSchema = z.object({
     ask: z.array(z.string()).default([]),
   }).default({ allow: [], deny: [], ask: [] }),
   additionalDirectories: z.array(z.string()).default([]),
+  // T1 (H1): fail-safe policy for 'ask' decisions in non-interactive contexts
+  // (no UI approval handler). 'deny' (default) refuses; 'allow'/'proceed' opt in.
+  noninteractiveAskPolicy: z.enum(['deny', 'allow', 'proceed']).default('deny'),
 
   // Tool Configuration
   toolTimeout: z.number().default(30),
@@ -158,6 +161,7 @@ const _configObject: z.ZodObject<any> = (() => {
 // Enum schemas used for environment variable validation (QUAL-04)
 const providerSchema = _configObject.shape.provider;
 const permissionModeSchema = _configObject.shape.permissionMode;
+const noninteractiveAskPolicySchema = _configObject.shape.noninteractiveAskPolicy;
 const searchProviderSchema = _configObject.shape.searchProvider;
 const sandboxBackendSchema = (() => {
   const sb = _configObject.shape.sandbox;
@@ -275,6 +279,14 @@ export function loadEnvConfig(): Partial<Config> {
       config.permissionMode = result.data;
     } else {
       logger.services.warn(`Invalid KC_PERMISSION_MODE value: "${process.env.KC_PERMISSION_MODE}" -- discarding`);
+    }
+  }
+  if (process.env.KC_NONINTERACTIVE_ASK_POLICY) {
+    const result = noninteractiveAskPolicySchema.safeParse(process.env.KC_NONINTERACTIVE_ASK_POLICY);
+    if (result.success) {
+      config.noninteractiveAskPolicy = result.data;
+    } else {
+      logger.services.warn(`Invalid KC_NONINTERACTIVE_ASK_POLICY value: "${process.env.KC_NONINTERACTIVE_ASK_POLICY}" -- discarding`);
     }
   }
   if (process.env.KC_SEARCH_PROVIDER) {

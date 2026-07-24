@@ -60,6 +60,7 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
     provider: opts.provider,
     autoExtendTurns: opts.autoExtendTurns,
     im: opts.im,
+    dangerouslySkipPermissions: opts.dangerouslySkipPermissions || false,
   });
 
   const result = await bootstrap.compose();

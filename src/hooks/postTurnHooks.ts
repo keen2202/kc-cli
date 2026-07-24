@@ -2,6 +2,7 @@
 
 import type { ChatMessage } from '../query/protocol';
 import type { AgentState } from '../state/types';
+import { flushOperationAudit } from '../services/operation-audit-log';
 
 export interface PostTurnHookContext {
   messages: ChatMessage[];
@@ -58,6 +59,13 @@ export async function executePostTurnHooksSync(
       } catch (err) {
         console.error('[PostTurnHook] Error in synchronous hook execution:', err);
       }
+    }
+    // T6 (M1): drain any pending operation-audit disk writes on graceful
+    // shutdown so the audit trail is complete before the process exits.
+    try {
+      await flushOperationAudit();
+    } catch (err) {
+      console.error('[PostTurnHook] Error flushing operation audit log:', err);
     }
   } finally {
     clearTimeout(timeout);

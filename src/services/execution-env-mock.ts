@@ -1,6 +1,15 @@
 // MockExecutionEnv - In-memory implementation for testing
 
-import type { ExecutionEnv, FileSystem, FileStat, Shell, ShellResult, ShellOptions } from './execution-env';
+import type {
+  ExecutionEnv,
+  FileSystem,
+  FileStat,
+  Shell,
+  ShellResult,
+  ShellOptions,
+  AtomicWriteOptions,
+  AtomicWriteResult,
+} from './execution-env';
 
 interface MockFile {
   content: string;
@@ -32,6 +41,28 @@ export class MockFileSystem implements FileSystem {
 
   async writeFile(filePath: string, content: string): Promise<void> {
     this.files.set(filePath, { content, mtime: new Date() });
+  }
+
+  /**
+   * T2 (H2): in-memory atomic write. Snapshots any existing file to a
+   * timestamped `.bak` key so backup-aware callers/tests behave like the
+   * local filesystem without touching disk.
+   */
+  async writeFileAtomic(
+    filePath: string,
+    content: string,
+    options: AtomicWriteOptions = {},
+  ): Promise<AtomicWriteResult> {
+    const backup = options.backup ?? true;
+    let backupPath: string | null = null;
+    const existing = this.files.get(filePath);
+    if (backup && existing) {
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      backupPath = `${filePath}.${ts}.bak`;
+      this.files.set(backupPath, { content: existing.content, mtime: new Date() });
+    }
+    this.files.set(filePath, { content, mtime: new Date() });
+    return { backupPath, backupFailed: false };
   }
 
   async exists(filePath: string): Promise<boolean> {

@@ -42,6 +42,7 @@ export function createProgram(delegates: CLIDelegates): Command {
     .option('--print', 'Print response and exit (non-interactive)')
     .option('--bare', 'Minimal mode: skip hooks and heavy initialization')
     .option('--bypass-permissions', 'Bypass all permission checks (requires KC_ALLOW_BYPASS=1)')
+    .option('--dangerously-skip-permissions', 'Non-interactive: auto-approve \'ask\' decisions instead of the default fail-safe deny (accepts risk)')
     .option('--profile', 'Show startup profile')
     .option('--json', 'Output events as NDJSON (for IDE integration)')
     .option('--json-pretty', 'Output events as formatted JSON (for debugging)')

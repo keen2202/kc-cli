@@ -51,6 +51,7 @@ export const TOOL_MANIFEST = [
   { name: 'FileWrite', modulePath: './FileWriteTool/index.js', priority: ToolPriority.HIGH, eager: true },
   { name: 'WebSearch', modulePath: './WebSearchTool/index.js', priority: ToolPriority.HIGH, eager: true },
   { name: 'FileEdit', modulePath: './FileEditTool/index.js', priority: ToolPriority.HIGH, eager: true },
+  { name: 'FileRestore', modulePath: './FileRestoreTool/index.js', priority: ToolPriority.HIGH, eager: true },
   { name: 'Grep', modulePath: './GrepTool/index.js', priority: ToolPriority.HIGH, eager: true },
   { name: 'Glob', modulePath: './GlobTool/index.js', priority: ToolPriority.HIGH, eager: true },
   { name: 'WebFetch', modulePath: './WebFetchTool/index.js', priority: ToolPriority.HIGH, eager: true },

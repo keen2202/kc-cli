@@ -56,6 +56,12 @@ evaluation/
 # Memory and session data (contains conversation transcripts)
 .kc-cli/memory/
 .kc-cli/sessions/
+# T2 (H2): rolling file-write backups
+.kc-cli/backups/
+# T6 (M1): unified operation audit log
+.kc-cli/audit/
+# T7 (M2): task-completion acceptance reports
+.kc-cli/reports/
 .history
 
 # Generated reports (one-off review/audit documents)

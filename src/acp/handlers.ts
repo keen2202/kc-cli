@@ -82,6 +82,8 @@ export async function handleAgentRun(request: ACPRequest, state: ACPHandlerState
     maxTurns: config.maxTurns || 80,
     maxBudgetUsd: null,
     systemPrompt,
+    // T1 (H1): headless ACP entry inherits the fail-safe 'ask' policy (default 'deny').
+    noninteractiveAskPolicy: config.noninteractiveAskPolicy,
   }, tools);
 
   const sessionInfo: ACPSessionInfo = {

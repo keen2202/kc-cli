@@ -19,6 +19,7 @@ import { tool as FileReadTool } from './tools/FileReadTool/index.js';
 import { tool as FileWriteTool } from './tools/FileWriteTool/index.js';
 import { tool as WebSearchTool } from './tools/WebSearchTool/index.js';
 import { tool as FileEditTool } from './tools/FileEditTool/index.js';
+import { tool as FileRestoreTool } from './tools/FileRestoreTool/index.js';
 import { tool as GrepTool } from './tools/GrepTool/index.js';
 import { tool as GlobTool } from './tools/GlobTool/index.js';
 import { tool as WebFetchTool } from './tools/WebFetchTool/index.js';
@@ -206,7 +207,7 @@ export async function registerBuiltInTools(): Promise<void> {
     // CRITICAL
     BashTool, FileReadTool,
     // HIGH
-    FileWriteTool, WebSearchTool, FileEditTool, GrepTool, GlobTool,
+    FileWriteTool, WebSearchTool, FileEditTool, FileRestoreTool, GrepTool, GlobTool,
     WebFetchTool, GitTool, RunTool,
   ];
 

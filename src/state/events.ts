@@ -3,6 +3,7 @@
 
 import type { ChatMessage, ToolCall, ToolResult, PlanningFinding } from '../query/protocol';
 import type { BudgetSnapshot } from '../services/budget';
+import type { AcceptanceReport } from '../query/completion-report';
 
 /**
  * Token usage tracking
@@ -82,7 +83,7 @@ export type AgentEvent =
   | { type: 'agent:compact_full'; originalTokens: number; compactedTokens: number; timestamp: number }
   | { type: 'agent:error'; error: Error; recoverable: boolean; timestamp: number }
   | { type: 'agent:steered'; message: ChatMessage; timestamp: number }
-  | { type: 'agent:complete'; timestamp: number }
+  | { type: 'agent:complete'; timestamp: number; report?: AcceptanceReport }
   | { type: 'agent:tool_hint'; toolName: string; hint: string; timestamp: number }
   | { type: 'agent:thinking_delta'; thinking: string; timestamp: number }
   | { type: 'agent:cache_status'; hit: boolean; timestamp: number }

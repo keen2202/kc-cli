@@ -217,6 +217,9 @@ describe('Global OS/Network tool semaphore', () => {
       { enabled: false },
       { maxConcurrentTools: 50 }
     );
+    // Concurrency-focused test: opt into proceed so the T1 fail-safe deny does
+    // not block the (unhandled) 'ask' decisions for these mock tools.
+    executor.setNoninteractiveAskPolicy('proceed');
 
     const calls = Array.from({ length: 30 }, (_, i) => ({
       id: `call-${i}`,
@@ -256,6 +259,9 @@ describe('Global OS/Network tool semaphore', () => {
       { enabled: false },
       { maxConcurrentTools: 50 }
     );
+    // Concurrency-focused test: opt into proceed (see note above).
+    executor1.setNoninteractiveAskPolicy('proceed');
+    executor2.setNoninteractiveAskPolicy('proceed');
 
     const calls1 = Array.from({ length: 15 }, (_, i) => ({
       id: `call-a-${i}`,
@@ -296,6 +302,8 @@ describe('Global OS/Network tool semaphore', () => {
       { enabled: false },
       { maxConcurrentTools: 50 }
     );
+    // Concurrency-focused test: opt into proceed (see note above).
+    executor.setNoninteractiveAskPolicy('proceed');
 
     const calls = Array.from({ length: 20 }, (_, i) => ({
       id: `read-${i}`,
