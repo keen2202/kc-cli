@@ -13,7 +13,6 @@ interface EditorProps {
   text: string;
   cursorPos: number;
   isSteerMode?: boolean;
-  placeholder?: string;
   attachments?: Attachment[];
   deleteMode?: boolean;
 }
@@ -50,7 +49,6 @@ export function Editor({
   text,
   cursorPos,
   isSteerMode = false,
-  placeholder,
   attachments = [],
   deleteMode = false,
 }: EditorProps) {
@@ -77,7 +75,7 @@ export function Editor({
           {isSteerMode
             ? tokens['input.steer'](promptPrefix)
             : tokens['input.prompt'](promptPrefix)}
-          <Text dimColor>{placeholder || 'Ask anything, @file to attach...'}</Text>
+          <Text backgroundColor="white" color="black"> </Text>
         </Text>
       );
     }

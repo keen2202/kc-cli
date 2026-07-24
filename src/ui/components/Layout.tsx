@@ -49,8 +49,10 @@ export function Layout({ headerBar, chatPanel, editor, errorBar, operationSummar
       <Box flexDirection="row" height={dims.contentHeight + dims.editorHeight + dims.errorBarHeight + dims.operationHeight}>
         {/* Left pane */}
         <Box flexDirection="column" flexGrow={1} width={width - rightPanelWidth}>
-          {/* Chat panel */}
-          <Box height={dims.contentHeight}>{chatPanel}</Box>
+          {/* Chat panel. overflow="hidden" clips overflowing chat output to its
+              allotted height so stale content never bleeds into the editor
+              below when the terminal is resized (small -> large). */}
+          <Box height={dims.contentHeight} overflow="hidden">{chatPanel}</Box>
           {/* Error banner sits directly above the editor so it is always
               visible near the input without scrolling the chat output. */}
           {errorBar != null && (
@@ -60,8 +62,9 @@ export function Layout({ headerBar, chatPanel, editor, errorBar, operationSummar
           {operationSummary != null && (
             <Box height={dims.operationHeight}>{operationSummary}</Box>
           )}
-          {/* Editor */}
-          <Box height={dims.editorHeight}>{editor}</Box>
+          {/* Editor. flexShrink={0} keeps its full height so the chat panel can
+              never squeeze or overlap the input line. */}
+          <Box height={dims.editorHeight} flexShrink={0}>{editor}</Box>
         </Box>
 
         {/* Right pane */}
