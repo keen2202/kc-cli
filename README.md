@@ -56,11 +56,37 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 
 ### Installation
 
+**Prerequisites:** See [Prerequisites](#prerequisites) above — you need Node.js 20+, a sandbox backend, and at least one LLM provider's API key.
+
 ```bash
+# 1. Clone the repository
+git clone <repo-url>
 cd kc-cli
+
+# 2. Install dependencies
 npm install
-npm run kc -- "List all files in the current directory"
-npm run kc  # Interactive mode
+
+# 3. Configure environment (copy the template, then set KC_API_KEY and KC_PROVIDER)
+cp .env.example .env
+
+# 4. (Optional) Build TypeScript to dist/ — not required for development
+npm run build
+
+# 5. Verify the install
+npm run typecheck   # Should finish with no type errors
+```
+
+> **Note:** KC-CLI has no global `bin` entry. You always run it from the project
+> directory — either through the npm scripts (`npm run kc`) or directly with
+> `node dist/main.js` after a build.
+
+**Run it:**
+
+```bash
+npm run kc                               # Interactive REPL
+npm run kc -- "List all files here"      # Single-prompt mode
+# After `npm run build`:
+node dist/main.js -- "List all files here"
 ```
 
 ### Configuration
@@ -154,6 +180,51 @@ Options:
 - `/checkout <id>` — Switch to a different branch
 - `/history` — Show conversation tree visualization
 - `/exit` — Exit
+
+### Usage Examples
+
+**Explore and understand a codebase**
+
+```bash
+npm run kc -- "Explain what the QueryEngine state machine does and list its state transitions"
+npm run kc -- "Find everywhere the permission engine is invoked and summarize the decision flow"
+```
+
+**Generate and refine code (LSP-aware edits + tests)**
+
+```bash
+npm run kc -- "Add a Zod-validated 'retry' option to the BashTool input schema, wire it through, and add a test"
+npm run kc -- "Refactor src/services/cache to use TieredCache and update all callers; run typecheck afterward"
+```
+
+**Git workflows**
+
+```bash
+npm run kc -- "Show the uncommitted changes, then commit them with a conventional-commit message"
+```
+
+**Interactive REPL with mid-task steering**
+
+```bash
+npm run kc
+# Inside the REPL:
+> "Set up a vitest test for the memory relevance search"
+> /status              # check model, permission mode, and token budget
+> Ctrl+I               # toggle steer mode, then type: also cover the recency boost
+```
+
+**Multi-agent / team orchestration**
+
+```bash
+npm run kc -- "Spawn two sub-agents: one audits the permission engine, one audits the sandbox backend. Merge their findings into a single report."
+```
+
+**Non-interactive / CI-friendly**
+
+```bash
+npm run kc -- --print "Summarize the open TODOs in src/tools"
+npm run kc -- --mode plan "Propose a refactor of the compaction engines"   # read-only plan mode
+```
 
 ## Architecture
 
@@ -578,6 +649,78 @@ npm run test:coverage # Run tests with coverage report
 - [Optimization Tasks](docs/specs/optimization-tasks.md) — Task breakdown with dependency tracking
 - [NEXT Optimization](docs/specs/NEXT_OPTIMIZATION_SPEC.md) — Forward-looking optimization plan
 - [UI Event System](docs/specs/ui-event-system-spec.md) — UI redesign specification
+
+## Contributing
+
+Contributions are welcome! KC-CLI is a TypeScript / ESM project built around a
+protocol-first, tool-based architecture. This section covers setup and what we
+expect from a pull request. For an in-depth walkthrough, see
+[docs/repowiki/Development-Guide.md](docs/repowiki/Development-Guide.md).
+
+### Getting started
+
+```bash
+git clone <repo-url>
+cd kc-cli
+npm install
+cp .env.example .env        # add at least one provider's KC_API_KEY
+npm run typecheck && npm test
+```
+
+### Development workflow
+
+1. **Branch** off `main` with a descriptive name (`feat/...`, `fix/...`, `docs/...`).
+2. **Make your change** following the [conventions](#coding-conventions) below.
+3. **Verify locally**:
+   ```bash
+   npm run typecheck        # tsc --noEmit must pass
+   npm test                 # the vitest suite must pass
+   npm run test:coverage    # must meet the thresholds below
+   ```
+4. **Keep docs in sync** — if you add or change a tool, provider, or config option,
+   update `README.md` and the relevant `docs/repowiki/*` page.
+5. **Open a PR** with a clear description: what changed, why, and how to test it.
+
+### Coding conventions
+
+- **TypeScript strict mode**, target ES2022, ESNext modules.
+- **No `any`** in new code; prefer precise types. Prefer editing existing files over creating new ones.
+- **Protocol-first**: every module exposes its public types in `protocol.ts`
+  (types only — never implementation — to avoid circular imports).
+- **Comments sparingly**: only when the *why* is non-obvious. No multi-line docstrings.
+- **Error handling**: return `Result<T, E>`; use `KCError` with a stable `ErrorCode`.
+  Never swallow errors silently.
+- **Tools** use the `ExecutionEnv` abstraction (never direct FS/Shell access) and must
+  go through `ToolExecutor` so sandbox and permission checks apply.
+- **Path alias**: import internal modules with `@/...` (e.g. `import { buildTool } from '@/Tool'`).
+
+### Testing requirements
+
+- Co-locate unit tests as `*.test.ts` next to source; integration tests live in `test/`.
+- Use `MockLLMClient` for LLM-dependent tests and `MockExecutionEnv` for tool tests.
+- **Coverage thresholds** (v8 provider, enforced in CI):
+
+  | Scope | Statements | Branches | Functions | Lines |
+  |-------|-----------|----------|-----------|-------|
+  | Global | 60% | 50% | 60% | 60% |
+  | `src/permissions/**` | 75% | 65% | 75% | 75% |
+  | `src/services/sandbox*.ts` | 65% | 55% | 65% | 65% |
+
+### Extending KC-CLI
+
+- **Add a tool** — `src/tools/<Name>/index.ts`, then register in `src/tools.ts`; see
+  [Tool Development](docs/guides/tool-development.md).
+- **Add an LLM provider** — extend `BaseApiClient` in `src/api/`; see
+  [API Clients](docs/guides/api-clients.md).
+- **Add a plugin** — contribute tools / hooks / permissionRules / prompts / mcpServers; see
+  [Plugin Development](docs/guides/plugin-development.md).
+- **Wire MCP / LSP** — see [MCP Integration](docs/guides/mcp-integration.md) and
+  [LSP Integration](docs/guides/lsp-integration.md).
+
+### Questions?
+
+Open an issue or start a discussion. Most "how do I…" answers live in
+[docs/repowiki/](docs/repowiki/) and the guides under [docs/guides/](docs/guides/).
 
 ## License
 
