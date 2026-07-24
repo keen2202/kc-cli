@@ -16,9 +16,13 @@ build/
 # IDE
 .vscode/
 .idea/
+.qoder/
 *.swp
 *.swo
 *~
+
+# Local agent/tool caches (not project code)
+.workbuddy/
 
 # OS
 .DS_Store
