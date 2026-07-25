@@ -6,7 +6,11 @@ import type { MemoryConfig, MemoryEntry } from '../memory/types';
 import { DEFAULT_MEMORY_CONFIG } from '../memory/types';
 import { findRelevantMemories } from '../memory/relevanceSearch';
 import type { MemoryManifestEntry } from '../memory/types';
-import { extractMemoriesFromMessages as extractHeuristic } from '../services/memoryExtraction';
+import {
+  extractMemoriesHybrid,
+  type LlmExtractionClient,
+} from '../services/memoryExtraction';
+import type { BudgetEnforcer } from '../services/budget';
 
 export interface MemoryIntegrationConfig {
   config?: Partial<MemoryConfig>;
@@ -17,6 +21,12 @@ export interface MemoryIntegrationConfig {
   getMemoryContent?: (fileName: string) => Promise<string | null>;
   /** Callback to save extracted memory */
   saveMemory?: (memory: MemoryEntry) => Promise<void>;
+  /** Optional isolated LLM client for the hybrid extraction tier (T3). */
+  llmClient?: LlmExtractionClient | null;
+  /** Optional budget enforcer gating LLM extraction cost (T2/GR6). */
+  budget?: BudgetEnforcer | null;
+  /** Injectable clock for deterministic tests. */
+  now?: () => number;
 }
 
 /**
@@ -30,6 +40,9 @@ export class MemoryIntegration {
   private getMemoryContent: (fileName: string) => Promise<string | null>;
   private saveMemory: (memory: MemoryEntry) => Promise<void>;
   private memoryLoadPromise: Promise<string> | null = null;
+  private llmClient: LlmExtractionClient | null;
+  private budget: BudgetEnforcer | null;
+  private now: () => number;
 
   constructor(options: MemoryIntegrationConfig) {
     this.config = { ...DEFAULT_MEMORY_CONFIG, ...options.config };
@@ -39,6 +52,9 @@ export class MemoryIntegration {
     this.getMemoryManifest = options.getMemoryManifest || (async () => []);
     this.getMemoryContent = options.getMemoryContent || (async () => null);
     this.saveMemory = options.saveMemory || (async () => {});
+    this.llmClient = options.llmClient ?? null;
+    this.budget = options.budget ?? null;
+    this.now = options.now ?? (() => Date.now());
   }
 
   /**
@@ -88,8 +104,9 @@ export class MemoryIntegration {
 
   /**
    * Post-query: Extract and save memories from conversation.
-   * Uses heuristic-based extraction to find user preferences, project decisions,
-   * and feedback/lessons from conversation messages.
+   * Runs the hybrid two-tier pipeline (heuristic gate + optional isolated LLM
+   * fine-extraction). When the LLM tier is disabled/unavailable this is
+   * byte-for-byte equivalent to the previous heuristic-only behaviour.
    */
   async extractMemoriesFromConversation(messages: ChatMessage[]): Promise<void> {
     if (!this.config.enabled || !this.config.autoExtract) {
@@ -97,8 +114,14 @@ export class MemoryIntegration {
     }
 
     try {
-      // Extract memories using heuristic patterns
-      const extracted = await extractHeuristic(messages);
+      // Hybrid extraction (heuristic gate + optional guarded LLM tier).
+      const extracted = await extractMemoriesHybrid(messages, {
+        config: this.config,
+        client: this.llmClient,
+        budget: this.budget,
+        getExistingManifest: this.getMemoryManifest,
+        now: this.now,
+      });
 
       if (extracted.length === 0) {
         return;

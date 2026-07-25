@@ -325,6 +325,28 @@ export function getFeedbackMapSize(): number {
 }
 
 /**
+ * Token-set similarity in [0, 1] for semantic dedup (T4 / GR4).
+ *
+ * Reuses the shared CJK-aware {@link tokenize} (same tokenizer the relevance
+ * scorer uses) and returns the overlap coefficient — intersection size over the
+ * smaller token set. This favours detecting a paraphrase that is largely
+ * contained in an existing memory, without introducing an embedding dependency.
+ * Pure & deterministic.
+ */
+export function tokenSetSimilarity(a: string, b: string): number {
+  const ta = new Set(tokenize(a));
+  const tb = new Set(tokenize(b));
+  if (ta.size === 0 || tb.size === 0) return 0;
+
+  const [small, large] = ta.size <= tb.size ? [ta, tb] : [tb, ta];
+  let intersection = 0;
+  for (const token of small) {
+    if (large.has(token)) intersection++;
+  }
+  return intersection / small.size;
+}
+
+/**
  * Get human-readable age text
  */
 export { getAgeText } from '../utils/format';

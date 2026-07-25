@@ -46,9 +46,8 @@ ${existingMemories ? `## Existing Memories\n\n${existingMemories}\n\nDo not dupl
 
 ## Output Format
 
-For each memory you extract, use this format:
+For each memory you extract, output a block in EXACTLY this format:
 
-\`\`\`
 ---
 name: memory_name
 description: one-line description for relevance matching
@@ -56,7 +55,20 @@ type: user|feedback|project|reference
 ---
 
 Memory content here. Be concise and actionable.
-\`\`\`
+
+## Output Format Hard Constraints (STRICT — violations are discarded)
+
+1. Emit ONLY the memory blocks. No preamble, no commentary, no summaries.
+2. Every block MUST open and close its frontmatter with a line containing only \`---\`.
+3. Frontmatter MUST contain exactly these keys: \`name\`, \`description\`, \`type\`.
+   - \`type\` MUST be one of: \`user\`, \`feedback\`, \`project\`, \`reference\` (lowercase).
+   - \`name\` ≤ 200 chars; \`description\` ≤ 500 chars; both non-empty single lines.
+4. Content goes AFTER the closing \`---\`, before the next block's opening \`---\`.
+5. Content MUST be prose (≥ 20 chars). Do NOT wrap content in code fences and do
+   NOT emit code-only memories.
+6. NEVER include secrets, API keys, tokens, passwords, or credentials. NEVER
+   include absolute filesystem paths to protected locations.
+7. If nothing is worth remembering, output nothing at all.
 
 Extract all relevant memories from the conversation below.`;
 }
