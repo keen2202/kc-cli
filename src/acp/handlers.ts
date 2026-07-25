@@ -84,6 +84,9 @@ export async function handleAgentRun(request: ACPRequest, state: ACPHandlerState
     systemPrompt,
     // T1 (H1): headless ACP entry inherits the fail-safe 'ask' policy (default 'deny').
     noninteractiveAskPolicy: config.noninteractiveAskPolicy,
+    // Flow the configured memory section (incl. llmExtraction toggle) into
+    // the engine's memory integration, consistent with the CLI bootstrap.
+    memory: { config: config.memory },
   }, tools);
 
   const sessionInfo: ACPSessionInfo = {

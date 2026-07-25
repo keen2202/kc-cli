@@ -102,6 +102,16 @@ export interface ConsolidationLock {
 }
 
 /**
+ * LLM semantic extraction configuration (hybrid tier).
+ * Disabled by default so behaviour is identical to the heuristic tier until
+ * explicitly enabled (gray rollout). See spec T6/GR8.
+ */
+export interface MemoryLlmExtractionConfig {
+  /** Master switch for the LLM extraction tier (default false). */
+  enabled: boolean;
+}
+
+/**
  * Memory configuration
  */
 export interface MemoryConfig {
@@ -117,6 +127,17 @@ export interface MemoryConfig {
   sessionRetentionDays: number;
   sessionArchiveRetentionDays: number;
   relevanceSearchLimit: number;
+  // ── LLM semantic extraction (T6) ──
+  /** LLM extraction tier toggle (default disabled). */
+  llmExtraction: MemoryLlmExtractionConfig;
+  /** Model override for the extraction call (defaults to the main model). */
+  llmExtractionModel?: string;
+  /** Token-set similarity threshold above which a candidate is a duplicate. */
+  semanticDedupThreshold: number;
+  /** Trigger the LLM tier immediately on high-signal feedback/correction cues. */
+  llmTriggerOnFeedbackSignal: boolean;
+  /** Optional per-session USD cap for extraction calls. */
+  maxExtractionCostUsdPerSession?: number;
 }
 
 /**
@@ -135,4 +156,8 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   sessionRetentionDays: 30,
   sessionArchiveRetentionDays: 90,
   relevanceSearchLimit: 5,
+  // ── LLM semantic extraction (T6) — off by default (zero behaviour change) ──
+  llmExtraction: { enabled: false },
+  semanticDedupThreshold: 0.85,
+  llmTriggerOnFeedbackSignal: true,
 };

@@ -7,6 +7,7 @@ vi.mock('../../src/memory/relevanceSearch', () => ({
 
 vi.mock('../../src/services/memoryExtraction', () => ({
   extractMemoriesFromMessages: vi.fn(),
+  extractMemoriesHybrid: vi.fn(),
 }));
 
 import {
@@ -14,12 +15,13 @@ import {
   createMemoryIntegration,
 } from '../../src/memory/integration';
 import { findRelevantMemories } from '../../src/memory/relevanceSearch';
-import { extractMemoriesFromMessages } from '../../src/services/memoryExtraction';
+import { extractMemoriesHybrid } from '../../src/services/memoryExtraction';
 import type { MemoryManifestEntry, MemoryEntry, MemoryConfig } from '../../src/memory/types';
 import type { ChatMessage } from '../../src/types/message';
 
 const mockFindRelevant = vi.mocked(findRelevantMemories);
-const mockExtractMemories = vi.mocked(extractMemoriesFromMessages);
+// Integration now calls the hybrid orchestrator; bind the mock to it.
+const mockExtractMemories = vi.mocked(extractMemoriesHybrid);
 
 function makeManifest(overrides: Partial<MemoryManifestEntry> = {}): MemoryManifestEntry {
   return {
@@ -280,7 +282,7 @@ describe('MemoryIntegration', () => {
       const messages = [makeChatMessage('user', 'I prefer TypeScript')];
       await integration.extractMemoriesFromConversation(messages);
 
-      expect(mockExtractMemories).toHaveBeenCalledWith(messages);
+      expect(mockExtractMemories).toHaveBeenCalledWith(messages, expect.anything());
       expect(saveMemory).toHaveBeenCalledWith(memory);
     });
 

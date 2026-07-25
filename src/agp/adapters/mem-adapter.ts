@@ -130,6 +130,11 @@ export function recordToMemConfig(record: ResourceRegistrationRecord<'Mem'>): Me
     sessionRetentionDays: (p.sessionRetentionDays as number) ?? 30,
     sessionArchiveRetentionDays: (p.sessionArchiveRetentionDays as number) ?? 90,
     relevanceSearchLimit: (p.relevanceSearchLimit as number) ?? 5,
+    llmExtraction: { enabled: (p.llmExtractionEnabled as boolean) ?? false },
+    llmExtractionModel: p.llmExtractionModel as string | undefined,
+    semanticDedupThreshold: (p.semanticDedupThreshold as number) ?? 0.85,
+    llmTriggerOnFeedbackSignal: (p.llmTriggerOnFeedbackSignal as boolean) ?? true,
+    maxExtractionCostUsdPerSession: p.maxExtractionCostUsdPerSession as number | undefined,
   };
 }
 

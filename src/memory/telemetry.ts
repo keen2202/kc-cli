@@ -7,6 +7,15 @@ interface MemoryTelemetryData {
   memoriesExtracted: number;
   lastExtractionAt: number;
 
+  // LLM extraction stats (hybrid tier)
+  llmExtractionCalls: number;
+  heuristicFallbacks: number;
+  memoriesFromLlm: number;
+  redactedSecrets: number;
+  dedupSkipped: number;
+  estimatedCostUsd: number;
+  circuitBroken: boolean;
+
   // Consolidation stats
   consolidationsTotal: number;
   consolidationsFailed: number;
@@ -34,6 +43,14 @@ let telemetry: MemoryTelemetryData = {
   extractionsFailed: 0,
   memoriesExtracted: 0,
   lastExtractionAt: 0,
+
+  llmExtractionCalls: 0,
+  heuristicFallbacks: 0,
+  memoriesFromLlm: 0,
+  redactedSecrets: 0,
+  dedupSkipped: 0,
+  estimatedCostUsd: 0,
+  circuitBroken: false,
 
   consolidationsTotal: 0,
   consolidationsFailed: 0,
@@ -78,6 +95,40 @@ export function recordExtraction(
   totalExtractionTimeMs += durationMs;
   telemetry.averageExtractionTimeMs =
     totalExtractionTimeMs / telemetry.extractionsTotal;
+}
+
+/**
+ * Record a single isolated LLM extraction call outcome (hybrid tier, T7).
+ * `success=false` means the call errored and the pipeline degraded to heuristic.
+ */
+export function recordLlmExtraction(params: {
+  success: boolean;
+  memoriesFromLlm?: number;
+  redactedSecrets?: number;
+  estimatedCostUsd?: number;
+}): void {
+  telemetry.llmExtractionCalls++;
+  if (params.success) {
+    telemetry.memoriesFromLlm += params.memoriesFromLlm ?? 0;
+    telemetry.redactedSecrets += params.redactedSecrets ?? 0;
+    telemetry.estimatedCostUsd += params.estimatedCostUsd ?? 0;
+  } else {
+    telemetry.heuristicFallbacks++;
+  }
+}
+
+/**
+ * Record that semantic dedup skipped `count` candidate memories (T4/T7).
+ */
+export function recordDedupSkipped(count: number): void {
+  telemetry.dedupSkipped += count;
+}
+
+/**
+ * Mark the LLM extraction circuit breaker as tripped for the session (T5/T7).
+ */
+export function recordCircuitBroken(): void {
+  telemetry.circuitBroken = true;
 }
 
 /**
@@ -151,6 +202,15 @@ export function formatTelemetryReport(): string {
     `- Average extraction time: ${telemetry.averageExtractionTimeMs.toFixed(0)}ms`,
     `- Last extraction: ${telemetry.lastExtractionAt ? new Date(telemetry.lastExtractionAt).toISOString() : 'Never'}`,
     '',
+    '### LLM Extraction (hybrid)',
+    `- LLM extraction calls: ${telemetry.llmExtractionCalls}`,
+    `- Heuristic fallbacks: ${telemetry.heuristicFallbacks}`,
+    `- Memories from LLM: ${telemetry.memoriesFromLlm}`,
+    `- Redacted secrets: ${telemetry.redactedSecrets}`,
+    `- Dedup skipped: ${telemetry.dedupSkipped}`,
+    `- Estimated cost: $${telemetry.estimatedCostUsd.toFixed(4)}`,
+    `- Circuit broken: ${telemetry.circuitBroken ? 'yes' : 'no'}`,
+    '',
     '### Consolidation',
     `- Total consolidations: ${telemetry.consolidationsTotal}`,
     `- Failed consolidations: ${telemetry.consolidationsFailed}`,
@@ -183,6 +243,14 @@ export function resetTelemetry(): void {
     extractionsFailed: 0,
     memoriesExtracted: 0,
     lastExtractionAt: 0,
+
+    llmExtractionCalls: 0,
+    heuristicFallbacks: 0,
+    memoriesFromLlm: 0,
+    redactedSecrets: 0,
+    dedupSkipped: 0,
+    estimatedCostUsd: 0,
+    circuitBroken: false,
 
     consolidationsTotal: 0,
     consolidationsFailed: 0,

@@ -202,12 +202,33 @@ export class QueryEngine {
       model: config.model,
     });
 
+    // Initialize budget enforcer. Hoisted above the sub-modules so the
+    // memory LLM-extraction tier can share this same enforcer (GR6).
+    this.budgetEnforcer = new BudgetEnforcer({
+      sessionTokenLimit: config.maxBudgetUsd
+        ? Math.ceil(config.maxBudgetUsd / 0.00001) // rough token-per-dollar estimate
+        : DEFAULT_BUDGET_CONFIG.sessionTokenLimit,
+      costLimitUsd: config.maxBudgetUsd ?? null,
+    });
+
     // Initialize sub-modules
     this.conversation = new ConversationState({
       maxMessages: config.maxMessages,
     });
     this.compaction = new CompactionHandler();
-    this.memory = new MemoryHandler(config.memory || {});
+    // Memory integration: default-inject the engine's own API client and
+    // budget enforcer so the hybrid LLM-extraction tier (spec:
+    // memory-llm-extraction-hardening) can actually fire when
+    // `llmExtraction.enabled` is turned on. The extraction call still goes
+    // through the isolated path in memoryExtraction.ts (no QueryEngine, no
+    // post-turn hooks — GR5 recursion isolation is preserved). Explicitly
+    // provided values in config.memory (including an explicit null) win
+    // over these defaults.
+    this.memory = new MemoryHandler({
+      llmClient: this.apiClient,
+      budget: this.budgetEnforcer,
+      ...config.memory,
+    });
     this.errorHandler = new ErrorHandler();
 
     // Initialize state store
@@ -251,14 +272,6 @@ export class QueryEngine {
 
     // Initialize planning phase handler
     this.planningHandler = new PlanningPhaseHandler(config.planningPhase || {});
-
-    // Initialize budget enforcer
-    this.budgetEnforcer = new BudgetEnforcer({
-      sessionTokenLimit: config.maxBudgetUsd
-        ? Math.ceil(config.maxBudgetUsd / 0.00001) // rough token-per-dollar estimate
-        : DEFAULT_BUDGET_CONFIG.sessionTokenLimit,
-      costLimitUsd: config.maxBudgetUsd ?? null,
-    });
 
     // Link planning handler to tool executor for defense-in-depth filtering
     this.toolExecutor.setToolBlockCheck((toolName: string) => {

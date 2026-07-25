@@ -66,7 +66,16 @@ export const ConfigSchema = z.object({
     maxMemoriesPerType: z.number().default(50),
     maxSessionSnapshots: z.number().default(100),
     sessionRetentionDays: z.number().default(30),
+    sessionArchiveRetentionDays: z.number().default(90),
     relevanceSearchLimit: z.number().default(5),
+    // ── LLM semantic extraction (T6) — off by default (zero behaviour change) ──
+    llmExtraction: z.object({
+      enabled: z.boolean().default(false),
+    }).default({}),
+    llmExtractionModel: z.string().optional(),
+    semanticDedupThreshold: z.number().min(0).max(1).default(0.85),
+    llmTriggerOnFeedbackSignal: z.boolean().default(true),
+    maxExtractionCostUsdPerSession: z.number().min(0).optional(),
   }).default({}),
 
   // Sandbox Configuration
@@ -385,6 +394,34 @@ export function loadEnvConfig(): Partial<Config> {
   }
   if (process.env.KC_MEMORY_AUTO_EXTRACT) {
     mem.autoExtract = process.env.KC_MEMORY_AUTO_EXTRACT === 'true' || process.env.KC_MEMORY_AUTO_EXTRACT === '1';
+  }
+  if (process.env.KC_MEMORY_LLM_EXTRACTION) {
+    if (!mem.llmExtraction) mem.llmExtraction = {} as Config['memory']['llmExtraction'];
+    mem.llmExtraction.enabled =
+      process.env.KC_MEMORY_LLM_EXTRACTION === 'true' || process.env.KC_MEMORY_LLM_EXTRACTION === '1';
+  }
+  if (process.env.KC_MEMORY_LLM_EXTRACTION_MODEL) {
+    mem.llmExtractionModel = process.env.KC_MEMORY_LLM_EXTRACTION_MODEL;
+  }
+  if (process.env.KC_MEMORY_SEMANTIC_DEDUP_THRESHOLD) {
+    const raw = Number(process.env.KC_MEMORY_SEMANTIC_DEDUP_THRESHOLD);
+    if (Number.isFinite(raw) && raw >= 0 && raw <= 1) {
+      mem.semanticDedupThreshold = raw;
+    } else {
+      logger.services.warn(`Invalid KC_MEMORY_SEMANTIC_DEDUP_THRESHOLD value: "${process.env.KC_MEMORY_SEMANTIC_DEDUP_THRESHOLD}" -- discarding`);
+    }
+  }
+  if (process.env.KC_MEMORY_LLM_TRIGGER_ON_FEEDBACK) {
+    mem.llmTriggerOnFeedbackSignal =
+      process.env.KC_MEMORY_LLM_TRIGGER_ON_FEEDBACK === 'true' || process.env.KC_MEMORY_LLM_TRIGGER_ON_FEEDBACK === '1';
+  }
+  if (process.env.KC_MEMORY_MAX_EXTRACTION_COST_USD) {
+    const raw = Number(process.env.KC_MEMORY_MAX_EXTRACTION_COST_USD);
+    if (Number.isFinite(raw) && raw >= 0) {
+      mem.maxExtractionCostUsdPerSession = raw;
+    } else {
+      logger.services.warn(`Invalid KC_MEMORY_MAX_EXTRACTION_COST_USD value: "${process.env.KC_MEMORY_MAX_EXTRACTION_COST_USD}" -- discarding`);
+    }
   }
 
   // IM environment variables

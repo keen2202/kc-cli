@@ -416,6 +416,9 @@ export class Bootstrap {
               systemPrompt: buildSystemPrompt(sessionTools),
               sandboxFailIfNoSandbox: config.sandbox?.failIfNoSandbox,
               noninteractiveAskPolicy: this.resolveNoninteractiveAskPolicy(config),
+              // Flow the configured memory section (incl. llmExtraction
+              // toggle) into the engine's memory integration.
+              memory: { config: config.memory },
               permissionRules: {
                 deny: config.permissions.deny,
                 ask: config.permissions.ask,
@@ -475,6 +478,9 @@ export class Bootstrap {
         maxTurnsCeiling,
         sandboxFailIfNoSandbox: config.sandbox?.failIfNoSandbox,
         noninteractiveAskPolicy,
+        // Flow the configured memory section (incl. llmExtraction toggle)
+        // into the engine's memory integration.
+        memory: { config: config.memory },
         permissionRules: {
           deny: config.permissions.deny,
           ask: config.permissions.ask,
