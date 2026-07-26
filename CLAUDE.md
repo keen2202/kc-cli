@@ -82,6 +82,4 @@ npm run kc             # Start interactive REPL
 
 - **Reference**: `docs/repowiki/` — 15 deep-dive documents covering all subsystems (Home, Architecture, Query-Engine, Tools-System, API-Clients, Permission-System, Sandbox, Orchestrator, Memory-System, Plugin-System, UI-System, State-Management, Configuration, Testing, Development-Guide)
 - **Guides**: `docs/guides/` — Tool development, API clients, MCP, LSP, plugins, migration, SWE-bench
-- **Specs**: `docs/specs/` — Architecture optimization, UI event system, NEXT optimization
-- **Tasks**: `docs/tasks/` — Active task breakdowns (tech review V2, self-evolving, v3.1/v4)
-- **Archive**: `docs/archive/` — Historical completed specs, tasks, and reviews (v2/v3 upgrades, test coverage, compliance)
+- **Specs**: `docs/specs/` — Hardening/optimization specs and task breakdowns (architecture, UI structural, intent-context, memory LLM extraction, safety verification)
