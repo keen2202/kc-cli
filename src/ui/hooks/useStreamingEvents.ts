@@ -1,11 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { UIEventBus } from '../event-bus';
-import type { ChatMessage } from '../components/ChatView';
-import type { ThinkingChain } from '../components/ThinkingChainView';
-import type { ToolCallData } from '../components/ToolCallCard';
-import type { SidebarData } from '../components/Sidebar';
-import { createSidebarData } from '../components/Sidebar';
-import { classifyThinkingSteps } from '../components/ThinkingChainView';
+import type { ChatMessage, ThinkingChain, ToolCallData, SidebarData } from '../view-protocol';
+import { createSidebarData, classifyThinkingSteps } from '../view-protocol';
 import { normalizeUIEvent } from '../event-normalizer';
 import type { AgentEvent } from '../../state/types';
 import type { StreamEvent } from '../../query/protocol';

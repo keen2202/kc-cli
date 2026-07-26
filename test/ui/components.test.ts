@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { getTheme, type Theme } from '../../src/ui/theme';
-import { renderToolCallCard, type ToolCallData } from '../../src/ui/components/ToolCallCard';
+import { renderToolCallCard } from '../../src/ui/components/ToolCallCard';
+import type { ToolCallData } from '../../src/ui/view-protocol';
 import { renderStatusBar } from '../../src/ui/components/StatusBar';
 import { renderInputBox, createInputState } from '../../src/ui/components/InputBox';
 

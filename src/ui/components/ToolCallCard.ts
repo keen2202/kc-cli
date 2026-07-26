@@ -1,14 +1,10 @@
 import chalk from 'chalk';
 import type { Theme } from '../theme';
 
-export interface ToolCallData {
-  toolName: string;
-  input?: string;
-  output?: string;
-  status: 'running' | 'completed' | 'failed';
-  startTime?: number;
-  endTime?: number;
-}
+// LIVE runtime helpers (T7 triage): renderToolCallCard/renderToolCallCompact
+// are used by ChatMessagesView. The ToolCallData contract lives in
+// view-protocol — import it from there, never from this file.
+import type { ToolCallData } from '../view-protocol';
 
 export function renderToolCallCard(tc: ToolCallData, theme?: Theme): string {
   const tokens = theme?.resolve();

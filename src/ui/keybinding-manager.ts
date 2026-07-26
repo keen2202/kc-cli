@@ -94,11 +94,12 @@ export function createDefaultKeybindings(): KeybindingManager {
     { key: 'ctrl+d', command: 'exit', when: 'idle', description: 'Exit (empty input)' },
     { key: 'ctrl+t', command: 'toggleSidebar', description: 'Toggle sidebar' },
     { key: 'ctrl+g', command: 'cycleExecutionMode', description: 'Cycle execution mode (interactive/auto/goal)' },
-    { key: 'ctrl+shift+t', command: 'toggleThinking', description: 'Toggle thinking chain' },
-    { key: 'escape', command: 'closeOverlay', when: 'overlay', description: 'Close overlay' },
-    { key: 'escape', command: 'cancelMode', when: 'delete-mode', description: 'Exit delete mode' },
+    // escape→closeOverlay / escape→cancelMode removed: ESC is owned by the
+    // FocusStack (the top layer's onEscape), so schema entries for it were
+    // dead bindings (F1). toggleThinking (ctrl+shift+t) and autocomplete (tab)
+    // removed: neither had a real handler behind it — advertising them in
+    // /help was a broken promise. Tab is swallowed by the editor base layer.
     { key: 'tab', command: 'toggleAgentMode', when: 'idle', description: 'Toggle build/plan mode' },
-    { key: 'tab', command: 'autocomplete', when: 'input', description: 'Autocomplete' },
     { key: 'up', command: 'historyPrev', when: 'input', description: 'Previous history' },
     { key: 'down', command: 'historyNext', when: 'input', description: 'Next history' },
     { key: '?', command: 'help', description: 'Show help' },

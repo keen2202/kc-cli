@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text } from 'ink';
 import { useTheme } from '../hooks/useTheme';
+import { useFocusLayer } from '../hooks/useFocusLayer';
+import type { KeypressEvent } from '../keypress';
 
 interface FileItem {
   name: string;
@@ -20,23 +22,30 @@ export function FilePicker({ files, onSelect, onCancel }: FilePickerProps) {
 
   const maxIndex = Math.max(0, Math.min(files.length, 20) - 1);
 
-  useInput((input, key) => {
-    if (key.escape) {
+  // Focus layer: the picker owns the keyboard while mounted; ESC cancels it
+  // via the stack's unified escape semantics.
+  useFocusLayer({
+    id: 'file-picker',
+    onKey: (event: KeypressEvent) => {
+      if (event.name === 'up' || event.name === 'k') {
+        setSelectedIndex((i) => Math.max(0, i - 1));
+        return true;
+      }
+      if (event.name === 'down' || event.name === 'j') {
+        setSelectedIndex((i) => Math.min(maxIndex, i + 1));
+        return true;
+      }
+      if (event.name === 'return') {
+        const file = files[selectedIndex];
+        if (file) onSelect(file.path);
+        return true;
+      }
+      return true;
+    },
+    onEscape: () => {
       onCancel();
-      return;
-    }
-    if (key.upArrow || input === 'k') {
-      setSelectedIndex((i) => Math.max(0, i - 1));
-      return;
-    }
-    if (key.downArrow || input === 'j') {
-      setSelectedIndex((i) => Math.min(maxIndex, i + 1));
-      return;
-    }
-    if (key.return) {
-      const file = files[selectedIndex];
-      if (file) onSelect(file.path);
-    }
+      return true;
+    },
   });
 
   return (

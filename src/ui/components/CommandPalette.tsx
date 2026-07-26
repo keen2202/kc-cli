@@ -6,8 +6,10 @@
 // without rendering the Ink tree.
 
 import React, { useState, useMemo } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text } from 'ink';
 import { useTheme } from '../hooks/useTheme';
+import { useFocusLayer } from '../hooks/useFocusLayer';
+import type { KeypressEvent } from '../keypress';
 
 export interface CommandItem {
   id: string;
@@ -45,37 +47,43 @@ export function CommandPalette({ commands, onClose }: CommandPaletteProps) {
   const filtered = useMemo(() => filterCommands(commands, query), [commands, query]);
   const clampedIndex = Math.min(selectedIndex, Math.max(0, filtered.length - 1));
 
-  useInput((input, key) => {
-    if (key.escape) {
-      onClose();
-      return;
-    }
-    if (key.return) {
-      const cmd = filtered[clampedIndex];
-      if (cmd) {
-        onClose();
-        cmd.run();
+  // Focus layer: the palette owns the keyboard while mounted; ESC closes it
+  // via the stack's unified escape semantics.
+  useFocusLayer({
+    id: 'palette',
+    onKey: (event: KeypressEvent) => {
+      if (event.name === 'return') {
+        const cmd = filtered[clampedIndex];
+        if (cmd) {
+          onClose();
+          cmd.run();
+        }
+        return true;
       }
-      return;
-    }
-    if (key.upArrow) {
-      setSelectedIndex((i) => Math.max(0, Math.min(i, filtered.length - 1) - 1));
-      return;
-    }
-    if (key.downArrow) {
-      setSelectedIndex((i) => Math.min(filtered.length - 1, i + 1));
-      return;
-    }
-    if (key.backspace || key.delete) {
-      setQuery((q) => q.slice(0, -1));
-      setSelectedIndex(0);
-      return;
-    }
-    // Printable characters extend the query.
-    if (!key.ctrl && !key.meta && input && input.length >= 1 && input.charCodeAt(0) >= 0x20) {
-      setQuery((q) => q + input);
-      setSelectedIndex(0);
-    }
+      if (event.name === 'up') {
+        setSelectedIndex((i) => Math.max(0, Math.min(i, filtered.length - 1) - 1));
+        return true;
+      }
+      if (event.name === 'down') {
+        setSelectedIndex((i) => Math.min(filtered.length - 1, i + 1));
+        return true;
+      }
+      if (event.name === 'backspace' || event.name === 'delete') {
+        setQuery((q) => q.slice(0, -1));
+        setSelectedIndex(0);
+        return true;
+      }
+      // Printable characters extend the query; everything else is swallowed.
+      if (event.isPrintable) {
+        setQuery((q) => q + event.name);
+        setSelectedIndex(0);
+      }
+      return true;
+    },
+    onEscape: () => {
+      onClose();
+      return true;
+    },
   });
 
   const visible = filtered.slice(0, MAX_VISIBLE);

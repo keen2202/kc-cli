@@ -4,8 +4,9 @@
  * Covers:
  * - Global bindings resolve regardless of context (palette, newSession, ...)
  * - `when`-scoped bindings only resolve while their context is active
- * - The same physical key maps to different commands per context (tab, escape)
- * - Removed bindings (modelSelector/sessionSwitcher) no longer resolve
+ * - The same physical key maps to different commands per context (tab)
+ * - Removed bindings (modelSelector/sessionSwitcher, escape→closeOverlay,
+ *   escape→cancelMode, toggleThinking, autocomplete) no longer resolve
  */
 
 import { describe, it, expect } from 'vitest';
@@ -36,24 +37,24 @@ describe('KeybindingManager — resolve', () => {
     expect(km.resolve(ev('f', { ctrl: true }))).toBeNull();
   });
 
-  it('maps tab to different commands depending on context', () => {
+  it('maps tab to toggleAgentMode only in idle context', () => {
     const km = createDefaultKeybindings();
     km.setContext('idle');
     expect(km.resolve(ev('tab'))).toBe('toggleAgentMode');
     km.clearContext('idle');
 
+    // The autocomplete binding was removed (no real handler existed); tab in
+    // input-only context resolves nothing and is swallowed by the editor layer.
     km.setContext('input');
-    expect(km.resolve(ev('tab'))).toBe('autocomplete');
+    expect(km.resolve(ev('tab'))).toBeNull();
   });
 
-  it('maps escape to close overlay vs exit delete-mode by context', () => {
+  it('never binds escape — ESC semantics belong to the focus stack', () => {
     const km = createDefaultKeybindings();
     km.setContext('overlay');
-    expect(km.resolve(ev('escape'))).toBe('closeOverlay');
-    km.clearContext('overlay');
-
     km.setContext('delete-mode');
-    expect(km.resolve(ev('escape'))).toBe('cancelMode');
+    expect(km.resolve(ev('escape'))).toBeNull();
+    expect(km.getAll().every((b) => b.key !== 'escape')).toBe(true);
   });
 
   it('resolves history navigation only in input context', () => {
@@ -73,5 +74,9 @@ describe('KeybindingManager — resolve', () => {
     const commands = km.getAll().map((b) => b.command);
     expect(commands).not.toContain('modelSelector');
     expect(commands).not.toContain('sessionSwitcher');
+    expect(commands).not.toContain('toggleThinking');
+    expect(commands).not.toContain('autocomplete');
+    expect(commands).not.toContain('closeOverlay');
+    expect(commands).not.toContain('cancelMode');
   });
 });

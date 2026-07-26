@@ -1,16 +1,16 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { ChatView } from './ChatMessagesView.js';
-import type { ChatMessage } from './ChatView';
-import type { ThinkingChain } from './ThinkingChainView';
+import { ChatView, type ChatScrollHandle } from './ChatMessagesView.js';
+import type { ChatMessage, ThinkingChain } from '../view-protocol';
 
 interface ChatPanelProps {
   messages: ChatMessage[];
   thinkingChains?: Map<string, ThinkingChain>;
-  isModalOpen?: boolean;
+  /** Scroll handle wired to the focus stack's editor base layer. */
+  scrollRef?: React.MutableRefObject<ChatScrollHandle | null>;
 }
 
-export function ChatPanel({ messages, thinkingChains, isModalOpen }: ChatPanelProps) {
+export function ChatPanel({ messages, thinkingChains, scrollRef }: ChatPanelProps) {
   if (messages.length === 0) {
     return (
       <Box padding={1} flexDirection="column">
@@ -21,7 +21,7 @@ export function ChatPanel({ messages, thinkingChains, isModalOpen }: ChatPanelPr
 
   return (
     <Box padding={1} flexDirection="column">
-      <ChatView messages={messages} thinkingChains={thinkingChains} isModalOpen={isModalOpen} />
+      <ChatView messages={messages} thinkingChains={thinkingChains} scrollRef={scrollRef} />
     </Box>
   );
 }

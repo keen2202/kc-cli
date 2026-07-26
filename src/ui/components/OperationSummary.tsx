@@ -7,8 +7,10 @@
 //   - 'live': auto/goal mode is executing autonomously. Shows what is currently
 //     running (no confirmation), optionally flagged as auto-approved.
 //
-// Height is fixed by the layout budget (see layout.ts OPERATION_HEIGHT), so the
-// content is clamped/truncated and degrades to a single line on compact/tiny.
+// The strip owns its own height bound: visible operations are capped, every
+// content row is a single truncated line, and compact widths collapse the
+// detail rows — so its natural height has a fixed ceiling and Yoga measures
+// it directly (no reserved slot in layout.ts).
 
 import React from 'react';
 import { Box, Text } from 'ink';
@@ -124,7 +126,7 @@ export function OperationSummary({ operations, mode, compact = false, autoApprov
   if (operations.length === 0) return null;
 
   const title = mode === 'confirm' ? 'Pending Operation' : 'Running';
-  // Cap visible operations to respect the fixed layout budget (see layout.ts):
+  // Cap visible operations so the strip's natural height stays bounded:
   // confirm shows a single op (its steps/expected make it 3 rows tall); live
   // shows up to 3 one-line ops, or a single op on compact widths.
   const maxVisible = mode === 'confirm' ? 1 : compact ? 1 : 3;
@@ -142,8 +144,8 @@ export function OperationSummary({ operations, mode, compact = false, autoApprov
       {visible.map((op, i) => {
         const opDiffs = mode === 'confirm' ? op.diffs : undefined;
         const hasDiffs = !!opDiffs && opDiffs.length > 0;
-        // Sample at most 2 changed lines on normal widths (fits the 8-row
-        // budget: title + op-name + summary + 2 lines + confirm); none on compact.
+        // Sample at most 2 changed lines on normal widths (keeps the strip's
+        // ceiling at title + op-name + summary + 2 lines + confirm); none on compact.
         const condensed = hasDiffs ? condenseDiffs(opDiffs!, compact ? 0 : 2) : null;
         return (
           <Box key={`${op.toolName}-${i}`} flexDirection="column">
@@ -153,26 +155,26 @@ export function OperationSummary({ operations, mode, compact = false, autoApprov
               {condensed ? (
                 <Text color={colors.muted}> +{condensed.adds} -{condensed.removes}</Text>
               ) : op.summary ? (
-                <Text color={colors.muted}> {truncate(op.summary, 48)}</Text>
+                <Text color={colors.muted} wrap="truncate-end"> {truncate(op.summary, 48)}</Text>
               ) : null}
             </Box>
             {condensed && !compact ? (
               <>
-                <Text color={colors.muted}>
+                <Text color={colors.muted} wrap="truncate-end">
                   {'  '}{condensed.fileCount} file(s) · +{condensed.adds} -{condensed.removes}
                 </Text>
                 {condensed.sampleLines.map((line, li) => (
-                  <Text key={`diff-${li}`} color={line.type === 'add' ? colors.success : colors.error}>
+                  <Text key={`diff-${li}`} color={line.type === 'add' ? colors.success : colors.error} wrap="truncate-end">
                     {'  '}{line.type === 'add' ? '+' : '-'} {truncate(line.content, 58)}
                   </Text>
                 ))}
               </>
             ) : null}
             {!condensed && !compact && op.steps.length > 0 ? (
-              <Text color={colors.muted}>  steps: {truncate(op.steps.slice(0, 3).join(' \u2192 '), 60)}</Text>
+              <Text color={colors.muted} wrap="truncate-end">  steps: {truncate(op.steps.slice(0, 3).join(' \u2192 '), 60)}</Text>
             ) : null}
             {!condensed && !compact && op.expected ? (
-              <Text color={colors.muted}>  expected: {truncate(op.expected, 60)}</Text>
+              <Text color={colors.muted} wrap="truncate-end">  expected: {truncate(op.expected, 60)}</Text>
             ) : null}
           </Box>
         );

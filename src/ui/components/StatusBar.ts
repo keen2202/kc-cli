@@ -1,3 +1,6 @@
+// LEGACY (T7 triage): string-rendering status bar kept only for its unit
+// tests. The live status bar is the ink component in StatusBarView.tsx — do
+// not wire this back into the render path.
 import chalk from 'chalk';
 import type { Theme } from '../theme';
 

@@ -1,3 +1,5 @@
+// LIVE (T7 triage): renderMarkdown is the markdown-to-ANSI pipeline used by
+// ChatMessagesView on the live render path. Pure string logic — no ink here.
 import chalk from 'chalk';
 import { createRequire } from 'node:module';
 import type { Theme } from '../theme';

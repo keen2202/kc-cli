@@ -1,47 +1,9 @@
 import type { ThemeTokens } from '../theme';
 
-export type ThinkingStepLabel = 'analyze' | 'decide' | 'plan' | 'execute' | 'think';
-
-export interface ThinkingStep {
-  label: ThinkingStepLabel;
-  content: string;
-}
-
-export interface ThinkingChain {
-  steps: ThinkingStep[];
-  rawContent: string;
-  folded: boolean;
-  startTime: number;
-}
-
-/**
- * Classify raw thinking text into structured steps by keyword heuristics.
- * Returns steps with labels based on content patterns.
- */
-export function classifyThinkingSteps(raw: string): ThinkingStep[] {
-  // Split on paragraph boundaries or sentence boundaries for step detection
-  const segments = raw.split(/\n{2,}|(?<=\.)\s+/).filter(s => s.trim().length > 0);
-  const steps: ThinkingStep[] = [];
-
-  for (const segment of segments) {
-    const lower = segment.toLowerCase();
-    let label: ThinkingStepLabel = 'think';
-
-    if (/analyz|look at|examin|consider|review|check/.test(lower)) {
-      label = 'analyze';
-    } else if (/decid|choos|select|pick|determin/.test(lower)) {
-      label = 'decide';
-    } else if (/plan|step|first|then|next|approach|strateg/.test(lower)) {
-      label = 'plan';
-    } else if (/execut|run|call|use|apply|perform/.test(lower)) {
-      label = 'execute';
-    }
-
-    steps.push({ label, content: segment.trim() });
-  }
-
-  return steps.length > 0 ? steps : [{ label: 'think', content: raw }];
-}
+// LIVE runtime helper (T7 triage): renderThinkingChain is used by
+// ChatMessagesView. Data contracts (ThinkingChain et al.) live in
+// view-protocol — import them from there, never from this file.
+import type { ThinkingChain } from '../view-protocol';
 
 /**
  * Render a thinking chain as a foldable tree in the terminal.

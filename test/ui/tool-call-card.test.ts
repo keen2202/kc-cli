@@ -13,8 +13,8 @@ import { describe, it, expect } from 'vitest';
 import {
   renderToolCallCard,
   renderToolCallCompact,
-  type ToolCallData,
 } from '../../src/ui/components/ToolCallCard';
+import type { ToolCallData } from '../../src/ui/view-protocol';
 
 describe('ToolCallCard — renderToolCallCard', () => {
   it('renders running tool call', () => {

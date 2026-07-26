@@ -3,8 +3,7 @@
 // replayed in the chat view. Kept pure and dependency-free for unit testing.
 
 import type { ChatMessage as EngineChatMessage } from '../query/protocol';
-import type { ChatMessage as UIChatMessage } from './components/ChatView';
-import type { ToolCallData } from './components/ToolCallCard';
+import type { ChatMessage as UIChatMessage, ToolCallData } from './view-protocol';
 
 /**
  * Convert engine conversation messages into UI chat messages.

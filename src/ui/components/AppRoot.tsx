@@ -19,6 +19,9 @@ import { getBreakpoint } from '../layout';
 import { UIEventBus } from '../event-bus';
 import { createDefaultKeybindings } from '../keybinding-manager';
 import { isPrintableUnicode, type KeypressEvent } from '../keypress';
+import { FocusStack, ESCAPE_HELP_LINE, type FocusLayer } from '../focus-stack';
+import { FocusStackProvider, FocusLayerMount, useFocusLayer } from '../hooks/useFocusLayer';
+import type { ChatScrollHandle } from './ChatMessagesView.js';
 import { normalizeSlashCommand } from './slash-commands';
 import {
   createInputState,
@@ -64,7 +67,9 @@ function ErrorBar({ errors }: ErrorBarProps) {
   const { colors } = useTheme();
   if (errors.length === 0) return null;
 
-  // Show the most recent error
+  // Show the most recent error. The bar owns its own height bound: one
+  // truncated message row inside the border, so its natural height is fixed
+  // and Yoga can measure it (no reserved slot in layout.ts).
   const latest = errors[errors.length - 1];
 
   return (
@@ -77,7 +82,7 @@ function ErrorBar({ errors }: ErrorBarProps) {
       marginBottom={1}
     >
       <Text color={colors.error}>⚠ Error: </Text>
-      <Text>{latest}</Text>
+      <Text wrap="truncate-end">{latest}</Text>
       <Text dimColor>  [Esc to dismiss]</Text>
     </Box>
   );
@@ -92,13 +97,19 @@ interface ExitConfirmDialogProps {
 
 function ExitConfirmDialog({ onConfirm, onCancel }: ExitConfirmDialogProps) {
   const { colors } = useTheme();
-  useInput((input: string, key: any) => {
-    if (input === 'y' || input === 'Y') {
-      onConfirm();
-    }
-    if (key.escape || input === 'n' || input === 'N') {
+  // Modal focus layer: Y confirms, N cancels, everything else is swallowed;
+  // ESC cancels via the stack's unified escape semantics.
+  useFocusLayer({
+    id: 'exit-confirm',
+    onKey: (event: KeypressEvent) => {
+      if (event.name === 'y' || event.name === 'Y') onConfirm();
+      else if (event.name === 'n' || event.name === 'N') onCancel();
+      return true;
+    },
+    onEscape: () => {
       onCancel();
-    }
+      return true;
+    },
   });
 
   return (
@@ -135,9 +146,10 @@ interface AppOpenCodeProps {
   maxTurns: number;
 }
 
-/** Normalize an Ink (input, key) pair into a KeypressEvent for the resolver. */
+/** Normalize an Ink (input, key) pair into a KeypressEvent for the focus stack. */
 function toKeypressEvent(input: string, key: any): KeypressEvent {
   let name: string;
+  let printable = false;
   if (key.upArrow) name = 'up';
   else if (key.downArrow) name = 'down';
   else if (key.leftArrow) name = 'left';
@@ -147,14 +159,25 @@ function toKeypressEvent(input: string, key: any): KeypressEvent {
   else if (key.tab) name = 'tab';
   else if (key.backspace) name = 'backspace';
   else if (key.delete) name = 'delete';
-  else name = input;
-  return { name, ctrl: !!key.ctrl, meta: !!key.meta, shift: !!key.shift };
+  else {
+    name = input;
+    // Printable text (single char or IME-composed string) — named keys above
+    // never qualify, so consumers can trust this flag for text insertion.
+    printable = !key.ctrl && !key.meta && isPrintableUnicode(input);
+  }
+  return { name, ctrl: !!key.ctrl, meta: !!key.meta, shift: !!key.shift, isPrintable: printable };
 }
 
 function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: AppOpenCodeProps) {
   // Create event bus and keybinding manager (stable across renders)
   const eventBus = useMemo(() => new UIEventBus(), []);
   const keybindingManager = useMemo(() => createDefaultKeybindings(), []);
+
+  // The single input arbiter: exactly one layer (stack top) owns the keyboard.
+  const focusStack = useMemo(() => new FocusStack(), []);
+  // Imperative chat scroll handle so the editor base layer can dispatch ↑/↓
+  // scrolling without ChatView owning its own useInput.
+  const chatScrollRef = useRef<ChatScrollHandle | null>(null);
 
   // The active model is promotable at runtime via /model, so it lives in state
   // (seeded from the prop) and drives the header/status bars after a switch.
@@ -233,11 +256,6 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
   // Session ID lives in state so /session new|<id> can swap it and re-render.
   const [sessionId, setSessionId] = useState(() => getState().sessionId);
 
-  // A pending tool authorization is confirmed inline above the editor (not as a
-  // modal overlay), so it is deliberately excluded from overlayOpen; useInput
-  // gives it top priority instead.
-  const overlayOpen = showExitConfirm || showPalette || showFilePicker;
-
   // Register the interactive authorization handler with the engine. The
   // returned Promise resolves when the user decides; PermissionDialog.onDecide
   // guarantees a resolution on every path (Esc → 'deny') so the awaiting
@@ -266,20 +284,6 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
     );
     return () => queryEngine.setPermissionRequestHandler(null);
   }, [queryEngine]);
-
-  // Keep the keybinding resolver's context in sync with UI state so `when`
-  // clauses (idle/input/streaming/overlay/delete-mode) resolve correctly.
-  useEffect(() => {
-    const km = keybindingManager;
-    (['idle', 'input', 'streaming', 'overlay', 'delete-mode'] as const).forEach((c) => km.clearContext(c));
-    if (isStreaming) km.setContext('streaming');
-    if (overlayOpen) km.setContext('overlay');
-    if (attachmentState.deleteMode) km.setContext('delete-mode');
-    if (!isStreaming && !overlayOpen) {
-      km.setContext('idle');
-      km.setContext('input');
-    }
-  }, [keybindingManager, isStreaming, overlayOpen, attachmentState.deleteMode]);
 
   // Advance the session clock once per second so SessionInfo's duration timer
   // updates live instead of freezing until the next unrelated re-render.
@@ -757,111 +761,94 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
         );
         return true;
       }
-      case 'help': addSystemMsg('Keys:\n' + keybindingManager.getHelpText()); return true;
+      case 'help': addSystemMsg('Keys:\n' + keybindingManager.getHelpText() + '\n' + ESCAPE_HELP_LINE); return true;
       case 'historyPrev': historyPrev(); return true;
       case 'historyNext': historyNext(); return true;
-      case 'cancelMode':
-        setAttachmentState((prev) => ({ ...prev, deleteMode: false }));
-        return true;
-      case 'closeOverlay':
-      case 'autocomplete':
-        return true;
+      // closeOverlay/cancelMode/autocomplete cases removed with their schema
+      // bindings: ESC lives in the focus stack, and tab is swallowed by the
+      // editor base layer without needing a fake command.
       default:
         return false;
     }
   }, [startNewSession, setMessages, inputState.text, openFilePicker, requestExit, addSystemMsg, keybindingManager, historyPrev, historyNext, applyExecutionMode, goalState]);
 
-  // Keyboard input handling via Ink's useInput.
-  useInput((input: string, key: any) => {
-    // Inline permission confirmation owns the keyboard while a request is
-    // pending in interactive mode: Enter=allow, A=always, Esc=deny. Everything
-    // else is swallowed so keystrokes never leak into the editor mid-decision.
-    if (permissionRequest) {
-      // While the expanded diff overlay is open, PermissionDialog owns the
-      // keyboard (Y/A/N/Esc); swallow everything else here so keys never leak.
-      if (showDiffDetail) return;
-      // Ctrl+O expands the pending request into a full DiffPreview overlay,
-      // but only when there is a diff to review.
-      if (key.ctrl && (input === 'o' || input === 'O')) {
-        if (permissionRequest.diffs && permissionRequest.diffs.length > 0) setShowDiffDetail(true);
-        return;
-      }
-      if (key.return) { permissionRequest.onDecide('allow'); return; }
-      if (input === 'a' || input === 'A') { permissionRequest.onDecide('allow_always'); return; }
-      if (key.escape) { permissionRequest.onDecide('deny'); return; }
-      return;
+  // ── Editor base layer ──
+  // Handles everything a key can do when no overlay/mode owns the keyboard:
+  // keybinding commands, delete-attachment mode, @-attach, Enter submission,
+  // cursor movement, editing shortcuts, and printable insertion.
+  const handleEditorKey = useCallback((event: KeypressEvent): boolean => {
+    // Derive the resolver's `when` contexts synchronously at dispatch time
+    // (the old useEffect sync lagged a render behind — F3). This runs only on
+    // the editor path, and the focus stack guarantees no overlay layer is on
+    // top of it here, so overlay-style contexts are structurally impossible.
+    const km = keybindingManager;
+    (['idle', 'input', 'streaming'] as const).forEach((c) => km.clearContext(c));
+    if (isStreaming) {
+      km.setContext('streaming');
+    } else {
+      km.setContext('idle');
+      km.setContext('input');
     }
 
-    // Overlays own their input; block background handling while one is open.
-    if (overlayOpen) return;
-
-    const event = toKeypressEvent(input, key);
+    // ↑/↓ scroll the chat and recall input history (both effects fired
+    // historically via parallel useInput handlers; preserved on one path).
+    if (!event.ctrl && !event.meta && (event.name === 'up' || event.name === 'down')) {
+      if (event.name === 'up') chatScrollRef.current?.scrollUp();
+      else chatScrollRef.current?.scrollDown();
+      const command = keybindingManager.resolve(event);
+      if (command) dispatchCommand(command);
+      return true;
+    }
 
     // Consult the keybinding resolver for control/navigation keys only, so
     // plain printable characters are always inserted as text (no double path).
-    const isControlKey = key.ctrl || key.meta || key.escape || key.tab || key.upArrow || key.downArrow;
-    if (isControlKey) {
+    if (event.ctrl || event.meta || event.name === 'tab') {
       const command = keybindingManager.resolve(event);
-      if (command && dispatchCommand(command)) return;
-
-      if (key.escape) {
-        if (goalState?.active) {
-          goalCancelledRef.current = true;
-          addSystemMsg('[Goal mode] Stopping after the current step...');
-          return;
-        }
-        // No binding matched: dismiss the newest active error, if any.
-        const lastActive = errors
-          .map((_, i) => i)
-          .filter((i) => !dismissedErrors.has(i))
-          .pop();
-        if (lastActive !== undefined) dismissError(lastActive);
-        return;
-      }
-      // Named navigation keys without a binding are swallowed (never text).
-      if (key.tab || key.upArrow || key.downArrow) return;
+      if (command && dispatchCommand(command)) return true;
+      // Tab without a binding is swallowed (never text).
+      if (event.name === 'tab') return true;
       // Unresolved Ctrl combos fall through to the editing shortcuts below.
     }
 
     // ── Delete-attachment mode ──
     if (attachmentState.deleteMode) {
-      if (input === 'r' || input === 'R') {
+      if (event.name === 'r' || event.name === 'R') {
         setAttachmentState({ attachments: [], deleteMode: false });
-        return;
+        return true;
       }
-      if (input >= '0' && input <= '9') {
-        const idx = parseInt(input, 10);
+      if (event.name.length === 1 && event.name >= '0' && event.name <= '9') {
+        const idx = parseInt(event.name, 10);
         setAttachmentState((prev) => ({
           attachments: prev.attachments.filter((_, i) => i !== idx),
           deleteMode: prev.attachments.length > 1,
         }));
-        return;
+        return true;
       }
     }
 
     // @ opens the file picker to attach a file.
-    if (input === '@') {
+    if (event.name === '@') {
       void openFilePicker();
-      return;
+      return true;
     }
 
     // Text input — check Shift+Enter before plain Enter.
-    if (key.return && key.shift) {
+    if (event.name === 'return' && event.shift) {
       setInputState((prev) => insertNewline(prev));
-      return;
+      return true;
     }
 
-    if (key.return) {
+    if (event.name === 'return') {
       // \ at end of line = multi-line continuation.
       if (inputState.text.endsWith('\\')) {
         setInputState((prev) => insertNewline(prev));
-        return;
+        return true;
       }
       const text = inputState.text.trim();
       if (text.startsWith('/')) {
         setInputState(createInputState());
         handleSlashCommand(text);
-        return;
+        return true;
       }
       if (text) {
         setInputState(createInputState());
@@ -871,43 +858,124 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
           submitMessage(text);
         }
       }
-      return;
+      return true;
     }
 
-    if (key.backspace || key.delete) {
+    if (event.name === 'backspace' || event.name === 'delete') {
       setInputState((prev) => deleteBefore(prev));
-      return;
+      return true;
     }
 
-    if (key.leftArrow) {
+    if (event.name === 'left') {
       setInputState((prev) => moveCursorLeft(prev));
-      return;
+      return true;
     }
 
-    if (key.rightArrow) {
+    if (event.name === 'right') {
       setInputState((prev) => moveCursorRight(prev));
-      return;
+      return true;
     }
 
     // Editing Ctrl shortcuts (not part of the keybinding schema).
-    if (key.ctrl && input === 'a') {
+    if (event.ctrl && event.name === 'a') {
       setInputState((prev) => moveToLineStart(prev));
-      return;
+      return true;
     }
-    if (key.ctrl && input === 'w') {
+    if (event.ctrl && event.name === 'w') {
       setInputState((prev) => deleteWordBefore(prev));
-      return;
+      return true;
     }
-    if (key.ctrl && input === 'u') {
+    if (event.ctrl && event.name === 'u') {
       setInputState((prev) => deleteToLineStart(prev));
-      return;
+      return true;
     }
 
     // Printable character (single char or multi-character IME-composed text,
     // e.g. a committed Chinese phrase like "你好"). Reject control characters.
-    if (!key.ctrl && !key.meta && isPrintableUnicode(input)) {
-      setInputState((prev) => insertChar(prev, input));
+    if (event.isPrintable) {
+      setInputState((prev) => insertChar(prev, event.name));
+      return true;
     }
+    return false;
+  }, [keybindingManager, isStreaming, dispatchCommand, attachmentState.deleteMode, openFilePicker, inputState.text, handleSlashCommand, runGoal, submitMessage, goalState]);
+
+  // ── Focus layers ──
+  // Plain objects rebuilt each render; FocusLayerMount proxies them through a
+  // ref, so stack order stays stable while handlers never go stale.
+
+  // Always-mounted base layer. ESC only leaves delete-attachment mode; the
+  // base itself never closes on ESC.
+  const editorLayer: FocusLayer = {
+    id: 'editor',
+    onKey: handleEditorKey,
+    onEscape: () => {
+      if (attachmentState.deleteMode) {
+        setAttachmentState((prev) => ({ ...prev, deleteMode: false }));
+        return true;
+      }
+      return false;
+    },
+  };
+
+  // Error layer: ESC dismisses the newest active error; typing still reaches
+  // the editor. Mounted only when no higher-priority mode is active so the
+  // historical ESC priority (permission > goal > error) is preserved.
+  const errorLayer: FocusLayer = {
+    id: 'error',
+    onKey: handleEditorKey,
+    onEscape: () => {
+      const lastActive = errors
+        .map((_, i) => i)
+        .filter((i) => !dismissedErrors.has(i))
+        .pop();
+      if (lastActive !== undefined) dismissError(lastActive);
+      return true;
+    },
+  };
+
+  // Goal layer: ESC requests cancellation after the current step; typing
+  // still reaches the editor while the goal loop runs.
+  const goalLayer: FocusLayer = {
+    id: 'goal',
+    onKey: handleEditorKey,
+    onEscape: () => {
+      goalCancelledRef.current = true;
+      addSystemMsg('[Goal mode] Stopping after the current step...');
+      return true;
+    },
+  };
+
+  // Permission layer: the inline confirmation owns the keyboard while a
+  // request is pending. Enter=allow, A=always, ESC=deny, Ctrl+O expands the
+  // diff; everything else is swallowed so keystrokes never leak into the
+  // editor mid-decision. onDispose guarantees the executor's Promise resolves
+  // (deny) even if the layer is torn down without a decision.
+  const permissionLayer: FocusLayer = {
+    id: 'permission',
+    onKey: (event) => {
+      if (!permissionRequest) return true;
+      if (event.ctrl && (event.name === 'o' || event.name === 'O')) {
+        if (permissionRequest.diffs && permissionRequest.diffs.length > 0) setShowDiffDetail(true);
+        return true;
+      }
+      if (event.name === 'return') { permissionRequest.onDecide('allow'); return true; }
+      if (event.name === 'a' || event.name === 'A') { permissionRequest.onDecide('allow_always'); return true; }
+      return true;
+    },
+    onEscape: () => {
+      permissionRequest?.onDecide('deny');
+      return true;
+    },
+    onDispose: () => {
+      // Safe even after a normal decision: resolving twice is a no-op.
+      permissionRequest?.onDecide('deny');
+    },
+  };
+
+  // The single top-level useInput: normalize the key and let the focus stack
+  // route it to the one layer that currently owns the keyboard.
+  useInput((input: string, key: any) => {
+    focusStack.handleKey(toKeypressEvent(input, key));
   });
 
   const sessionDuration = nowTick - sessionStartTime;
@@ -947,65 +1015,76 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
     : (turnCount / Math.max(1, maxTurns)) * 100;
 
   return (
-    <Layout
-      sidebarHidden={sidebarHidden}
-      headerBar={<HeaderBar provider={provider} model={model} agentMode={agentMode} executionMode={executionMode} />}
-      errorBar={
-        hasError ? <ErrorBar errors={activeErrors} onDismiss={dismissError} /> : null
-      }
-      operationSummary={operationSummaryNode}
-      chatPanel={
-        <ChatPanel
-          messages={messages}
-          thinkingChains={thinkingChains}
-          isModalOpen={overlayOpen || (showDiffDetail && permissionRequest != null)}
-        />
-      }
-      editor={
-        <Editor
-          text={inputState.text}
-          cursorPos={inputState.cursorPos}
-          isSteerMode={inputState.steerMode}
-          attachments={attachmentState.attachments}
-          deleteMode={attachmentState.deleteMode}
-        />
-      }
-      sessionInfo={
-        <SessionInfo
-          sessionId={sessionId}
-          tokensUsed={totalTokensUsed}
-          tokensMax={200000}
-          duration={sessionDuration}
-        />
-      }
-      sidebar={<SidebarPanel data={sidebarData} />}
-      statusBar={
-        <StatusBar
-          mode={mode}
-          provider={provider}
-          model={model}
-          turnCount={turnCount}
-          maxTurns={maxTurns}
-          tokensUsed={totalTokensUsed}
-          currentOperation={currentOperation}
-          progressPercent={progressPercent}
-        />
-      }
-      overlay={
-        showDiffDetail && permissionRequest ? (
-          <PermissionDialog request={permissionRequest} onClose={() => setShowDiffDetail(false)} />
-        ) : showPalette ? (
-          <CommandPalette commands={paletteCommands} onClose={() => setShowPalette(false)} />
-        ) : showFilePicker ? (
-          <FilePicker files={fileItems} onSelect={onFileSelect} onCancel={() => setShowFilePicker(false)} />
-        ) : showExitConfirm ? (
-          <ExitConfirmDialog
-            onConfirm={() => { setShowExitConfirm(false); process.exit(0); }}
-            onCancel={() => setShowExitConfirm(false)}
+    <FocusStackProvider value={focusStack}>
+      {/* Focus layers (bottom → top): sibling order defines stack order for
+          layers mounted in the same commit; later state-driven mounts push on
+          top. Overlay layers register from within their own components. */}
+      <FocusLayerMount layer={editorLayer} />
+      {activeErrors.length > 0 && !goalState?.active && !permissionRequest && (
+        <FocusLayerMount layer={errorLayer} />
+      )}
+      {goalState?.active && <FocusLayerMount layer={goalLayer} />}
+      {permissionRequest && <FocusLayerMount layer={permissionLayer} />}
+      <Layout
+        sidebarHidden={sidebarHidden}
+        headerBar={<HeaderBar provider={provider} model={model} agentMode={agentMode} executionMode={executionMode} />}
+        errorBar={
+          hasError ? <ErrorBar errors={activeErrors} onDismiss={dismissError} /> : null
+        }
+        operationSummary={operationSummaryNode}
+        chatPanel={
+          <ChatPanel
+            messages={messages}
+            thinkingChains={thinkingChains}
+            scrollRef={chatScrollRef}
           />
-        ) : null
-      }
-    />
+        }
+        editor={
+          <Editor
+            text={inputState.text}
+            cursorPos={inputState.cursorPos}
+            isSteerMode={inputState.steerMode}
+            attachments={attachmentState.attachments}
+            deleteMode={attachmentState.deleteMode}
+          />
+        }
+        sessionInfo={
+          <SessionInfo
+            sessionId={sessionId}
+            tokensUsed={totalTokensUsed}
+            tokensMax={200000}
+            duration={sessionDuration}
+          />
+        }
+        sidebar={<SidebarPanel data={sidebarData} />}
+        statusBar={
+          <StatusBar
+            mode={mode}
+            provider={provider}
+            model={model}
+            turnCount={turnCount}
+            maxTurns={maxTurns}
+            tokensUsed={totalTokensUsed}
+            currentOperation={currentOperation}
+            progressPercent={progressPercent}
+          />
+        }
+        overlay={
+          showDiffDetail && permissionRequest ? (
+            <PermissionDialog request={permissionRequest} onClose={() => setShowDiffDetail(false)} />
+          ) : showPalette ? (
+            <CommandPalette commands={paletteCommands} onClose={() => setShowPalette(false)} />
+          ) : showFilePicker ? (
+            <FilePicker files={fileItems} onSelect={onFileSelect} onCancel={() => setShowFilePicker(false)} />
+          ) : showExitConfirm ? (
+            <ExitConfirmDialog
+              onConfirm={() => { setShowExitConfirm(false); process.exit(0); }}
+              onCancel={() => setShowExitConfirm(false)}
+            />
+          ) : null
+        }
+      />
+    </FocusStackProvider>
   );
 }
 

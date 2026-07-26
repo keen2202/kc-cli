@@ -59,58 +59,36 @@ export interface OpenCodeLayout {
   terminalHeight: number;
   headerHeight: number;
   rightPanelWidth: number;
-  sessionInfoHeight: number;
   editorHeight: number;
   statusBarHeight: number;
   sidebarVisible: boolean;
   headerVisible: boolean;
-  contentHeight: number;
-  errorBarHeight: number;
-  /** Reserved rows for the operation-summary strip above the editor (0 when hidden). */
-  operationHeight: number;
   /** Active breakpoint name so consumers can degrade UI density. */
   breakpoint: BreakpointName;
   /** Active density derived from the breakpoint. */
   density: Density;
 }
 
-export interface LayoutOptions {
-  /** When true, reserve vertical space for the error banner above the editor. */
-  errorVisible?: boolean;
-  /** When true, reserve vertical space for the operation-summary strip. */
-  operationVisible?: boolean;
-}
-
 // Right panel: narrower on the standard breakpoint (80-119 cols) so the chat
 // column keeps more room, wider on the wide breakpoint (>=120 cols).
 const RIGHT_PANEL_WIDTH = 24;
 const RIGHT_PANEL_WIDTH_WIDE = 40;
-const SESSION_INFO_HEIGHT = 8;
 const EDITOR_MIN_HEIGHT = 3;
 const EDITOR_MAX_HEIGHT = 15;
 const HEADER_HEIGHT = 1;
 const STATUS_BAR_HEIGHT = 1;
-// Error banner: border (2) + content (1) + marginBottom (1)
-const ERROR_BAR_HEIGHT = 4;
-// Operation summary strip. Sized to the tallest content it can render so it
-// never overflows the fixed-height slot and shifts the layout:
-//   normal  = border(2) + title + op-name + diff-summary + 2 diff lines + confirm = 8
-//             (or title + op-name + steps + expected + confirm when there is no diff)
-//   compact = border(2) + title + op-name + confirm                              = 5
-// (compact hides the steps/expected/diff detail lines.)
-const OPERATION_HEIGHT = 8;
-const OPERATION_HEIGHT_COMPACT = 5;
-// Minimum chat rows to keep visible; the editor is shrunk (below its nominal
-// minimum if necessary) before the chat content is squeezed on short terminals.
-const MIN_CONTENT_HEIGHT = 6;
 
 /**
- * Compute the opencode-style layout for the given terminal dimensions.
+ * Compute the layout POLICY for the given terminal dimensions: breakpoint,
+ * density, panel widths and the editor's target height. All other heights are
+ * measured by Yoga from the components' natural sizes (spec §3.2.1) — this
+ * module deliberately knows nothing about how tall the error bar, operation
+ * strip, session info or sidebar render; reverse-engineering component
+ * internals into row constants is what rotted the previous layout.
  */
 export function computeOpenCodeLayout(
   width: number,
   height: number,
-  options: LayoutOptions = {},
 ): OpenCodeLayout {
   const bp = getBreakpoint(width);
   const headerVisible = bp.headerVisible;
@@ -120,56 +98,25 @@ export function computeOpenCodeLayout(
   const rightPanelWidth = sidebarVisible
     ? (bp.name === 'wide' ? RIGHT_PANEL_WIDTH_WIDE : RIGHT_PANEL_WIDTH)
     : 0;
-  const errorBarHeight = options.errorVisible ? ERROR_BAR_HEIGHT : 0;
 
-  // Vertical space available for the main content row (between header and status bar).
+  // Editor target height: grows with the terminal, capped, and yields on very
+  // short terminals so at least one chat row survives beside the two strips.
   const available = Math.max(0, height - headerHeight - statusBarHeight);
-
-  // Operation strip nominal height, then clamped so it never pushes the
-  // essential editor(1) + content(1) rows (and the error bar) off a short
-  // terminal — mirroring how the editor is shrunk below its minimum.
-  let operationHeight = options.operationVisible
-    ? (bp.density === 'compact' ? OPERATION_HEIGHT_COMPACT : OPERATION_HEIGHT)
-    : 0;
-  operationHeight = Math.min(operationHeight, Math.max(0, available - errorBarHeight - 2));
-
-  const usable = Math.max(0, available - errorBarHeight - operationHeight);
-
-  // Editor grows with the terminal but is capped. To protect a minimum chat
-  // area, the editor is shrunk (even below EDITOR_MIN_HEIGHT) so the content
-  // keeps at least MIN_CONTENT_HEIGHT rows whenever the terminal is tall enough.
   let editorHeight = Math.max(
     EDITOR_MIN_HEIGHT,
     Math.min(EDITOR_MAX_HEIGHT, Math.floor(available * 0.25)),
   );
-  editorHeight = Math.min(editorHeight, Math.max(1, usable - MIN_CONTENT_HEIGHT));
-  editorHeight = Math.max(1, Math.min(editorHeight, Math.max(1, usable - 1)));
-
-  // Chat content fills the remainder of the left column. SessionInfo is NOT
-  // subtracted here: it lives in the right column, and subtracting it left ~8
-  // blank rows at the bottom and floated the editor off the terminal floor.
-  const contentHeight = Math.max(1, usable - editorHeight);
-
-  // The right column spans the same height as the main content row. SessionInfo
-  // shrinks so it never exceeds that row height on short terminals.
-  const rowHeight = contentHeight + editorHeight + errorBarHeight + operationHeight;
-  const sessionInfoHeight = sidebarVisible
-    ? Math.min(SESSION_INFO_HEIGHT, Math.max(0, rowHeight - 1))
-    : 0;
+  editorHeight = Math.max(1, Math.min(editorHeight, Math.max(1, available - 2)));
 
   return {
     terminalWidth: width,
     terminalHeight: height,
     headerHeight,
     rightPanelWidth,
-    sessionInfoHeight,
     editorHeight,
     statusBarHeight,
     sidebarVisible,
     headerVisible,
-    contentHeight,
-    errorBarHeight,
-    operationHeight,
     breakpoint: bp.name,
     density: bp.density,
   };

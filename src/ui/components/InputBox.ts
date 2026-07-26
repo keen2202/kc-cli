@@ -1,3 +1,7 @@
+// MIXED (T7 triage): the InputState machine (createInputState, insertChar,
+// cursor/word ops, toggleSteerMode…) is LIVE pure logic driving AppRoot's
+// editor. renderInputBox below is a LEGACY string renderer kept only for its
+// unit tests — the live editor is drawn by ink components, not this function.
 import chalk from 'chalk';
 import type { Theme } from '../theme';
 

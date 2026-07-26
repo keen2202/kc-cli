@@ -22,6 +22,9 @@ export function SessionInfo({
 
   // Provider/model intentionally omitted here — the HeaderBar is the single
   // source of truth for the active provider/model to avoid duplicate display.
+  // The block renders at its natural height (border + padding + 4 rows) and
+  // the Layout right column gives it flexShrink={0}; no layout constant
+  // mirrors this shape (spec §3.2.2 — the component owns its height).
   return (
     <Box flexDirection="column" borderStyle="single" padding={1}>
       <Text bold>Session Info</Text>

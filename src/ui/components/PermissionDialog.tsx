@@ -4,8 +4,10 @@
 // user reviews the exact change before approving ("review → authorize").
 
 import React from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text } from 'ink';
 import { useTheme } from '../hooks/useTheme';
+import { useFocusLayer } from '../hooks/useFocusLayer';
+import type { KeypressEvent } from '../keypress';
 import DiffPreview, { type FileDiff } from './DiffPreview';
 import type { FilePatchPreview } from '../../permissions/protocol';
 
@@ -27,25 +29,33 @@ interface PermissionDialogProps {
 export function PermissionDialog({ request, onClose }: PermissionDialogProps) {
   const { colors } = useTheme();
 
-  // Every exit path resolves onDecide exactly once so the awaiting executor
-  // Promise can never deadlock — Esc / Q default to a safe 'deny'.
+  // Every decision path resolves onDecide exactly once so the awaiting
+  // executor Promise can never deadlock. This dialog is the expanded
+  // diff-detail focus layer stacked above the inline permission layer: ESC
+  // closes the diff first (back to the inline confirm strip); the permission
+  // layer beneath then owns the next ESC (deny). Stack order guarantees the
+  // sequencing — no manual guards needed.
   const decide = (decision: PermissionDecision) => {
     request.onDecide(decision);
     onClose?.();
   };
 
-  useInput((input, key) => {
-    if (key.escape) {
-      decide('deny');
-      return;
-    }
-    switch (input.toLowerCase()) {
-      case 'y': decide('allow'); break;
-      case 'a': decide('allow_always'); break;
-      case 'n':
-      case 'r': decide('deny'); break;
-      case 'q': decide('deny'); break;
-    }
+  useFocusLayer({
+    id: 'diff-detail',
+    onKey: (event: KeypressEvent) => {
+      switch (event.name.toLowerCase()) {
+        case 'y': decide('allow'); break;
+        case 'a': decide('allow_always'); break;
+        case 'n':
+        case 'r':
+        case 'q': decide('deny'); break;
+      }
+      return true;
+    },
+    onEscape: () => {
+      onClose?.();
+      return true;
+    },
   });
 
   const hasDiffs = !!request.diffs && request.diffs.length > 0;

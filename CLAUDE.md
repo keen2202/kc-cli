@@ -71,6 +71,13 @@ npm run kc             # Start interactive REPL
 - Sandbox tests: `sandbox-e2e.test.ts` for isolation verification
 - Multi-agent tests: `multi-agent.test.ts` for orchestrator coverage
 
+### UI red lines (ui-structural-hardening, non-negotiable)
+
+- **Any UI behavior change MUST ship with a behavior-level test** in `test/ui/behavior/**` (real AppRoot rendered via the harness). Arithmetic-only test edits (tweaking layout math assertions) do NOT count as coverage.
+- **ESC semantics**: the focus stack (`src/ui/focus-stack.ts`) is the single arbiter — never add a second `useInput` for keys, never bind `escape` in the keybinding schema; changes to ESC behavior must update `esc-matrix.test.tsx`.
+- **Layout truth**: Yoga (ink flexbox) owns all measurement; `src/ui/layout.ts` is policy-only — never reintroduce reserved-height constants or parent-computed child heights (guarded by `layout.test.ts` and `layout-anchor.test.tsx`).
+- **Data contracts** live in `src/ui/view-protocol.ts` only; never import contracts from component files (enforced by `dead-path-guard.test.ts` — its deny/exemption lists are the reviewed source of truth).
+
 ## Documentation
 
 - **Reference**: `docs/repowiki/` — 15 deep-dive documents covering all subsystems (Home, Architecture, Query-Engine, Tools-System, API-Clients, Permission-System, Sandbox, Orchestrator, Memory-System, Plugin-System, UI-System, State-Management, Configuration, Testing, Development-Guide)

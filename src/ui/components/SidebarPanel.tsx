@@ -1,8 +1,14 @@
 // Real ink sidebar panel — consumes live SidebarData collected by
 // useStreamingEvents. Replaces the static SidebarPlaceholder in AppRoot.
+//
+// Height truth has a single owner (spec §3.2.2): the panel measures its own
+// allotted rows via measureElement and truncates its item lists to fit. No
+// parent injects a computed height; the Layout slot merely clips overflow as
+// a defensive backstop.
 
-import React from 'react';
-import { Box, Text } from 'ink';
+import React, { useEffect, useRef, useState } from 'react';
+import { Box, Text, measureElement, type DOMElement } from 'ink';
+import { useTerminalSize } from '../hooks/useTerminalSize';
 import { useTheme } from '../hooks/useTheme';
 import type { ThemeColors } from '../theme';
 import type {
@@ -10,13 +16,10 @@ import type {
   SidebarTool,
   SidebarTask,
   SidebarFile,
-} from './Sidebar';
+} from '../view-protocol';
 
 interface SidebarPanelProps {
   data: SidebarData;
-  /** Total row height allotted to the right column (used to budget items). */
-  height?: number;
-  width?: number;
 }
 
 function toolStatusColor(status: SidebarTool['status'], colors: ThemeColors): string {
@@ -80,13 +83,31 @@ function Section({ title, count, emptyLabel, children }: SectionProps) {
   );
 }
 
-export function SidebarPanel({ data, height, width }: SidebarPanelProps) {
+export function SidebarPanel({ data }: SidebarPanelProps) {
   const { colors } = useTheme();
+  const { height: termHeight, width: termWidth } = useTerminalSize();
+
+  // Self-measure the rows/columns Yoga actually allotted to this panel. Until
+  // the first measurement lands (or if it fails), fall back to a conservative
+  // bound derived from the terminal size; the slot's overflow clip catches
+  // any first-frame excess.
+  const rootRef = useRef<DOMElement | null>(null);
+  const [measured, setMeasured] = useState<{ rows: number; cols: number } | null>(null);
+  useEffect(() => {
+    if (!rootRef.current) return;
+    const { height: rows, width: cols } = measureElement(rootRef.current);
+    if (rows > 0 && (measured?.rows !== rows || measured?.cols !== cols)) {
+      setMeasured({ rows, cols });
+    }
+  });
+  const rows = measured?.rows ?? Math.max(4, termHeight - 12);
+  const cols = measured?.cols ?? Math.min(40, Math.max(20, Math.floor(termWidth / 4)));
+
   // Budget how many items each section may show so the panel never overflows
-  // the right column. Four section headers + borders consume ~9 rows; the
+  // its allotment. Four section headers + borders consume ~9 rows; the
   // remainder is split only across the populated sections (empty sections
   // consume no item budget), so active sections each get more rows.
-  const budget = Math.max(2, (height ?? 20) - 9);
+  const budget = Math.max(2, rows - 9);
   const activeSections =
     (data.tools.length > 0 ? 1 : 0) +
     (data.files.length > 0 ? 1 : 0) +
@@ -99,11 +120,11 @@ export function SidebarPanel({ data, height, width }: SidebarPanelProps) {
   const tasks = data.tasks.slice(-perSection);
   const memories = data.memories.slice(-perSection);
 
-  const maxName = Math.max(6, (width ?? 30) - 8);
+  const maxName = Math.max(6, cols - 8);
   const clip = (s: string) => (s.length > maxName ? s.slice(0, maxName - 1) + '…' : s);
 
   return (
-    <Box flexDirection="column" borderStyle="single" paddingLeft={1} paddingRight={1}>
+    <Box ref={rootRef} height="100%" flexDirection="column" borderStyle="single" paddingLeft={1} paddingRight={1} overflow="hidden">
       <Section title="Tools" count={data.tools.length} emptyLabel="No tool calls yet">
         {tools.map((tool, i) => (
           <Text key={`tool-${i}`}>

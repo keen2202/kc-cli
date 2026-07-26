@@ -1,7 +1,6 @@
 import React, { useRef, useEffect } from 'react';
-import { Box, Text, useInput } from 'ink';
-import type { ChatMessage } from './ChatView';
-import type { ThinkingChain } from './ThinkingChainView';
+import { Box, Text } from 'ink';
+import type { ChatMessage, ThinkingChain } from '../view-protocol';
 import { renderThinkingChain } from './ThinkingChainView';
 import { renderToolCallCard } from './ToolCallCard';
 import { renderMarkdown } from './MarkdownRenderer';
@@ -55,13 +54,20 @@ export function ChatMessageView({ message, thinkingChain }: ChatMessageViewProps
   );
 }
 
+/** Imperative scroll handle exposed to the editor base focus layer. */
+export interface ChatScrollHandle {
+  scrollUp: () => void;
+  scrollDown: () => void;
+}
+
 interface ChatViewProps {
   messages: ChatMessage[];
   thinkingChains?: Map<string, ThinkingChain>;
-  isModalOpen?: boolean;
+  /** Populated with scroll callbacks; ↑/↓ are dispatched by the focus stack's base layer. */
+  scrollRef?: React.MutableRefObject<ChatScrollHandle | null>;
 }
 
-export function ChatView({ messages, thinkingChains, isModalOpen }: ChatViewProps) {
+export function ChatView({ messages, thinkingChains, scrollRef }: ChatViewProps) {
   const {
     start,
     end,
@@ -87,18 +93,16 @@ export function ChatView({ messages, thinkingChains, isModalOpen }: ChatViewProp
     prevLengthRef.current = messages.length;
   }, [messages.length, scrollTo, isAtEnd]);
 
-  // Handle arrow keys for scrolling through messages
-  useInput((_input: string, key: { upArrow?: boolean; downArrow?: boolean }) => {
-    // When a modal/overlay is open, focus belongs to it: don't scroll the
-    // background chat behind the dialog.
-    if (isModalOpen) return;
-    if (key.upArrow) {
-      scrollUp();
-    }
-    if (key.downArrow) {
-      scrollDown();
-    }
-  });
+  // Expose scrolling to the focus stack's editor base layer. Keys are routed
+  // there by the single input arbiter, so no local useInput is needed — and
+  // overlays holding the keyboard automatically prevent background scrolling.
+  useEffect(() => {
+    if (!scrollRef) return;
+    scrollRef.current = { scrollUp, scrollDown };
+    return () => {
+      scrollRef.current = null;
+    };
+  }, [scrollRef, scrollUp, scrollDown]);
 
   const safeEnd = Math.max(start, end);
   const needsScrolling = messages.length > pageSize + 5;

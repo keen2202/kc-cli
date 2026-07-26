@@ -1,6 +1,8 @@
 /**
- * Tests for computeOpenCodeLayout — verifies the layout never overflows the
- * terminal height and never squeezes the chat content below one row.
+ * Tests for computeOpenCodeLayout — the layout POLICY layer. Since T4, Yoga
+ * owns all measurement; this module only decides breakpoints, panel widths
+ * and the editor's target height, so the assertions here are strictly about
+ * policy (no row arithmetic against component heights).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -12,75 +14,36 @@ const WIDTHS = [40, 80, 120];
 describe('computeOpenCodeLayout', () => {
   for (const width of WIDTHS) {
     for (const height of HEIGHTS) {
-      it(`fits within ${width}x${height} without overflow`, () => {
+      it(`yields a sane editor policy height at ${width}x${height}`, () => {
         const l = computeOpenCodeLayout(width, height);
 
-        // Content is never squeezed away.
-        expect(l.contentHeight).toBeGreaterThanOrEqual(1);
+        // The editor target always exists and leaves room for at least one
+        // chat row between the header and status strips.
+        expect(l.editorHeight).toBeGreaterThanOrEqual(1);
+        expect(l.editorHeight).toBeLessThanOrEqual(15);
+        const available = height - l.headerHeight - l.statusBarHeight;
+        expect(l.editorHeight).toBeLessThanOrEqual(Math.max(1, available - 2));
 
-        // The full column (header + content-row + status) fits the terminal.
-        const total =
-          l.headerHeight +
-          l.contentHeight +
-          l.editorHeight +
-          l.errorBarHeight +
-          l.statusBarHeight;
-        expect(total).toBeLessThanOrEqual(height);
-
-        // The right column (sessionInfo) never exceeds the main content row.
-        const rowHeight = l.contentHeight + l.editorHeight + l.errorBarHeight;
-        expect(l.sessionInfoHeight).toBeLessThanOrEqual(rowHeight);
-      });
-
-      it(`reserves error-bar space within ${width}x${height}`, () => {
-        const l = computeOpenCodeLayout(width, height, { errorVisible: true });
-        expect(l.errorBarHeight).toBeGreaterThan(0);
-        expect(l.contentHeight).toBeGreaterThanOrEqual(1);
-        const total =
-          l.headerHeight +
-          l.contentHeight +
-          l.editorHeight +
-          l.errorBarHeight +
-          l.statusBarHeight;
-        expect(total).toBeLessThanOrEqual(height);
-      });
-
-      it(`reserves operation-summary space within ${width}x${height}`, () => {
-        const l = computeOpenCodeLayout(width, height, { operationVisible: true });
-        expect(l.operationHeight).toBeGreaterThan(0);
-        expect(l.contentHeight).toBeGreaterThanOrEqual(1);
-        const total =
-          l.headerHeight +
-          l.contentHeight +
-          l.editorHeight +
-          l.errorBarHeight +
-          l.operationHeight +
-          l.statusBarHeight;
-        expect(total).toBeLessThanOrEqual(height);
+        // Strips are single-row policy values.
+        expect(l.statusBarHeight).toBe(1);
+        expect([0, 1]).toContain(l.headerHeight);
       });
     }
   }
 
-  it('reserves no operation-summary space when hidden', () => {
-    expect(computeOpenCodeLayout(80, 24).operationHeight).toBe(0);
-    expect(computeOpenCodeLayout(80, 24, { operationVisible: false }).operationHeight).toBe(0);
+  it('exposes only policy fields — measured heights belong to Yoga', () => {
+    const l = computeOpenCodeLayout(80, 24) as Record<string, unknown>;
+    // Reverse-engineered component heights must never come back (F5).
+    for (const dead of ['contentHeight', 'errorBarHeight', 'operationHeight', 'sessionInfoHeight']) {
+      expect(l[dead], `policy layer leaked measured field "${dead}"`).toBeUndefined();
+    }
   });
 
-  it('degrades the operation-summary height on compact breakpoints', () => {
-    const compact = computeOpenCodeLayout(40, 24, { operationVisible: true });
-    const standard = computeOpenCodeLayout(80, 24, { operationVisible: true });
-    expect(getBreakpoint(40).density).toBe('compact');
-    expect(compact.operationHeight).toBeLessThan(standard.operationHeight);
-  });
-
-  it('anchors the editor to the bottom (no wasted rows) when sidebar is visible', () => {
-    // At 80 cols the sidebar is visible; sessionInfo must NOT shrink the left
-    // column, so header + content-row + status fills the whole terminal.
-    const l = computeOpenCodeLayout(80, 24);
-    expect(l.sidebarVisible).toBe(true);
-    const total =
-      l.headerHeight + l.contentHeight + l.editorHeight + l.errorBarHeight + l.statusBarHeight;
-    expect(total).toBe(24);
+  it('grows the editor with taller terminals up to the cap', () => {
+    const short = computeOpenCodeLayout(80, 20);
+    const tall = computeOpenCodeLayout(80, 60);
+    expect(tall.editorHeight).toBeGreaterThanOrEqual(short.editorHeight);
+    expect(tall.editorHeight).toBeLessThanOrEqual(15);
   });
 
   it('widens the right panel on the wide breakpoint', () => {
@@ -90,11 +53,20 @@ describe('computeOpenCodeLayout', () => {
     expect(wide.rightPanelWidth).toBeGreaterThan(standard.rightPanelWidth);
   });
 
-  it('hides the sidebar and session info on narrow terminals', () => {
+  it('hides the sidebar on narrow terminals', () => {
     const l = computeOpenCodeLayout(40, 24);
     expect(l.sidebarVisible).toBe(false);
     expect(l.rightPanelWidth).toBe(0);
-    expect(l.sessionInfoHeight).toBe(0);
+    expect(l.headerVisible).toBe(false);
+    expect(l.breakpoint).toBe('tiny');
+    expect(l.density).toBe('compact');
+  });
+
+  it('reports breakpoint and density for consumers to degrade UI', () => {
+    expect(computeOpenCodeLayout(60, 24).breakpoint).toBe('compact');
+    expect(computeOpenCodeLayout(80, 24).breakpoint).toBe('standard');
+    expect(computeOpenCodeLayout(80, 24).sidebarVisible).toBe(true);
+    expect(computeOpenCodeLayout(120, 24).density).toBe('wide');
   });
 });
 
