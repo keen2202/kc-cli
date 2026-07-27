@@ -49,7 +49,7 @@ export function FilePicker({ files, onSelect, onCancel }: FilePickerProps) {
   });
 
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor={colors.border} padding={1} width={50}>
+    <Box flexDirection="column" flexShrink={0} borderStyle="single" borderColor={colors.border} padding={1} width={50}>
       <Box marginBottom={1}>
         <Text bold>File Picker</Text>
         <Text dimColor> (Ctrl+F to close)</Text>

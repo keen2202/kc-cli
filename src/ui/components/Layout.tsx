@@ -27,12 +27,17 @@ interface LayoutProps {
  */
 export function Layout({ headerBar, chatPanel, editor, errorBar, operationSummary, sessionInfo, sidebar, statusBar, overlay, sidebarHidden }: LayoutProps) {
   const { width, height } = useTerminalSize();
-  const layout = computeOpenCodeLayout(width, height);
+  // Render one row short of the terminal: when ink's output height reaches the
+  // full terminal height it falls back to clearTerminal + full repaint on every
+  // frame (visible flicker). Staying at height-1 keeps the incremental diff
+  // renderer active for smooth updates.
+  const frameHeight = Math.max(1, height - 1);
+  const layout = computeOpenCodeLayout(width, frameHeight);
   const sidebarVisible = layout.sidebarVisible && !sidebarHidden;
   const rightPanelWidth = sidebarVisible ? layout.rightPanelWidth : 0;
 
   return (
-    <Box flexDirection="column" width={width} height={height}>
+    <Box flexDirection="column" width={width} height={frameHeight}>
       {/* Header bar */}
       {layout.headerVisible && (
         <Box height={layout.headerHeight} flexShrink={0}>{headerBar}</Box>

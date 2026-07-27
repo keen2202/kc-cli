@@ -1,5 +1,6 @@
 import { createProgram, type CLIDelegates } from './cli-config';
 import { initLogLevel, runAgent, type RunAgentOptions } from './init-sequence';
+import { loadDotEnv } from './config';
 
 export { VERSION } from './cli-config';
 export { initLogLevel, runAgent, buildSystemPrompt } from './init-sequence';
@@ -10,6 +11,8 @@ export async function main(
     onListTools: () => Promise<void>;
   },
 ): Promise<void> {
+  // Load .env before anything reads process.env (e.g. LOG_LEVEL below).
+  loadDotEnv(process.cwd());
   initLogLevel();
 
   const delegates: CLIDelegates = {

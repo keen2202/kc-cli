@@ -123,6 +123,12 @@ export interface PatchGuaranteeConfig {
    * Defaults to false (give way on infra failure; genuine type errors always block).
    */
   typeCheckStrict?: boolean;
+  /**
+   * When true, exhausting zero-patch retries yields a non-recoverable
+   * `model_no_patch` error (SWE-bench strict mode). Defaults to false:
+   * interactive sessions complete normally, keeping the model's text answer.
+   */
+  failOnZeroPatch?: boolean;
 }
 
 /** Configuration for context window efficiency. */

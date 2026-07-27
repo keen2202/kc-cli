@@ -70,9 +70,21 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
 
       switch (type) {
         case 'text_delta': {
-          if (assistantId === null) break;
+          // QueryEngine emits turn_complete per internal turn; a follow-up turn
+          // within the same query streams more text after the ref was cleared.
+          // Open a fresh assistant bubble instead of dropping that output.
+          let targetId = assistantId;
+          if (targetId === null) {
+            targetId = `assistant_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            currentAssistantIdRef.current = targetId;
+            messagesRef.current = [
+              ...messagesRef.current,
+              { id: targetId, role: 'assistant', content: '', timestamp: Date.now() },
+            ];
+            setIsStreaming(true);
+          }
           const msgs = messagesRef.current;
-          const idx = msgs.findIndex((m) => m.id === assistantId);
+          const idx = msgs.findIndex((m) => m.id === targetId);
           if (idx >= 0) {
             // Mutate the entry in place; the coalesced flush produces the single
             // fresh array copy React needs (avoids a clone per streamed token).

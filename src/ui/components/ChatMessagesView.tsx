@@ -41,7 +41,7 @@ export function renderMessageLines(
     lines.push(...wrapToWidth(tokens['chat.user']('▸ ') + (message.content ?? ''), width));
   } else if (message.role === 'assistant') {
     if (thinkingChain) {
-      lines.push(...wrapToWidth(renderThinkingChain(thinkingChain, tokens), width));
+      lines.push(...wrapToWidth(renderThinkingChain(thinkingChain, tokens, { expanded: toolOutputExpanded }), width));
     }
     if (message.content) {
       for (const line of renderMarkdown(message.content, undefined, width)) {

@@ -215,9 +215,6 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
   const [inputState, setInputState] = useState<InputState>(createInputState());
   const [turnCount, setTurnCount] = useState(0);
   const [sessionStartTime] = useState(() => Date.now());
-  // Ticks once per second so the session duration timer advances live rather
-  // than only re-rendering when other state changes (which froze the clock).
-  const [nowTick, setNowTick] = useState(() => Date.now());
   const [mode, setMode] = useState<'idle' | 'streaming' | 'overlay' | 'steer'>('idle');
   const [attachmentState, setAttachmentState] = useState<{
     attachments: Array<{ path: string; name: string }>;
@@ -304,13 +301,6 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
     );
     return () => queryEngine.setPermissionRequestHandler(null);
   }, [queryEngine]);
-
-  // Advance the session clock once per second so SessionInfo's duration timer
-  // updates live instead of freezing until the next unrelated re-render.
-  useEffect(() => {
-    const timer = setInterval(() => setNowTick(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   const addSystemMsg = useCallback((content: string) => {
     addMessage({
@@ -1023,7 +1013,6 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
     focusStack.handleKey(toKeypressEvent(input, key));
   });
 
-  const sessionDuration = nowTick - sessionStartTime;
   const hasError = activeErrors.length > 0;
 
   // Token ceiling for the session gauge: the active provider/model's real
@@ -1106,7 +1095,7 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
             sessionId={sessionId}
             tokensUsed={totalTokensUsed}
             tokensMax={tokensMax}
-            duration={sessionDuration}
+            startTime={sessionStartTime}
           />
         }
         sidebar={<SidebarPanel data={sidebarData} />}

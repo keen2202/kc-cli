@@ -69,8 +69,11 @@ export function PermissionDialog({ request, onClose }: PermissionDialogProps) {
       }))
     : [];
 
+  // flexShrink=0: as an in-flow overlay in Layout's fixed-height column this
+  // dialog must never be flex-squeezed (rows would collapse onto each other);
+  // the chat panel (overflow="hidden") absorbs the shrinkage instead.
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor={colors.border} padding={1}>
+    <Box flexDirection="column" flexShrink={0} borderStyle="single" borderColor={colors.border} padding={1}>
       <Box>
         <Text bold color={colors.primary}>
           Permission Required

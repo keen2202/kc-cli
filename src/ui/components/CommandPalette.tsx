@@ -91,6 +91,7 @@ export function CommandPalette({ commands, onClose }: CommandPaletteProps) {
   return (
     <Box
       flexDirection="column"
+      flexShrink={0}
       borderStyle="single"
       borderColor={colors.border}
       padding={1}

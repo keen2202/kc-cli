@@ -361,6 +361,15 @@ export class QueryEngine {
     if (this.stateMachine.currentState !== 'idle') {
       this.stateMachine.forceTransitionTo('idle');
     }
+    // Each user query gets a fresh retry budget: without this, zero-patch /
+    // verification retry counters accumulate across queries and a few plain
+    // Q&A turns (classified as task-like, modifying no files) exhaust the
+    // budget and poison every subsequent query with model_no_patch.
+    this.zeroPatchRetries = 0;
+    this.verificationRetries = 0;
+    this.typeCheckRetries = 0;
+    this.lastTypeCheckGate = null;
+    this.lastTestGate = null;
   }
 
   /**
@@ -675,21 +684,30 @@ export class QueryEngine {
               hasTools = await this.decidingPhase(turnCount, minTurnsEnforced);
             }
 
-            // Area 2: Zero-patch exhaustion error
+            // Area 2: Zero-patch exhaustion error (strict mode only). By
+            // default the query completes normally with the model's text
+            // answer; SWE-bench runs opt into the hard failure via
+            // patchGuarantee.failOnZeroPatch.
             if (!hasTools && this.zeroPatchRetries > 0 && this.modifiedFiles.size === 0) {
               const maxRetries = this.config.patchGuarantee?.maxZeroPatchRetries ?? 3;
               if (this.zeroPatchRetries >= maxRetries) {
-                const err = new KCError(
-                  'model_no_patch',
-                  'Agent exited without modifying any files after exhausting zero-patch retries',
-                  { zeroPatchRetries: this.zeroPatchRetries }
-                );
-                yield {
-                  type: 'agent:error',
-                  error: err,
-                  recoverable: false,
-                  timestamp: Date.now(),
-                } as AgentEvent;
+                if (this.config.patchGuarantee?.failOnZeroPatch) {
+                  const err = new KCError(
+                    'model_no_patch',
+                    'Agent exited without modifying any files after exhausting zero-patch retries',
+                    { zeroPatchRetries: this.zeroPatchRetries }
+                  );
+                  yield {
+                    type: 'agent:error',
+                    error: err,
+                    recoverable: false,
+                    timestamp: Date.now(),
+                  } as AgentEvent;
+                } else {
+                  logger.query.warn(
+                    `[QueryEngine] Zero-patch retries exhausted (${this.zeroPatchRetries}) — completing without patch (failOnZeroPatch disabled)`
+                  );
+                }
               }
             }
 

@@ -5,6 +5,15 @@ import type { ThemeTokens } from '../theme';
 // view-protocol — import them from there, never from this file.
 import type { ThinkingChain } from '../view-protocol';
 
+/** Rendering options for the thinking chain. */
+export interface ThinkingChainOptions {
+  /** When true (Ctrl+O), show every step's full content regardless of chain.folded. */
+  expanded?: boolean;
+}
+
+/** Expanded chains cap the rendered rows to avoid flooding the terminal. */
+const EXPANDED_MAX_LINES = 200;
+
 /**
  * Render a thinking chain as a foldable tree in the terminal.
  *
@@ -12,18 +21,24 @@ import type { ThinkingChain } from '../view-protocol';
  *  - streaming (no endTime): header with a live timer plus a one-line preview
  *    of the latest step, so long reasoning phases show visible progress;
  *  - completed (endTime set): folded header with the duration frozen.
+ *
+ * The global expand toggle (Ctrl+O) overrides chain.folded so completed
+ * reasoning is inspectable after the fact.
  */
 export function renderThinkingChain(
   chain: ThinkingChain,
   tokens: ThemeTokens,
+  options?: ThinkingChainOptions,
 ): string {
+  const expanded = options?.expanded ?? false;
   const endedAt = chain.endTime ?? Date.now();
   const duration = (Math.max(0, endedAt - chain.startTime) / 1000).toFixed(1);
   const stepCount = chain.steps.length;
-  const header = tokens['thinking.folded'](`... Thinking (${stepCount} step${stepCount !== 1 ? 's' : ''}, ${duration}s)`);
+  const hint = !expanded && stepCount > 0 ? ' · Ctrl+O to expand' : '';
+  const header = tokens['thinking.folded'](`... Thinking (${stepCount} step${stepCount !== 1 ? 's' : ''}, ${duration}s)${hint}`);
   const streaming = chain.endTime === undefined;
 
-  if (chain.folded) {
+  if (chain.folded && !expanded) {
     if (!streaming) {
       return header;
     }
@@ -44,12 +59,27 @@ export function renderThinkingChain(
 
   for (const step of chain.steps) {
     const labelTag = tokens['thinking.step'](`[${step.label}]`);
-    // Truncate long content to keep terminal manageable
-    const maxLen = 120;
-    const content = step.content.length > maxLen
-      ? step.content.slice(0, maxLen) + '...'
-      : step.content;
-    lines.push(`  ${labelTag} ${tokens['thinking.content'](content)}`);
+    if (expanded) {
+      // Full content: emit every line of the step (downstream wrapping handles
+      // width); cap the total to keep the terminal manageable.
+      const stepLines = step.content.replace(/\r\n/g, '\n').split('\n');
+      lines.push(`  ${labelTag} ${tokens['thinking.content'](stepLines[0] ?? '')}`);
+      for (const extra of stepLines.slice(1)) {
+        lines.push(`  ${tokens['thinking.content'](extra)}`);
+      }
+      if (lines.length >= EXPANDED_MAX_LINES) {
+        lines.length = EXPANDED_MAX_LINES;
+        lines.push(tokens['thinking.content']('  … truncated'));
+        break;
+      }
+    } else {
+      // Truncate long content to keep terminal manageable
+      const maxLen = 120;
+      const content = step.content.length > maxLen
+        ? step.content.slice(0, maxLen) + '...'
+        : step.content;
+      lines.push(`  ${labelTag} ${tokens['thinking.content'](content)}`);
+    }
   }
 
   return lines.join('\n');

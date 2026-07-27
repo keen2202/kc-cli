@@ -193,6 +193,64 @@ export interface ConfigLayer {
 }
 
 /**
+ * Load environment variables from `<cwd>/.env` into process.env.
+ *
+ * Lightweight parser (no dotenv dependency):
+ * - Skips blank lines and comment lines
+ * - Supports `KEY=VALUE` (optional `export ` prefix)
+ * - Strips inline `# comment` from unquoted values (.env.example style)
+ * - Strips matching single/double quotes around values
+ * - Never overwrites variables already present in process.env,
+ *   preserving the env > .env precedence
+ *
+ * Safe to call multiple times; a missing .env file is a no-op.
+ */
+export function loadDotEnv(cwd: string): void {
+  const envPath = path.join(cwd, '.env');
+  let content: string;
+  try {
+    content = fs.readFileSync(envPath, 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      logger.services.warn(`Failed to read .env from ${envPath}: ` + String(error));
+    }
+    return;
+  }
+
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+
+    const eqIndex = line.indexOf('=');
+    if (eqIndex <= 0) continue;
+
+    let key = line.slice(0, eqIndex).trim();
+    if (key.startsWith('export ')) key = key.slice('export '.length).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+
+    let value = line.slice(eqIndex + 1).trim();
+    const isQuoted =
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")));
+    if (isQuoted) {
+      value = value.slice(1, -1);
+    } else {
+      // Strip inline comments from unquoted values (e.g. `KC_PROVIDER=anthropic  # note`)
+      const hashIndex = value.indexOf('#');
+      if (hashIndex !== -1) {
+        value = value.slice(0, hashIndex).trim();
+      }
+    }
+
+    // Real environment always wins over .env
+    if (process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+}
+
+/**
  * Load configuration from multiple layers (priority ascending):
  * 1. System defaults
  * 2. User config (~/.kc-cli/settings.json)
@@ -205,6 +263,10 @@ export interface ConfigLayer {
  */
 export async function loadConfig(cwd: string): Promise<{ config: Config; layers: ConfigLayer[] }> {
   const layers: ConfigLayer[] = [];
+
+  // Load .env into process.env before reading KC_* env vars, so values in a
+  // project .env file (e.g. KC_API_KEY) are picked up by loadEnvConfig().
+  loadDotEnv(cwd);
 
   // Layer 1: System defaults
   layers.push({
