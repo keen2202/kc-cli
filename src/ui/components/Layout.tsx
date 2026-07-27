@@ -58,8 +58,10 @@ export function Layout({ headerBar, chatPanel, editor, errorBar, operationSummar
             <Box flexShrink={0}>{operationSummary}</Box>
           )}
           {/* Editor: policy-sized target height, never squeezed (flexShrink=0),
-              anchored to the bottom because chat is the only grower. */}
-          <Box height={layout.editorHeight} flexShrink={0}>{editor}</Box>
+              anchored to the bottom because chat is the only grower.
+              overflow="hidden" is the defensive backstop against any editor
+              content that would otherwise spill past its allotted rows. */}
+          <Box height={layout.editorHeight} flexShrink={0} overflow="hidden">{editor}</Box>
         </Box>
 
         {/* Right pane: session info takes its natural height, the sidebar

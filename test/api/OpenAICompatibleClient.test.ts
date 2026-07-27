@@ -278,6 +278,97 @@ describe('OpenAICompatibleClient', () => {
       expect(events.some(e => e.type === 'stop')).toBe(true);
     });
 
+    it('opts into stream usage and attaches it to the stop event (usage chunk with empty choices)', async () => {
+      const client = new OpenAICompatibleClient({
+        apiKey: 'sk-test',
+        baseUrl: 'https://api.openai.com',
+        model: 'gpt-4',
+      });
+
+      const sseChunks = [
+        'data: {"choices":[{"delta":{"content":"Hi"},"index":0}]}\n\n',
+        // stream_options.include_usage delivers usage in a trailing chunk
+        // whose choices array is empty — it must not be dropped by the guard.
+        'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":7,"total_tokens":19}}\n\n',
+        'data: [DONE]\n\n',
+      ];
+
+      const fetchMock = vi.fn().mockResolvedValue(mockFetchStream(sseChunks));
+      globalThis.fetch = fetchMock;
+
+      const events: any[] = [];
+      for await (const event of client.streamChat({
+        model: 'gpt-4',
+        messages: [{ id: '1', role: 'user', content: 'Hi', timestamp: Date.now() }],
+      })) {
+        events.push(event);
+      }
+
+      // The streaming request must ask the API to report usage.
+      const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(requestBody.stream_options).toEqual({ include_usage: true });
+
+      const stop = events.find(e => e.type === 'stop');
+      expect(stop).toBeDefined();
+      expect(stop.usage).toEqual({ inputTokens: 12, outputTokens: 7, totalTokens: 19 });
+    });
+
+    it('derives total_tokens when the usage chunk omits it', async () => {
+      const client = new OpenAICompatibleClient({
+        apiKey: 'sk-test',
+        baseUrl: 'https://api.openai.com',
+        model: 'gpt-4',
+      });
+
+      const sseChunks = [
+        'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}}\n\n',
+        'data: [DONE]\n\n',
+      ];
+
+      globalThis.fetch = vi.fn().mockResolvedValue(mockFetchStream(sseChunks));
+
+      const events: any[] = [];
+      for await (const event of client.streamChat({
+        model: 'gpt-4',
+        messages: [{ id: '1', role: 'user', content: 'Hi', timestamp: Date.now() }],
+      })) {
+        events.push(event);
+      }
+
+      const stop = events.find(e => e.type === 'stop');
+      expect(stop.usage.totalTokens).toBe(15);
+    });
+
+    it('yields thinking_delta for reasoning_content deltas (DeepSeek-R1/QwQ style)', async () => {
+      const client = new OpenAICompatibleClient({
+        apiKey: 'sk-test',
+        baseUrl: 'https://api.openai.com',
+        model: 'gpt-4',
+      });
+
+      const sseChunks = [
+        'data: {"choices":[{"delta":{"reasoning_content":"Let me think"},"index":0}]}\n\n',
+        'data: {"choices":[{"delta":{"reasoning_content":" about this"},"index":0}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"Answer"},"index":0}]}\n\n',
+        'data: [DONE]\n\n',
+      ];
+
+      globalThis.fetch = vi.fn().mockResolvedValue(mockFetchStream(sseChunks));
+
+      const events: any[] = [];
+      for await (const event of client.streamChat({
+        model: 'gpt-4',
+        messages: [{ id: '1', role: 'user', content: 'Hi', timestamp: Date.now() }],
+      })) {
+        events.push(event);
+      }
+
+      const thinking = events.filter(e => e.type === 'thinking_delta');
+      expect(thinking.map(e => e.thinking)).toEqual(['Let me think', ' about this']);
+      const textDeltas = events.filter(e => e.type === 'text_delta');
+      expect(textDeltas.map(e => e.text)).toEqual(['Answer']);
+    });
+
     it('should yield error on fetch failure', async () => {
       const client = new OpenAICompatibleClient({
         apiKey: 'sk-test',

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { UIEventBus } from '../event-bus';
 import type { ChatMessage, ThinkingChain, ToolCallData, SidebarData } from '../view-protocol';
-import { createSidebarData, classifyThinkingSteps } from '../view-protocol';
+import { createSidebarData, classifyThinkingSteps, summarizeToolInput } from '../view-protocol';
 import { normalizeUIEvent } from '../event-normalizer';
 import type { AgentEvent } from '../../state/types';
 import type { StreamEvent } from '../../query/protocol';
@@ -95,6 +95,11 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
             rawContent,
             steps: classifyThinkingSteps(rawContent),
           };
+          // Publish the live chain immediately so ChatMessagesView can render
+          // thinking progress during the stream (not only after turn_complete).
+          if (assistantId !== null) {
+            thinkingChainsRef.current.set(assistantId, currentThinkingChainRef.current);
+          }
           scheduleRender();
           break;
         }
@@ -114,7 +119,12 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
               messagesRef.current = [...msgs];
             }
           }
-          sidebarDataRef.current.tools.push({ name: ev.toolCall.toolName, status: 'running' });
+          sidebarDataRef.current.tools.push({
+            name: ev.toolCall.toolName,
+            status: 'running',
+            detail: summarizeToolInput(ev.toolCall.input),
+            startTime: toolCall.startTime,
+          });
           flushRender();
           break;
         }
@@ -140,6 +150,20 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
               messagesRef.current = [...msgs];
             }
           }
+          // Close out the matching sidebar entry (last running tool with this
+          // name) so the Tools panel reflects the real lifecycle + duration.
+          const sidebarTools = sidebarDataRef.current.tools;
+          const toolName = ev.toolCall?.toolName;
+          for (let i = sidebarTools.length - 1; i >= 0; i--) {
+            const entry = sidebarTools[i];
+            if (entry.status === 'running' && (toolName === undefined || entry.name === toolName)) {
+              entry.status = status;
+              if (entry.startTime !== undefined) {
+                entry.duration = `${((Date.now() - entry.startTime) / 1000).toFixed(1)}s`;
+              }
+              break;
+            }
+          }
           flushRender();
           break;
         }
@@ -149,7 +173,8 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
           setIsStreaming(false);
           const chain = currentThinkingChainRef.current;
           if (chain && assistantId) {
-            thinkingChainsRef.current.set(assistantId, chain);
+            // Freeze the displayed duration now that the turn is done.
+            thinkingChainsRef.current.set(assistantId, { ...chain, endTime: Date.now() });
           }
           currentThinkingChainRef.current = null;
 

@@ -593,6 +593,33 @@ describe('QueryEngine Coverage Part 2', () => {
       expect(turnComplete.usage.outputTokens).toBe(0);
     });
 
+    it('passes real usage from the provider stop event through to turn_complete', async () => {
+      setStream([
+        { type: 'text_delta', text: 'response' },
+        { type: 'stop', usage: { inputTokens: 120, outputTokens: 30, totalTokens: 150 } },
+      ]);
+
+      engine = createEngine();
+      const events = await collectEvents(engine, 'test');
+
+      const turnComplete = events.find(e => e.type === 'agent:turn_complete');
+      expect(turnComplete).toBeDefined();
+      expect(turnComplete.usage).toEqual({ inputTokens: 120, outputTokens: 30, totalTokens: 150 });
+    });
+
+    it('derives totalTokens when the provider stop usage omits it', async () => {
+      setStream([
+        { type: 'text_delta', text: 'response' },
+        { type: 'stop', usage: { inputTokens: 10, outputTokens: 5 } } as any,
+      ]);
+
+      engine = createEngine();
+      const events = await collectEvents(engine, 'test');
+
+      const turnComplete = events.find(e => e.type === 'agent:turn_complete');
+      expect(turnComplete.usage.totalTokens).toBe(15);
+    });
+
     it('should create complete event at end of successful run', async () => {
       setStream(textEvents('done'));
 

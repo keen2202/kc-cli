@@ -127,10 +127,13 @@ export function SidebarPanel({ data }: SidebarPanelProps) {
     <Box ref={rootRef} height="100%" flexDirection="column" borderStyle="single" paddingLeft={1} paddingRight={1} overflow="hidden">
       <Section title="Tools" count={data.tools.length} emptyLabel="No tool calls yet">
         {tools.map((tool, i) => (
-          <Text key={`tool-${i}`}>
+          // wrap="truncate" keeps each tool entry on a single row even when the
+          // detail summary would otherwise wrap and blow the section budget.
+          <Text key={`tool-${i}`} wrap="truncate">
             <Text color={toolStatusColor(tool.status, colors)}>{toolStatusIcon(tool.status)} </Text>
             <Text>{clip(tool.name)}</Text>
             {tool.duration ? <Text dimColor> {tool.duration}</Text> : null}
+            {tool.detail ? <Text dimColor> {tool.detail}</Text> : null}
           </Text>
         ))}
       </Section>

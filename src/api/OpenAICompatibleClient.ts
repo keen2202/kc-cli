@@ -25,6 +25,9 @@ export class OpenAICompatibleClient extends BaseApiClient {
   private toolCallBuffer: Map<number, { id: string; name: string; args: string }> = new Map();
   // Parser for <thinking> tags in text streams (for chain-of-thought providers)
   private thinkingParser = new ThinkingTagParser();
+  // Usage reported by the final stream chunk (stream_options.include_usage);
+  // attached to the 'stop' event so the engine can surface real token counts.
+  private streamUsage: TokenUsage | null = null;
 
   constructor(config: OpenAICompatibleConfig) {
     super({
@@ -82,6 +85,12 @@ export class OpenAICompatibleClient extends BaseApiClient {
     // OpenAI: enable prompt caching for supported models
     if (this.provider === 'openai') {
       body.prompt_cache = true;
+    }
+
+    // Streaming: ask the API to append a final usage chunk so token counts
+    // are real, not zeros. Gateways that don't support it ignore the field.
+    if (body.stream === true) {
+      body.stream_options = { include_usage: true };
     }
 
     return body;
@@ -171,6 +180,7 @@ export class OpenAICompatibleClient extends BaseApiClient {
     // Clear tool call buffer from any previous stream
     this.toolCallBuffer.clear();
     this.thinkingParser.reset();
+    this.streamUsage = null;
 
     const requestBody = this.buildRequestBody({ ...config, stream: true });
     const headers = {
@@ -407,7 +417,9 @@ export class OpenAICompatibleClient extends BaseApiClient {
       const dataStr = line.slice(6);
 
       if (dataStr === '[DONE]') {
-        yield { type: 'stop' };
+        // Attach the usage captured from the final chunk (if the API sent one)
+        // so downstream turn_complete events carry real token counts.
+        yield this.streamUsage ? { type: 'stop', usage: this.streamUsage } : { type: 'stop' };
         return;
       }
 
@@ -424,6 +436,18 @@ export class OpenAICompatibleClient extends BaseApiClient {
    * Parse single stream chunk
    */
   private *parseStreamChunk(data: Record<string, unknown>): Generator<LLMStreamEvent> {
+    // Usage arrives in a trailing chunk with an empty choices array when
+    // stream_options.include_usage is set — capture it before the choice guard.
+    const usageData = data.usage as Record<string, number> | null | undefined;
+    if (usageData) {
+      this.streamUsage = {
+        inputTokens: usageData.prompt_tokens || 0,
+        outputTokens: usageData.completion_tokens || 0,
+        totalTokens: usageData.total_tokens
+          || (usageData.prompt_tokens || 0) + (usageData.completion_tokens || 0),
+      };
+    }
+
     const choices = data.choices as Array<Record<string, unknown>> | undefined;
     const choice = choices?.[0];
     if (!choice) {
@@ -431,6 +455,16 @@ export class OpenAICompatibleClient extends BaseApiClient {
     }
 
     const delta = choice.delta as Record<string, unknown> | undefined;
+
+    // Reasoning stream (DeepSeek-R1 / QwQ / GLM style): a dedicated delta
+    // field, independent of the <thinking>-tag protocol. Surface it as
+    // thinking_delta so the UI can show live progress during long reasoning.
+    if (typeof delta?.reasoning_content === 'string' && delta.reasoning_content.length > 0) {
+      yield {
+        type: 'thinking_delta',
+        thinking: delta.reasoning_content,
+      };
+    }
 
     // Text delta — pass through thinking tag parser for chain-of-thought providers
     if (delta?.content && choice.finish_reason !== 'tool_calls') {

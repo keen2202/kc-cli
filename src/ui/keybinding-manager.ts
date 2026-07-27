@@ -68,6 +68,10 @@ function formatKeypressEvent(event: KeypressEvent): string {
   const parts: string[] = [];
   if (event.ctrl) parts.push('ctrl');
   if (event.meta) parts.push('meta');
+  // Only named keys (tab/up/return…) carry an explicit shift prefix. Printable
+  // characters already encode shift in the character itself ('?', 'A'), so
+  // prefixing them would break existing single-char bindings.
+  if (event.shift && event.name.length > 1) parts.push('shift');
   parts.push(event.name);
   return parts.join('+');
 }
@@ -94,6 +98,9 @@ export function createDefaultKeybindings(): KeybindingManager {
     { key: 'ctrl+d', command: 'exit', when: 'idle', description: 'Exit (empty input)' },
     { key: 'ctrl+t', command: 'toggleSidebar', description: 'Toggle sidebar' },
     { key: 'ctrl+g', command: 'cycleExecutionMode', description: 'Cycle execution mode (interactive/auto/goal)' },
+    // shift+tab (ESC[Z) mirrors ctrl+g; ctrl+g stays as the fallback for
+    // terminals that do not report shifted named keys.
+    { key: 'shift+tab', command: 'cycleExecutionMode', description: 'Cycle execution mode (interactive/auto/goal)' },
     // escape→closeOverlay / escape→cancelMode removed: ESC is owned by the
     // FocusStack (the top layer's onEscape), so schema entries for it were
     // dead bindings (F1). toggleThinking (ctrl+shift+t) and autocomplete (tab)

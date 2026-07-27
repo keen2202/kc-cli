@@ -18,6 +18,7 @@ import { useTerminalSize } from '../hooks/useTerminalSize';
 import { getBreakpoint } from '../layout';
 import { UIEventBus } from '../event-bus';
 import { createDefaultKeybindings } from '../keybinding-manager';
+import { getCapabilities } from '../../api/capabilities';
 import { isPrintableUnicode, type KeypressEvent } from '../keypress';
 import { FocusStack, ESCAPE_HELP_LINE, type FocusLayer } from '../focus-stack';
 import { FocusStackProvider, FocusLayerMount, useFocusLayer } from '../hooks/useFocusLayer';
@@ -239,6 +240,12 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
   const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
   // Ctrl+O expands the pending permission request into a full DiffPreview overlay.
   const [showDiffDetail, setShowDiffDetail] = useState(false);
+
+  // Status bar mode is derived live: any open overlay reports 'overlay' so the
+  // bar tracks what actually owns the screen, not just the base interaction mode.
+  const overlayOpen =
+    showExitConfirm || showPalette || showFilePicker || showDiffDetail || permissionRequest !== null;
+  const statusMode: 'idle' | 'streaming' | 'overlay' | 'steer' = overlayOpen ? 'overlay' : mode;
 
   // Input history (↑/↓ recall of previously submitted messages)
   const [submittedHistory, setSubmittedHistory] = useState<string[]>([]);
@@ -981,6 +988,13 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
   const sessionDuration = nowTick - sessionStartTime;
   const hasError = activeErrors.length > 0;
 
+  // Token ceiling for the session gauge: the active provider/model's real
+  // context window instead of a hardcoded constant.
+  const tokensMax = useMemo(
+    () => getCapabilities(provider, model).maxContextWindow,
+    [provider, model],
+  );
+
   // Operation summary strip above the editor. Interactive mode shows the
   // pending tool as a confirm affordance; auto/goal show what is running live
   // (auto-approved, no confirmation). Steps/expected collapse on compact widths.
@@ -1052,14 +1066,14 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
           <SessionInfo
             sessionId={sessionId}
             tokensUsed={totalTokensUsed}
-            tokensMax={200000}
+            tokensMax={tokensMax}
             duration={sessionDuration}
           />
         }
         sidebar={<SidebarPanel data={sidebarData} />}
         statusBar={
           <StatusBar
-            mode={mode}
+            mode={statusMode}
             provider={provider}
             model={model}
             turnCount={turnCount}

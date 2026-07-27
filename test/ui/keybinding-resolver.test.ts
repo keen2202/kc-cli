@@ -65,6 +65,25 @@ describe('KeybindingManager — resolve', () => {
     expect(km.resolve(ev('down'))).toBe('historyNext');
   });
 
+  it('resolves shift+tab to cycleExecutionMode in every context (T5)', () => {
+    const km = createDefaultKeybindings();
+    // Global binding: works with no context, in idle, and in input.
+    expect(km.resolve(ev('tab', { shift: true }))).toBe('cycleExecutionMode');
+    km.setContext('idle');
+    expect(km.resolve(ev('tab', { shift: true }))).toBe('cycleExecutionMode');
+    // Plain tab in idle still toggles the agent mode — no collision.
+    expect(km.resolve(ev('tab'))).toBe('toggleAgentMode');
+    // ctrl+g stays as the equivalent fallback chord.
+    expect(km.resolve(ev('g', { ctrl: true }))).toBe('cycleExecutionMode');
+  });
+
+  it('shift on printable characters never changes resolution', () => {
+    const km = createDefaultKeybindings();
+    // '?' is typed with shift on most layouts; the resolver must not turn it
+    // into 'shift+?' and break the help binding.
+    expect(km.resolve(ev('?', { shift: true }))).toBe('help');
+  });
+
   it('no longer advertises the removed modelSelector/sessionSwitcher bindings', () => {
     const km = createDefaultKeybindings();
     // ctrl+o and ctrl+s previously mapped to model selector / session switcher;

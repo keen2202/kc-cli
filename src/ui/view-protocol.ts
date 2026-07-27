@@ -23,6 +23,10 @@ export interface SidebarTool {
   name: string;
   status: 'running' | 'completed' | 'failed' | 'pending';
   duration?: string;
+  /** Brief input summary (e.g. target path or command), truncated for display. */
+  detail?: string;
+  /** Wall-clock start, used to derive `duration` when the tool completes. */
+  startTime?: number;
 }
 
 export interface SidebarTask {
@@ -62,6 +66,35 @@ export function createSidebarData(): SidebarData {
 
 // ── Tool calls ──
 
+/** Input keys most likely to identify what a tool call is operating on. */
+const TOOL_INPUT_SUMMARY_KEYS = [
+  'file_path', 'path', 'command', 'query', 'pattern', 'url', 'regex', 'prompt',
+];
+
+/**
+ * Summarize a tool call's input for compact display (sidebar / status strips):
+ * prefers well-known keys, falls back to the first string value, truncated.
+ */
+export function summarizeToolInput(input: unknown, maxLen = 40): string | undefined {
+  if (input === null || typeof input !== 'object') return undefined;
+  const record = input as Record<string, unknown>;
+  let value: string | undefined;
+  for (const key of TOOL_INPUT_SUMMARY_KEYS) {
+    if (typeof record[key] === 'string' && (record[key] as string).trim()) {
+      value = record[key] as string;
+      break;
+    }
+  }
+  if (value === undefined) {
+    value = Object.values(record).find(
+      (v): v is string => typeof v === 'string' && v.trim().length > 0,
+    );
+  }
+  if (value === undefined) return undefined;
+  const oneLine = value.replace(/\s+/g, ' ').trim();
+  return oneLine.length > maxLen ? oneLine.slice(0, maxLen - 1) + '…' : oneLine;
+}
+
 export interface ToolCallData {
   toolName: string;
   input?: string;
@@ -95,6 +128,8 @@ export interface ThinkingChain {
   rawContent: string;
   folded: boolean;
   startTime: number;
+  /** Set when the turn completes; freezes the displayed duration. Absent while streaming. */
+  endTime?: number;
 }
 
 /**

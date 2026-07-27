@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Box, Text } from 'ink';
+import React, { useState, useRef, useEffect } from 'react';
+import { Box, Text, measureElement, type DOMElement } from 'ink';
 import { useTheme } from '../hooks/useTheme';
 import { useTerminalSize } from '../hooks/useTerminalSize';
 import { computeOpenCodeLayout } from '../layout';
@@ -58,6 +58,17 @@ export function Editor({
 
   const attachmentCount = attachments.length;
 
+  // Width truth: measure the columns Yoga actually allotted to this component.
+  // The raw terminal width over-counts whenever the sidebar column is visible,
+  // which let long input lines wrap past the border on narrow terminals.
+  const rootRef = useRef<DOMElement | null>(null);
+  const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
+  useEffect(() => {
+    if (!rootRef.current) return;
+    const { width: w } = measureElement(rootRef.current);
+    if (w > 0 && w !== measuredWidth) setMeasuredWidth(w);
+  });
+
   // Height budget the editor is allotted by the layout. Content must fit
   // within this (minus the border) or it overflows and overlaps the chat
   // panel on small terminals. We progressively reveal chrome as room allows.
@@ -65,40 +76,103 @@ export function Editor({
   const innerBudget = editorHeight - 2; // subtract top/bottom border rows
   const remaining = innerBudget - 1; // reserve one row for the input line
   const showHints = remaining >= 3; // hint bar needs ~3 rows (with margins)
-  const showAttachmentDetails = remaining >= (showHints ? 5 : 2);
+  // Attachments row costs 1-2 rows: keep it while >=2 rows remain, or >=1 row
+  // when attachments exist (the count is then the higher-value information).
+  const showAttachmentBar = remaining >= 2 || (attachmentCount > 0 && remaining >= 1);
+  const attachmentBarMargin = remaining >= 2 ? 1 : 0;
+  const showAttachmentDetails = attachmentCount > 0 && remaining >= (showHints ? 5 : 2);
 
-  // Build display text with cursor position indicator
-  const renderInputLine = () => {
+  // Columns available for input text: allotted width minus border+padding
+  // and the prompt prefix. Pre-measurement fall back to the terminal width.
+  const innerWidth = Math.max(10, (measuredWidth ?? width) - 4);
+  const textCols = Math.max(4, innerWidth - promptPrefix.length);
+
+  // Rows left for the input text once the visible chrome is accounted for.
+  const chromeRows =
+    (showHints ? 3 : 0) +
+    (showAttachmentBar ? 1 + attachmentBarMargin : 0) +
+    (showAttachmentDetails ? attachmentCount * 2 : 0);
+  const inputRows = Math.max(1, innerBudget - chromeRows);
+
+  const promptNode = isSteerMode
+    ? tokens['input.steer'](promptPrefix)
+    : tokens['input.prompt'](promptPrefix);
+
+  // Build display text with cursor position indicator. Lines are clipped to
+  // the measured column budget (cursor-following horizontal window on the
+  // cursor line) and the line list to `inputRows`, so the editor never wraps
+  // or grows past its allotment on narrow terminals.
+  const renderInputLines = () => {
     if (text.length === 0) {
       return (
-        <Text>
-          {isSteerMode
-            ? tokens['input.steer'](promptPrefix)
-            : tokens['input.prompt'](promptPrefix)}
+        <Text wrap="truncate">
+          {promptNode}
           <Text backgroundColor="white" color="black"> </Text>
         </Text>
       );
     }
 
-    // Position the cursor visually by splitting the text at cursorPos
-    const beforeCursor = text.slice(0, Math.min(cursorPos, text.length));
-    const atCursor = cursorPos < text.length ? text[cursorPos] : ' ';
-    const afterCursor = text.slice(Math.min(cursorPos + 1, text.length));
+    // Locate the cursor's line/column in the (possibly multi-line) text.
+    const lines = text.split('\n');
+    let cursorLine = 0;
+    let cursorCol = Math.min(cursorPos, text.length);
+    for (let i = 0; i < lines.length; i++) {
+      if (cursorCol <= lines[i].length) {
+        cursorLine = i;
+        break;
+      }
+      cursorCol -= lines[i].length + 1; // +1 for the newline
+      cursorLine = i + 1;
+    }
+    if (cursorLine >= lines.length) {
+      cursorLine = lines.length - 1;
+      cursorCol = lines[cursorLine].length;
+    }
 
-    return (
-      <Text>
-        {isSteerMode
-          ? tokens['input.steer'](promptPrefix)
-          : tokens['input.prompt'](promptPrefix)}
-        <Text>{beforeCursor}</Text>
-        <Text backgroundColor="white" color="black">{atCursor}</Text>
-        <Text>{afterCursor}</Text>
-      </Text>
-    );
+    // Vertical window: show the last `inputRows` lines, shifted up if needed
+    // so the cursor line is always visible.
+    let endLine = lines.length;
+    let startLine = Math.max(0, endLine - inputRows);
+    if (cursorLine < startLine) {
+      startLine = cursorLine;
+      endLine = Math.min(lines.length, startLine + inputRows);
+    }
+
+    return lines.slice(startLine, endLine).map((line, i) => {
+      const absoluteIdx = startLine + i;
+      const prefix = i === 0 ? promptNode : ' '.repeat(promptPrefix.length);
+
+      if (absoluteIdx !== cursorLine) {
+        return (
+          <Text key={absoluteIdx} wrap="truncate">
+            {prefix}
+            <Text>{line.slice(0, textCols)}</Text>
+          </Text>
+        );
+      }
+
+      // Cursor line: horizontal window that keeps the cursor in view. The
+      // window ends at the cursor when it runs past the column budget.
+      const winStart = cursorCol >= textCols ? cursorCol - textCols + 1 : 0;
+      const visible = line.slice(winStart, winStart + textCols);
+      const vCol = cursorCol - winStart;
+      const beforeCursor = visible.slice(0, vCol);
+      const atCursor = vCol < visible.length ? visible[vCol] : ' ';
+      const afterCursor = visible.slice(vCol + 1);
+
+      return (
+        <Text key={absoluteIdx} wrap="truncate">
+          {prefix}
+          <Text>{beforeCursor}</Text>
+          <Text backgroundColor="white" color="black">{atCursor}</Text>
+          <Text>{afterCursor}</Text>
+        </Text>
+      );
+    });
   };
 
   return (
-    <Box flexDirection="column" width="100%" borderStyle="single" paddingLeft={1} paddingRight={1}>
+    <Box ref={rootRef} flexDirection="column" width="100%" borderStyle="single" paddingLeft={1} paddingRight={1}>
       {/* Keyboard shortcut hint bar (hidden when vertical space is tight) */}
       {showHints && (
         <Box marginBottom={1} marginTop={1}>
@@ -106,27 +180,29 @@ export function Editor({
         </Box>
       )}
 
-      {/* Attachment bar */}
-      <Box flexDirection="row" marginBottom={1}>
-        <Text dimColor>
-          Attachments: {attachmentCount}/{MAX_ATTACHMENTS}
-        </Text>
-        {deleteMode && (
-          <Text color={colors.warning}> [DELETE MODE: 0-{Math.max(0, attachmentCount - 1)} to remove, R to clear all]</Text>
-        )}
-      </Box>
+      {/* Attachment bar (dropped entirely when the height budget is too tight) */}
+      {showAttachmentBar && (
+        <Box flexDirection="row" marginBottom={attachmentBarMargin}>
+          <Text wrap="truncate" dimColor>
+            Attachments: {attachmentCount}/{MAX_ATTACHMENTS}
+          </Text>
+          {deleteMode && (
+            <Text color={colors.warning}> [DELETE MODE: 0-{Math.max(0, attachmentCount - 1)} to remove, R to clear all]</Text>
+          )}
+        </Box>
+      )}
       {showAttachmentDetails &&
         attachments.map((att, i) => (
           <Box key={i} flexDirection="row" marginBottom={1}>
-            <Text dimColor>
+            <Text wrap="truncate" dimColor>
               {deleteMode ? `[${i}] ` : ''}📄 {att.name}
             </Text>
           </Box>
         ))}
 
-      {/* Input line with real cursor */}
-      <Box flexDirection="row">
-        {renderInputLine()}
+      {/* Input lines with real cursor, clipped to the row/column budget */}
+      <Box flexDirection="column">
+        {renderInputLines()}
       </Box>
     </Box>
   );

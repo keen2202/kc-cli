@@ -900,6 +900,9 @@ export class QueryEngine {
   ): AsyncGenerator<StreamEvent | AgentEvent> {
     let currentContent = '';
     let currentToolCalls: ToolCall[] = [];
+    // Real usage reported by the provider's stop event (Anthropic/Ollama always,
+    // OpenAI-compatible when stream_options.include_usage is honored).
+    let turnUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | undefined;
 
     // Global timeout for LLM streaming to prevent infinite hangs.
     // Default 5 minutes; can be overridden via environment variable.
@@ -937,6 +940,14 @@ export class QueryEngine {
             if (event.error) throw event.error;
             break;
           case 'stop':
+            if (event.usage) {
+              turnUsage = {
+                inputTokens: event.usage.inputTokens || 0,
+                outputTokens: event.usage.outputTokens || 0,
+                totalTokens: event.usage.totalTokens
+                  || (event.usage.inputTokens || 0) + (event.usage.outputTokens || 0),
+              };
+            }
             break;
         }
       }
@@ -961,7 +972,7 @@ export class QueryEngine {
     };
 
     this.conversation.addMessage(assistantMsg);
-    yield this.createTurnCompleteEvent(assistantMsg);
+    yield this.createTurnCompleteEvent(assistantMsg, turnUsage);
   }
 
   private async decidingPhase(turnCount: number = 0, minTurns: number = 0): Promise<boolean> {
@@ -1536,11 +1547,14 @@ export class QueryEngine {
     return { type: 'agent:thinking_delta', thinking, timestamp: Date.now() };
   }
 
-  private createTurnCompleteEvent(message: AssistantMessage): AgentEvent {
+  private createTurnCompleteEvent(
+    message: AssistantMessage,
+    usage?: { inputTokens: number; outputTokens: number; totalTokens: number },
+  ): AgentEvent {
     return {
       type: 'agent:turn_complete',
       message,
-      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      usage: usage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       timestamp: Date.now(),
     };
   }

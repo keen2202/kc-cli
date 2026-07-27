@@ -37,7 +37,12 @@ export function StatusBar({ mode, provider, model, turnCount, maxTurns, tokensUs
   const icon = MODE_ICONS[mode] || '○';
   const label = MODE_LABELS[mode] || mode;
 
-  const progressFilled = Math.round((turnCount / Math.max(1, maxTurns)) * 10);
+  // Progress bar follows progressPercent when provided (goal mode reports
+  // iteration progress there); otherwise fall back to turn-based progress.
+  const ratio = progressPercent !== undefined
+    ? Math.min(1, Math.max(0, progressPercent / 100))
+    : turnCount / Math.max(1, maxTurns);
+  const progressFilled = Math.round(ratio * 10);
   const progressBar = '█'.repeat(progressFilled) + '░'.repeat(Math.max(0, 10 - progressFilled));
 
   const modelLabel = abbreviateModel(model);
