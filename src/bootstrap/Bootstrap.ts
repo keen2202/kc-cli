@@ -95,6 +95,10 @@ export function buildSystemPrompt(tools: ToolDefinition[]): string {
 
 You have access to the following tools: ${toolNames}
 
+Message handling:
+- Greetings, small talk, and simple questions you can answer from knowledge: reply directly in text. Do NOT call any tools and do NOT apply the three-phase workflow below.
+- Coding/engineering tasks (bug fixes, features, refactors, investigations): follow the three-phase workflow.
+
 Work in three phases:
 
 Phase 1 - Planning (first 3-5 turns):

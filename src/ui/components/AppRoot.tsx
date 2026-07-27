@@ -149,12 +149,20 @@ interface AppOpenCodeProps {
 
 /** Normalize an Ink (input, key) pair into a KeypressEvent for the focus stack. */
 function toKeypressEvent(input: string, key: any): KeypressEvent {
+  // Some Windows terminals deliver Shift+Tab as a raw ESC[Z sequence without
+  // ink marking key.tab/key.shift — normalize it explicitly so the mode cycle
+  // always fires.
+  if (input === '\u001B[Z' || input === '[Z') {
+    return { name: 'tab', ctrl: false, meta: false, shift: true, isPrintable: false };
+  }
   let name: string;
   let printable = false;
   if (key.upArrow) name = 'up';
   else if (key.downArrow) name = 'down';
   else if (key.leftArrow) name = 'left';
   else if (key.rightArrow) name = 'right';
+  else if (key.pageUp) name = 'pageup';
+  else if (key.pageDown) name = 'pagedown';
   else if (key.escape) name = 'escape';
   else if (key.return) name = 'return';
   else if (key.tab) name = 'tab';
@@ -215,15 +223,20 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
     attachments: Array<{ path: string; name: string }>;
     deleteMode: boolean;
   }>({ attachments: [], deleteMode: false });
-  const [agentMode, setAgentMode] = useState<'build' | 'plan'>('build');
   const [sidebarHidden, setSidebarHidden] = useState(false);
+  // Ctrl+O toggles expanded tool output in the chat transcript.
+  const [toolOutputExpanded, setToolOutputExpanded] = useState(false);
 
-  // Execution automation level, orthogonal to agentMode (build/plan): the
-  // "work mode" (build/plan) is what the agent does; executionMode is how much
-  // it does autonomously. A ref mirrors it so the stable permission-handler
-  // closure always reads the latest value.
-  const [executionMode, setExecutionMode] = useState<'interactive' | 'auto' | 'goal'>('interactive');
+  // Unified UI mode: what the agent does (build/plan) and how autonomously it
+  // runs (auto/goal) live on one four-state dial cycled by Shift+Tab/Ctrl+G.
+  // Refs mirror the latest values so stable closures (permission handler,
+  // keybinding dispatch) always read the current mode.
+  const [uiMode, setUiMode] = useState<'build' | 'plan' | 'auto' | 'goal'>('build');
+  const uiModeRef = useRef<'build' | 'plan' | 'auto' | 'goal'>('build');
   const executionModeRef = useRef<'interactive' | 'auto' | 'goal'>('interactive');
+  // Execution automation level derived from uiMode (build/plan are interactive).
+  const executionMode: 'interactive' | 'auto' | 'goal' =
+    uiMode === 'auto' ? 'auto' : uiMode === 'goal' ? 'goal' : 'interactive';
   const [goalState, setGoalState] = useState<{
     goal: string;
     iteration: number;
@@ -308,13 +321,17 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
     });
   }, [addMessage]);
 
-  // Switch the execution automation level. Auto/Goal route tool authorization
-  // through the classifier (permissionMode 'auto') and auto-approve in the UI;
-  // Interactive restores the default ask-based confirmation flow.
-  const applyExecutionMode = useCallback((next: 'interactive' | 'auto' | 'goal') => {
-    executionModeRef.current = next;
-    setExecutionMode(next);
-    updateState({ permissionMode: next === 'interactive' ? 'default' : 'auto' });
+  // Switch the unified UI mode. Auto/Goal route tool authorization through the
+  // classifier (permissionMode 'auto') and auto-approve in the UI; Build
+  // restores the ask-based confirmation flow; Plan forces the read-only
+  // permission mode.
+  const applyUiMode = useCallback((next: 'build' | 'plan' | 'auto' | 'goal') => {
+    uiModeRef.current = next;
+    setUiMode(next);
+    executionModeRef.current = next === 'auto' ? 'auto' : next === 'goal' ? 'goal' : 'interactive';
+    updateState({
+      permissionMode: next === 'build' ? 'default' : next === 'plan' ? 'plan' : 'auto',
+    });
   }, []);
 
   // Lazily create the ~/.kc-cli/sessions directory the first time we touch it.
@@ -537,18 +554,18 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
       }
 
       case '/auto':
-        applyExecutionMode('auto');
+        applyUiMode('auto');
         addSystemMsg('Execution mode: auto — tools run without confirmation.');
         break;
 
       case '/interactive':
-        applyExecutionMode('interactive');
+        applyUiMode('build');
         addSystemMsg('Execution mode: interactive — you confirm each operation.');
         break;
 
       case '/goal': {
         const goal = parts.slice(1).join(' ').trim();
-        applyExecutionMode('goal');
+        applyUiMode('goal');
         if (goal) {
           void runGoal(goal);
         } else {
@@ -625,7 +642,7 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
       default:
         addSystemMsg(`Unknown command: ${cmd}. Type /help to see the list of available commands.`);
     }
-  }, [queryEngine, addSystemMsg, setMessages, keybindingManager, applyExecutionMode, runGoal, model, sessionManager, ensureSessionInit]);
+  }, [queryEngine, addSystemMsg, setMessages, keybindingManager, applyUiMode, runGoal, model, sessionManager, ensureSessionInit]);
 
   const submitMessage = useCallback(async (text: string) => {
     // Record for ↑/↓ history recall.
@@ -753,18 +770,21 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
       case 'quit':
       case 'exit': requestExit(); return true;
       case 'toggleSidebar': setSidebarHidden((h) => !h); return true;
-      case 'toggleAgentMode': setAgentMode((prev) => (prev === 'build' ? 'plan' : 'build')); return true;
+      case 'toggleAgentMode': applyUiMode(uiModeRef.current === 'plan' ? 'build' : 'plan'); return true;
+      case 'toggleToolDetail': setToolOutputExpanded((v) => !v); return true;
       case 'cycleExecutionMode': {
-        const order = ['interactive', 'auto', 'goal'] as const;
-        const idx = order.indexOf(executionModeRef.current);
+        const order = ['build', 'plan', 'auto', 'goal'] as const;
+        const idx = order.indexOf(uiModeRef.current);
         const next = order[(idx + 1) % order.length]!;
-        applyExecutionMode(next);
+        applyUiMode(next);
         addSystemMsg(
           next === 'goal'
-            ? 'Execution mode: goal — type your goal and press Enter.'
+            ? 'Mode: goal — type your goal and press Enter.'
             : next === 'auto'
-              ? 'Execution mode: auto — tools run without confirmation.'
-              : 'Execution mode: interactive — you confirm each operation.',
+              ? 'Mode: auto — tools run without confirmation.'
+              : next === 'plan'
+                ? 'Mode: plan — read-only planning; edits are blocked.'
+                : 'Mode: build — you confirm each operation.',
         );
         return true;
       }
@@ -777,7 +797,7 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
       default:
         return false;
     }
-  }, [startNewSession, setMessages, inputState.text, openFilePicker, requestExit, addSystemMsg, keybindingManager, historyPrev, historyNext, applyExecutionMode, goalState]);
+  }, [startNewSession, setMessages, inputState.text, openFilePicker, requestExit, addSystemMsg, keybindingManager, historyPrev, historyNext, applyUiMode, goalState]);
 
   // ── Editor base layer ──
   // Handles everything a key can do when no overlay/mode owns the keyboard:
@@ -797,13 +817,21 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
       km.setContext('input');
     }
 
-    // ↑/↓ scroll the chat and recall input history (both effects fired
-    // historically via parallel useInput handlers; preserved on one path).
+    // ↑/↓ recall input history only. Chat scrolling lives on ←/→ (empty
+    // input) and PgUp/PgDn, so one key never fires two unrelated actions.
     if (!event.ctrl && !event.meta && (event.name === 'up' || event.name === 'down')) {
-      if (event.name === 'up') chatScrollRef.current?.scrollUp();
-      else chatScrollRef.current?.scrollDown();
       const command = keybindingManager.resolve(event);
       if (command) dispatchCommand(command);
+      return true;
+    }
+
+    // PgUp/PgDn page through the chat history at any time.
+    if (event.name === 'pageup') {
+      chatScrollRef.current?.scrollPageUp();
+      return true;
+    }
+    if (event.name === 'pagedown') {
+      chatScrollRef.current?.scrollPageDown();
       return true;
     }
 
@@ -874,11 +902,21 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
     }
 
     if (event.name === 'left') {
+      // With text in the editor ←/→ move the cursor; on an empty input they
+      // scroll the chat history line by line.
+      if (inputState.text.length === 0) {
+        chatScrollRef.current?.scrollLineUp();
+        return true;
+      }
       setInputState((prev) => moveCursorLeft(prev));
       return true;
     }
 
     if (event.name === 'right') {
+      if (inputState.text.length === 0) {
+        chatScrollRef.current?.scrollLineDown();
+        return true;
+      }
       setInputState((prev) => moveCursorRight(prev));
       return true;
     }
@@ -1041,7 +1079,7 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
       {permissionRequest && <FocusLayerMount layer={permissionLayer} />}
       <Layout
         sidebarHidden={sidebarHidden}
-        headerBar={<HeaderBar provider={provider} model={model} agentMode={agentMode} executionMode={executionMode} />}
+        headerBar={<HeaderBar provider={provider} model={model} uiMode={uiMode} />}
         errorBar={
           hasError ? <ErrorBar errors={activeErrors} onDismiss={dismissError} /> : null
         }
@@ -1051,6 +1089,7 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
             messages={messages}
             thinkingChains={thinkingChains}
             scrollRef={chatScrollRef}
+            toolOutputExpanded={toolOutputExpanded}
           />
         }
         editor={

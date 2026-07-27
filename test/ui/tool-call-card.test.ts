@@ -5,6 +5,7 @@
  * - renderToolCallCard for running/completed/failed statuses
  * - Elapsed time display
  * - Error output truncation
+ * - Collapsed preview / expanded output (Ctrl+O)
  * - renderToolCallCompact
  * - Edge cases (missing times, long output)
  */
@@ -110,18 +111,66 @@ describe('ToolCallCard — renderToolCallCard', () => {
     expect(result).not.toContain('...');
   });
 
-  it('does not show output for completed tools', () => {
+  it('shows a collapsed two-line preview for completed tool output', () => {
     const tc: ToolCallData = {
       toolName: 'Tool',
       status: 'completed',
-      output: 'some output',
+      output: 'line1\nline2\nline3\nline4',
       startTime: 1000,
       endTime: 2000,
     };
     const result = renderToolCallCard(tc);
-    // Only failed tools show output in the card
     expect(result).toContain('Tool');
-    expect(result).not.toContain('some output');
+    expect(result).toContain('line1');
+    expect(result).toContain('line2');
+    expect(result).not.toContain('line3');
+    expect(result).toContain('4 lines');
+    expect(result).toContain('Ctrl+O to expand');
+  });
+
+  it('omits the expand hint when output fits the preview', () => {
+    const tc: ToolCallData = {
+      toolName: 'Tool',
+      status: 'completed',
+      output: 'only line',
+    };
+    const result = renderToolCallCard(tc);
+    expect(result).toContain('only line');
+    expect(result).not.toContain('Ctrl+O to expand');
+  });
+
+  it('shows full output when expanded', () => {
+    const tc: ToolCallData = {
+      toolName: 'Tool',
+      status: 'completed',
+      output: 'line1\nline2\nline3\nline4',
+    };
+    const result = renderToolCallCard(tc, undefined, { expanded: true });
+    expect(result).toContain('line3');
+    expect(result).toContain('line4');
+    expect(result).not.toContain('Ctrl+O to expand');
+  });
+
+  it('caps expanded output at 200 lines', () => {
+    const output = Array.from({ length: 250 }, (_, i) => `row-${i}`).join('\n');
+    const tc: ToolCallData = { toolName: 'Tool', status: 'completed', output };
+    const result = renderToolCallCard(tc, undefined, { expanded: true });
+    expect(result).toContain('row-199');
+    expect(result).not.toContain('row-200\n');
+    expect(result).toContain('50 more lines truncated');
+  });
+
+  it('shows the input summary on the header line', () => {
+    const tc: ToolCallData = {
+      toolName: 'Read',
+      input: 'src/index.ts',
+      status: 'completed',
+      startTime: 1000,
+      endTime: 2000,
+    };
+    const result = renderToolCallCard(tc);
+    expect(result).toContain('Read');
+    expect(result).toContain('src/index.ts');
   });
 
   it('does not show output for running tools', () => {

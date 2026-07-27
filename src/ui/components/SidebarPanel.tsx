@@ -122,6 +122,10 @@ export function SidebarPanel({ data }: SidebarPanelProps) {
 
   const maxName = Math.max(6, cols - 8);
   const clip = (s: string) => (s.length > maxName ? s.slice(0, maxName - 1) + '…' : s);
+  // Tool names get a tighter budget so the detail summary stays visible; the
+  // row-level wrap="truncate" handles final clipping at the real column width.
+  const maxToolName = Math.max(6, Math.min(12, maxName));
+  const clipTool = (s: string) => (s.length > maxToolName ? s.slice(0, maxToolName - 1) + '…' : s);
 
   return (
     <Box ref={rootRef} height="100%" flexDirection="column" borderStyle="single" paddingLeft={1} paddingRight={1} overflow="hidden">
@@ -131,9 +135,9 @@ export function SidebarPanel({ data }: SidebarPanelProps) {
           // detail summary would otherwise wrap and blow the section budget.
           <Text key={`tool-${i}`} wrap="truncate">
             <Text color={toolStatusColor(tool.status, colors)}>{toolStatusIcon(tool.status)} </Text>
-            <Text>{clip(tool.name)}</Text>
-            {tool.duration ? <Text dimColor> {tool.duration}</Text> : null}
+            <Text>{clipTool(tool.name)}</Text>
             {tool.detail ? <Text dimColor> {tool.detail}</Text> : null}
+            {tool.duration ? <Text dimColor> ({tool.duration})</Text> : null}
           </Text>
         ))}
       </Section>

@@ -8,9 +8,11 @@ interface ChatPanelProps {
   thinkingChains?: Map<string, ThinkingChain>;
   /** Scroll handle wired to the focus stack's editor base layer. */
   scrollRef?: React.MutableRefObject<ChatScrollHandle | null>;
+  /** Global tool-output expansion toggle (Ctrl+O). */
+  toolOutputExpanded?: boolean;
 }
 
-export function ChatPanel({ messages, thinkingChains, scrollRef }: ChatPanelProps) {
+export function ChatPanel({ messages, thinkingChains, scrollRef, toolOutputExpanded }: ChatPanelProps) {
   if (messages.length === 0) {
     return (
       <Box padding={1} flexDirection="column">
@@ -20,8 +22,16 @@ export function ChatPanel({ messages, thinkingChains, scrollRef }: ChatPanelProp
   }
 
   return (
-    <Box padding={1} flexDirection="column">
-      <ChatView messages={messages} thinkingChains={thinkingChains} scrollRef={scrollRef} />
+    // flexGrow fills the Layout slot's row axis; without it this column box
+    // hugs its content width and ChatView's self-measure collapses to a few
+    // columns (feedback loop: narrow measure → narrow wrap → narrow measure).
+    <Box padding={1} flexDirection="column" flexGrow={1}>
+      <ChatView
+        messages={messages}
+        thinkingChains={thinkingChains}
+        scrollRef={scrollRef}
+        toolOutputExpanded={toolOutputExpanded}
+      />
     </Box>
   );
 }

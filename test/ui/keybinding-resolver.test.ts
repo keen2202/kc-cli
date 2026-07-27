@@ -86,9 +86,9 @@ describe('KeybindingManager — resolve', () => {
 
   it('no longer advertises the removed modelSelector/sessionSwitcher bindings', () => {
     const km = createDefaultKeybindings();
-    // ctrl+o and ctrl+s previously mapped to model selector / session switcher;
-    // those UIs do not exist, so the bindings must be gone (表里如一).
-    expect(km.resolve(ev('o', { ctrl: true }))).toBeNull();
+    // ctrl+o now toggles tool output detail in the chat transcript; ctrl+s
+    // (session switcher) stays gone — no backing UI exists (表里如一).
+    expect(km.resolve(ev('o', { ctrl: true }))).toBe('toggleToolDetail');
     expect(km.resolve(ev('s', { ctrl: true }))).toBeNull();
     const commands = km.getAll().map((b) => b.command);
     expect(commands).not.toContain('modelSelector');

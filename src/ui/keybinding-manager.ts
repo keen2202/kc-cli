@@ -97,10 +97,11 @@ export function createDefaultKeybindings(): KeybindingManager {
     { key: 'ctrl+c', command: 'quit', when: 'idle', description: 'Quit kc-cli' },
     { key: 'ctrl+d', command: 'exit', when: 'idle', description: 'Exit (empty input)' },
     { key: 'ctrl+t', command: 'toggleSidebar', description: 'Toggle sidebar' },
-    { key: 'ctrl+g', command: 'cycleExecutionMode', description: 'Cycle execution mode (interactive/auto/goal)' },
+    { key: 'ctrl+o', command: 'toggleToolDetail', description: 'Expand/collapse tool output' },
+    { key: 'ctrl+g', command: 'cycleExecutionMode', description: 'Cycle mode (build/plan/auto/goal)' },
     // shift+tab (ESC[Z) mirrors ctrl+g; ctrl+g stays as the fallback for
     // terminals that do not report shifted named keys.
-    { key: 'shift+tab', command: 'cycleExecutionMode', description: 'Cycle execution mode (interactive/auto/goal)' },
+    { key: 'shift+tab', command: 'cycleExecutionMode', description: 'Cycle mode (build/plan/auto/goal)' },
     // escape→closeOverlay / escape→cancelMode removed: ESC is owned by the
     // FocusStack (the top layer's onEscape), so schema entries for it were
     // dead bindings (F1). toggleThinking (ctrl+shift+t) and autocomplete (tab)

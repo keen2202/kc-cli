@@ -108,6 +108,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
         case 'tool_use_start': {
           const toolCall: ToolCallData = {
             toolName: ev.toolCall.toolName,
+            input: summarizeToolInput(ev.toolCall.input),
             status: 'running' as const,
             startTime: Date.now(),
           };

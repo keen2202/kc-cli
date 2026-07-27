@@ -182,6 +182,11 @@ export class QueryEngine {
   private verificationRetries = 0;
   private typeCheckRetries = 0;
 
+  // Conversational-query exemption: greetings/small talk skip the SWE-bench
+  // machinery (phase steers, anti-abandonment, patch guarantee) so a plain
+  // answer with zero tool calls completes normally. Set per submitMessage().
+  private activeQueryConversational = false;
+
   // T7 (M2): last pre-exit verification gate outcomes, captured so the
   // completion report reflects the final type-check / test result at exit.
   private lastTypeCheckGate: VerificationGateReport | null = null;
@@ -366,6 +371,10 @@ export class QueryEngine {
     // new loop. Conversation history is preserved.
     this.resetForNewQuery();
 
+    // Classify once per query: conversational messages (greetings, small talk,
+    // simple Q&A) are exempt from the SWE-bench task machinery below.
+    this.activeQueryConversational = isConversationalMessage(userMessage);
+
     // Add user message
     const userMsg: ChatMessage = {
       id: uuidv4(),
@@ -395,6 +404,11 @@ export class QueryEngine {
           const adjusted = Math.min(estimate.suggestedTurns, maxTurnsCeiling);
           logger.query.info(`[QueryEngine] Task complexity: ${estimate.complexity}, adjusting maxTurns ${maxTurns} → ${adjusted}`);
           maxTurns = adjusted;
+        } else if (this.activeQueryConversational && estimate.suggestedTurns < maxTurns) {
+          // Conversational queries converge to the small suggested budget
+          // instead of inheriting the task-sized default.
+          logger.query.info(`[QueryEngine] Conversational query: reducing maxTurns ${maxTurns} → ${estimate.suggestedTurns}`);
+          maxTurns = estimate.suggestedTurns;
         }
       }
 
@@ -570,13 +584,14 @@ export class QueryEngine {
               }
             }
 
-            // Phase 1 reminder (first turn)
-            if (turnCount === 1 && maxTurns > 10) {
+            // Phase 1 reminder (first turn) — not for conversational queries,
+            // which must answer directly without touring the codebase.
+            if (turnCount === 1 && maxTurns > 10 && !this.activeQueryConversational) {
               this.steer(`[Phase 1 - Planning] You are in the planning phase. Focus on reading files and understanding the codebase. Do not make changes yet. Formulate a concrete plan before proceeding to implementation.`);
             }
 
             // Phase 3 reminder (5 turns before budget exhaustion)
-            if (turnCount === maxTurns - 5 && maxTurns > 10) {
+            if (turnCount === maxTurns - 5 && maxTurns > 10 && !this.activeQueryConversational) {
               this.steer(`[Phase 3 - Verification] You are entering the verification phase. Stop making new changes. Run tests to verify your modifications, review all changed files, and fix any remaining issues.`);
             }
 
@@ -608,7 +623,7 @@ export class QueryEngine {
 
             // P1: Anti-abandonment — inject encouragement when agent tries to exit too early
             const minTurns = this.config.minTurns || 0;
-            if (minTurns > 0 && turnCount < minTurns) {
+            if (minTurns > 0 && turnCount < minTurns && !this.activeQueryConversational) {
               // Check if agent is about to exit (no tool calls in last message)
               const lastMsg = this.conversation.getLastMessage();
               if (lastMsg && lastMsg.role === 'assistant' && (!(lastMsg as any).toolCalls || (lastMsg as any).toolCalls.length === 0)) {
@@ -978,8 +993,8 @@ export class QueryEngine {
   private async decidingPhase(turnCount: number = 0, minTurns: number = 0): Promise<boolean> {
     const lastMsg = this.conversation.getLastMessage();
     if (!lastMsg || lastMsg.role !== 'assistant') {
-      // P1: If below minTurns, force continuation
-      if (turnCount < minTurns) {
+      // P1: If below minTurns, force continuation (task queries only)
+      if (turnCount < minTurns && !this.activeQueryConversational) {
         return true; // Force agent to continue
       }
       return false;
@@ -987,6 +1002,12 @@ export class QueryEngine {
 
     const assistantMsg = lastMsg as AssistantMessage;
     const hasToolCalls = !!(assistantMsg.toolCalls && assistantMsg.toolCalls.length > 0);
+
+    // Conversational queries complete as soon as the model answers without
+    // tools: no anti-abandonment, no zero-patch steer, no exit verification.
+    if (this.activeQueryConversational && !hasToolCalls) {
+      return false;
+    }
 
     // P1: Anti-abandonment — if below minTurns and agent has no tool calls, force continuation
     if (!hasToolCalls && turnCount < minTurns) {

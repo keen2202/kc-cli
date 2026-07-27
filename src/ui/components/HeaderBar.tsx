@@ -7,22 +7,26 @@ import { abbreviateModel, truncate } from '../layout';
 interface HeaderBarProps {
   provider: string;
   model: string;
-  agentMode?: 'build' | 'plan';
-  executionMode?: 'interactive' | 'auto' | 'goal';
+  /** Unified UI mode (Shift+Tab cycles build → plan → auto → goal). */
+  uiMode?: 'build' | 'plan' | 'auto' | 'goal';
 }
 
-export function HeaderBar({ provider, model, agentMode = 'build', executionMode = 'interactive' }: HeaderBarProps) {
+const MODE_LABELS: Record<'build' | 'plan' | 'auto' | 'goal', string> = {
+  build: 'Build',
+  plan: 'Plan',
+  auto: 'Auto',
+  goal: 'Goal',
+};
+
+export function HeaderBar({ provider, model, uiMode = 'build' }: HeaderBarProps) {
   const { tokens } = useTheme();
   const { width } = useTerminalSize();
 
   // The header is a fixed single row (HEADER_HEIGHT=1); on narrow terminals we
   // abbreviate the model and clip the plain-text projection so it never wraps.
   const modelLabel = abbreviateModel(model);
-  const modeLabel = agentMode === 'build' ? 'Build' : 'Plan';
-  // Only surface the automation level when it departs from the interactive
-  // default, to keep the single-row header lean.
-  const autoLabel = executionMode === 'auto' ? ' · Auto' : executionMode === 'goal' ? ' · Goal' : '';
-  const plain = `kc v3.2 · ${provider}/${modelLabel} · Mode: ${modeLabel}${autoLabel}`;
+  const modeLabel = MODE_LABELS[uiMode];
+  const plain = `kc v3.2 · ${provider}/${modelLabel} · Mode: ${modeLabel}`;
   // paddingLeft/Right consume 2 columns.
   const avail = Math.max(0, width - 2);
 
@@ -31,7 +35,7 @@ export function HeaderBar({ provider, model, agentMode = 'build', executionMode 
       <Box flexDirection="row" paddingLeft={1} paddingRight={1}>
         <Text>
           {tokens['header.brand']('kc')} v3.2 · {tokens['header.model'](`${provider}/${modelLabel}`)}
-          {' '}· Mode: {modeLabel}{autoLabel}
+          {' '}· Mode: {modeLabel}
         </Text>
       </Box>
     );
