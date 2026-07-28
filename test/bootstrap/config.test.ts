@@ -130,6 +130,18 @@ describe('ConfigSchema', () => {
       expect(config.permissionMode).toBe(mode);
     }
   });
+
+  it('should keep memory.failureBridging instead of stripping it (T8)', async () => {
+    const { ConfigSchema } = await import('../../src/bootstrap/config');
+
+    // Default off
+    expect(ConfigSchema.parse({}).memory.failureBridging).toBe(false);
+
+    // A user settings.json value must survive zod parsing (unknown keys are
+    // stripped, so the field has to exist in the schema).
+    const config = ConfigSchema.parse({ memory: { failureBridging: true } });
+    expect(config.memory.failureBridging).toBe(true);
+  });
 });
 
 // ── 2. loadConfigFile ───────────────────────────────────────────────────
@@ -353,6 +365,19 @@ describe('loadEnvConfig', () => {
 
     expect(config.memory!.enabled).toBe(true);
     expect(config.memory!.autoExtract).toBe(false);
+  });
+
+  it('should read KC_MEMORY_FAILURE_BRIDGING env var (T8)', async () => {
+    const { loadEnvConfig } = await import('../../src/bootstrap/config');
+
+    process.env.KC_MEMORY_FAILURE_BRIDGING = 'true';
+    expect(loadEnvConfig().memory!.failureBridging).toBe(true);
+
+    process.env.KC_MEMORY_FAILURE_BRIDGING = '1';
+    expect(loadEnvConfig().memory!.failureBridging).toBe(true);
+
+    process.env.KC_MEMORY_FAILURE_BRIDGING = 'false';
+    expect(loadEnvConfig().memory!.failureBridging).toBe(false);
   });
 });
 

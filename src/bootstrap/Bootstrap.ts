@@ -10,6 +10,7 @@
  */
 
 import * as path from 'path';
+import { createHash } from 'crypto';
 import chalk from 'chalk';
 
 import { profileCheckpoint } from './profiler';
@@ -29,6 +30,12 @@ import {
   type MCPServerConfig,
 } from '../mcp';
 import { getGlobalRegistry } from '../agp/registry';
+import { getTraceManager } from '../agp/trace-manager';
+import { createSurfacePromptRecords } from '../api/prompts/instruction-surfaces';
+import { registerFailureBridgingHook } from '../hooks/postTurnHooks';
+import { createMemoryIntegration } from '../memory/integration';
+import { FileMemoryService } from '../memory/FileMemoryService';
+import { scanMemoryFiles } from '../memory/scanner';
 import { detectProjectLanguage } from '../utils/project-detect';
 import { isInsideGitRepo } from '../utils/git';
 import { withTimeout } from '../utils/async-helpers';
@@ -387,6 +394,14 @@ export class Bootstrap {
         if (verbose && loaded.loaded > 0) {
           console.log(chalk.gray(`  AGP: ${loaded.loaded} resources restored from disk`));
         }
+        // harness-evolution T1: register evolvable instruction surfaces as AGP
+        // Prompt resources so the registry can list/evolve them (idempotent —
+        // records already restored from disk are left untouched).
+        for (const record of createSurfacePromptRecords()) {
+          if (!agpRegistry.get('Prompt', record.entity.name)) {
+            agpRegistry.register('Prompt', record);
+          }
+        }
       } catch (_err) {
         if (verbose) {
           console.warn(
@@ -504,6 +519,36 @@ export class Bootstrap {
       tools,
     );
     profileCheckpoint('engine_created');
+
+    // ── Phase 4b: harness-evolution T8 — failure-signature → memory bridging ──
+    // Registered only when the toggle is on so the disabled path stays
+    // zero-cost (no evidence bundle is built per turn). The hook fires from
+    // QueryEngine's post-turn dispatch and persists bridged feedback
+    // memories under ~/.kc-cli/memory/<projectHash>/.
+    if (config.memory?.enabled && config.memory?.failureBridging) {
+      const projectHash = createHash('sha256')
+        .update(path.resolve(cwd))
+        .digest('hex')
+        .slice(0, 16);
+      const memoryService = new FileMemoryService();
+      const bridgeIntegration = createMemoryIntegration({
+        config: config.memory,
+        projectHash,
+        getMemoryManifest: () => scanMemoryFiles(projectHash),
+        getMemoryContent: async (fileName) => {
+          const entry = await memoryService.getMemory(projectHash, fileName);
+          return entry?.content ?? null;
+        },
+        saveMemory: async (memory) => {
+          await memoryService.initialize();
+          await memoryService.addMemory(projectHash, memory);
+        },
+      });
+      registerFailureBridgingHook(bridgeIntegration, () =>
+        getTraceManager().buildEvidenceBundle()
+      );
+    }
+    profileCheckpoint('failure_bridging_wired');
 
     return {
       queryEngine,

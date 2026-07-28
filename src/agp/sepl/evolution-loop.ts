@@ -18,12 +18,15 @@
 import type { TraceManager } from '../trace-manager';
 import type { ServerInterface } from '../server-interface';
 import type { VersionManager } from '../version-manager';
+import type { AuditLog } from '../audit-log';
 import type {
   SEPLConfig,
   EvolutionCycleState,
   EvolutionCycleResult,
   EvolvableState,
   TraceSpace,
+  EvaluatorBackend,
+  SplitResult,
 } from './protocol';
 import { DEFAULT_SEPL_CONFIG, createEmptyEvolvableState, buildEvolvableState } from './protocol';
 import { ReflectOperator, buildTraceSpace } from './reflect';
@@ -39,6 +42,8 @@ export interface EvolutionLoopDeps {
   traceManager: TraceManager;
   serverInterface: ServerInterface;
   versionManager: VersionManager;
+  /** T7: audit log for rejected-candidate lineage (optional). */
+  auditLog?: AuditLog;
 }
 
 export class EvolutionLoop {
@@ -69,9 +74,27 @@ export class EvolutionLoop {
         deps.serverInterface,
         deps.versionManager,
         this.config.autoRollback,
-        this.config.acceptanceGate // harness-evolution T4 (disabled by default)
+        this.config.acceptanceGate, // harness-evolution T4 (disabled by default)
+        deps.auditLog // harness-evolution T7 (rejected-candidate lineage)
       ),
     };
+  }
+
+  /**
+   * Inject or clear the real evaluator backend on the loop's Evaluate
+   * operator (harness-evolution T5). Without a backend the heuristic
+   * evaluation path is used.
+   */
+  setEvaluatorBackend(backend: EvaluatorBackend | null): void {
+    this.operators.evaluate.setEvaluatorBackend(backend);
+  }
+
+  /**
+   * Supply baseline split results so backend-driven evaluations feed the
+   * T4 acceptance gate.
+   */
+  setBaselineSplits(splits: SplitResult[] | null): void {
+    this.operators.evaluate.setBaselineSplits(splits);
   }
 
   /**
@@ -214,6 +237,14 @@ export class EvolutionLoop {
     cycle.evolvableState = evaluateResult.state;
 
     // Step 5: Commit — accept or rollback
+    // T4: hand the gate decision from the backend-driven evaluation to the
+    // commit operator so the gate verdict overrides the heuristic accept.
+    this.operators.commit.setGateDecision(this.operators.evaluate.getLastGateDecision());
+    // T7: stamp rejected-candidate audit entries with the cycle context.
+    this.operators.commit.setAuditContext({
+      sessionId: sessionId ?? 'unknown',
+      iteration: cycle.iteration,
+    });
     const commitResult = await this.withTimeout(
       this.operators.commit.execute(cycle.evolvableState, evaluateResult.output),
       this.config.operatorTimeoutMs

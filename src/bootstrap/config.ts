@@ -76,6 +76,8 @@ export const ConfigSchema = z.object({
     semanticDedupThreshold: z.number().min(0).max(1).default(0.85),
     llmTriggerOnFeedbackSignal: z.boolean().default(true),
     maxExtractionCostUsdPerSession: z.number().min(0).optional(),
+    // ── Failure signature → memory bridging (harness-evolution T8) — off by default ──
+    failureBridging: z.boolean().default(false),
   }).default({}),
 
   // Sandbox Configuration
@@ -535,6 +537,10 @@ export function loadEnvConfig(): Partial<Config> {
     } else {
       logger.services.warn(`Invalid KC_MEMORY_MAX_EXTRACTION_COST_USD value: "${process.env.KC_MEMORY_MAX_EXTRACTION_COST_USD}" -- discarding`);
     }
+  }
+  if (process.env.KC_MEMORY_FAILURE_BRIDGING) {
+    mem.failureBridging =
+      process.env.KC_MEMORY_FAILURE_BRIDGING === 'true' || process.env.KC_MEMORY_FAILURE_BRIDGING === '1';
   }
 
   // Prompt instruction surfaces (harness-evolution T1)

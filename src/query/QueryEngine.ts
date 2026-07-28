@@ -14,6 +14,7 @@ import { FileOperationJournal } from '../state/file-operation-journal';
 import type { AgentEvent } from '../state/types';
 import { hasPermissionsToUseTool, buildPermissionContext } from '../permissions/engine';
 import { getState } from '../bootstrap/state';
+import { executePostTurnHooks } from '../hooks/postTurnHooks';
 import { createAPIClient, LLMProvider } from '../api';
 import type { BaseApiClient, LLMStreamEvent as APIStreamEvent, LLMRequestConfig } from '../api';
 import { UserProfileService } from '../services/userProfile';
@@ -804,6 +805,15 @@ export class QueryEngine {
                 // Restore state machine back to completed after evolution
                 this.stateMachine.transitionTo('completed');
               }
+              // Dispatch post-turn hooks (fire-and-forget): plugin postTurn
+              // hooks and the T8 failure-signature → memory bridging hook run
+              // off this path; hook errors never affect query completion.
+              void executePostTurnHooks({
+                messages: this.conversation.getMessages(),
+                systemPrompt: this.config.systemPrompt ?? '',
+                state: this.stateStore.get(),
+                querySource: 'query-engine',
+              });
               yield this.createCompleteEvent(turnCount);
             }
             break;

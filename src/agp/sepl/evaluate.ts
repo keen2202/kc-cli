@@ -73,6 +73,9 @@ export class EvaluateOperator implements SEPLOperator<ModificationSpace, Evaluat
     input: ModificationSpace
   ): Promise<SEPLOutput<EvaluationSpace>> {
     const startTime = Date.now();
+    // A gate decision only ever describes the current evaluation — clear any
+    // verdict left over from a previous cycle (heuristic runs produce none).
+    this.lastGateDecision = null;
 
     try {
       const results: EvaluationResult[] = [];

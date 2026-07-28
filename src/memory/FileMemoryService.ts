@@ -70,6 +70,10 @@ export class FileMemoryService implements MemoryService {
       type: memory.header.type,
       createdAt: memory.header.createdAt || Date.now(),
       updatedAt: memory.header.updatedAt || Date.now(),
+      confidence: memory.header.confidence,
+      // T8: preserve the failure signature so scanner/manifest dedup keeps
+      // matching bridged memories across sessions.
+      signature: memory.header.signature,
     };
 
     const content = composeMemoryFile(header, memory.content);
@@ -141,6 +145,9 @@ export class FileMemoryService implements MemoryService {
           type: memoryType,
           createdAt: header.createdAt,
           updatedAt: header.updatedAt,
+          confidence: header.confidence,
+          // T8: surface the failure signature to bridging/dedup consumers.
+          signature: header.signature,
         },
         content: body,
         filePath,
@@ -438,6 +445,9 @@ export class FileMemoryService implements MemoryService {
             type: memoryType,
             createdAt: header.createdAt,
             updatedAt: header.updatedAt,
+            confidence: header.confidence,
+            // T8: surface the failure signature to bridging/dedup consumers.
+            signature: header.signature,
           },
           content: body,
           filePath,
