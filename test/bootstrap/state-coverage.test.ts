@@ -260,6 +260,16 @@ describe('Global State Management', () => {
       const state = initializeState();
       expect(state.projectRoot).toBeNull();
     });
+
+    it('should terminate (not hang) at a Windows drive root without markers', () => {
+      // Regression: the previous `current !== '/'` guard never matched a
+      // Windows drive root (path.dirname('D:\\') === 'D:\\'), so with no
+      // markers present the walk-up spun forever at bootstrap. The portable
+      // `path.dirname(current) === current` terminator must stop cleanly.
+      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('D:\\nomarkers\\deep');
+      const state = initializeState();
+      expect(state.projectRoot).toBeNull();
+    }, 5000);
   });
 
   // ── 10. generateSessionId (exercised through initializeState) ─────────

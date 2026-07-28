@@ -119,7 +119,12 @@ function findProjectRoot(dir: string): string | null {
   ];
 
   let current = dir;
-  while (current !== '/' && current !== '.') {
+  // Walk up until a marker is found or we reach the filesystem root.
+  // `path.dirname(root) === root` on every platform (POSIX '/' and Windows
+  // drive roots like 'd:\\'), which is the portable loop terminator. The
+  // previous `current !== '/'` guard never matched a Windows drive root and
+  // could spin forever at the top of the tree (bootstrap hang).
+  while (true) {
     for (const marker of markers) {
       try {
         const filePath = path.join(current, marker);
@@ -130,7 +135,11 @@ function findProjectRoot(dir: string): string | null {
         // File doesn't exist, continue
       }
     }
-    current = path.dirname(current);
+    const parent = path.dirname(current);
+    if (parent === current) {
+      break; // reached filesystem root without finding a marker
+    }
+    current = parent;
   }
 
   return null;

@@ -461,8 +461,10 @@ export class Bootstrap {
 
     const systemPrompt = buildSystemPrompt(tools);
 
-    const autoExtend = this.options.autoExtendTurns ?? config.autoExtendTurns ?? false;
-    const maxTurnsCeiling = config.maxTurnsCeiling ?? 100;
+    // Long-task stability defaults flow from the config schema (autoExtend ON,
+    // ceiling 400; ceiling <= 0 = unbounded, handled by the engine).
+    const autoExtend = this.options.autoExtendTurns ?? config.autoExtendTurns ?? true;
+    const maxTurnsCeiling = config.maxTurnsCeiling ?? 400;
 
     // T1 (H1): resolve the non-interactive 'ask' fail-safe policy. Explicit
     // --dangerously-skip-permissions forces 'proceed'; otherwise honor config
@@ -480,6 +482,8 @@ export class Bootstrap {
         systemPrompt,
         autoExtendTurns: autoExtend,
         maxTurnsCeiling,
+        minTurns: config.minTurns,
+        autoCommitInterval: config.autoCommitInterval,
         sandboxFailIfNoSandbox: config.sandbox?.failIfNoSandbox,
         noninteractiveAskPolicy,
         // Flow the configured memory section (incl. llmExtraction toggle)

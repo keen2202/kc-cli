@@ -186,12 +186,13 @@ export function autoStageFile(filePath: string, cwd: string): void {
  * T4 (H4): the FIRST failure is surfaced via a debounced logger.warn instead of
  * being silently swallowed.
  */
-export async function autoCommitAll(cwd: string): Promise<boolean> {
+export async function autoCommitAll(cwd: string, message?: string): Promise<boolean> {
+  const commitMessage = (message ?? 'kc-cli auto-commit: turn limit reached').replace(/"/g, "'");
   try {
     await spawnGit('add -A', cwd, 5000);
     const { stdout: diffOutput } = await spawnGit('diff --cached --name-only', cwd, 5000);
     if (diffOutput.trim()) {
-      await spawnGit('commit -m "kc-cli auto-commit: turn limit reached"', cwd, 10000);
+      await spawnGit('commit -m "' + commitMessage + '"', cwd, 10000);
       return true;
     }
     return false;

@@ -270,6 +270,36 @@ describe('loadEnvConfig', () => {
     expect(loadEnvConfig().verbose).toBe(false);
   });
 
+  it('should read agent turn env vars (KC_MIN_TURNS, KC_AUTO_COMMIT_INTERVAL)', async () => {
+    process.env.KC_MIN_TURNS = '8';
+    process.env.KC_AUTO_COMMIT_INTERVAL = '5';
+    const { loadEnvConfig } = await import('../../src/bootstrap/config');
+    const config = loadEnvConfig();
+    expect(config.minTurns).toBe(8);
+    expect(config.autoCommitInterval).toBe(5);
+  });
+
+  it('should reject invalid KC_MIN_TURNS / KC_AUTO_COMMIT_INTERVAL (non-numeric falls back to default)', async () => {
+    process.env.KC_MIN_TURNS = 'not-a-number';
+    process.env.KC_AUTO_COMMIT_INTERVAL = 'nope';
+    const { loadEnvConfig } = await import('../../src/bootstrap/config');
+    const config = loadEnvConfig();
+    // Invalid values are dropped (not written onto the partial env config).
+    expect(config.minTurns).toBeUndefined();
+    expect(config.autoCommitInterval).toBeUndefined();
+  });
+
+  it('should default long-task stability settings in the parsed schema', async () => {
+    const { ConfigSchema } = await import('../../src/bootstrap/config');
+    const parsed = ConfigSchema.parse({});
+    expect(parsed.minTurns).toBe(0);
+    // Long-task stability defaults: periodic auto-commit ON every 10 turns,
+    // auto-extend ON, ceiling 400 (0 = unbounded).
+    expect(parsed.autoCommitInterval).toBe(10);
+    expect(parsed.autoExtendTurns).toBe(true);
+    expect(parsed.maxTurnsCeiling).toBe(400);
+  });
+
   it('should read all sandbox env vars', async () => {
     process.env.KC_SANDBOX_ENABLED = 'true';
     process.env.KC_SANDBOX_BACKEND = 'docker';

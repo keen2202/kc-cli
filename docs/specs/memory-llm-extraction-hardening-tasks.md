@@ -42,13 +42,13 @@ Phase 3 (P2 — 配置/置信度/测试):
   - blockedBy: none
   - blocks: T3
 - **Checklist:**
-  - [ ] 新增 `memory-extraction-guard.ts`：`parseAndValidate(raw): MemoryEntry[]`，zod schema 校验 `name/description/type/content`，`type` ∈ `user|feedback|project|reference`
-  - [ ] 非法条目（缺字段/未知 type/坏 YAML）**丢弃**并记 debug，绝不 throw；返回合法子集
-  - [ ] `redactSecrets(content)`：复用 `RunTool/secrets.ts` 密钥模式 + `permissions/protectedPaths.ts` 路径正则；含密钥→拒绝该条，含路径→占位脱敏
-  - [ ] 复用 `passesQualityCheck`（min length / code-only）+ 条数上限（`maxMemoriesPerType`）+ 单条 ≤ 2KB
-  - [ ] 护栏为**纯函数、无副作用、确定性**（Q1 锚点）
-  - [ ] 新增确定性单测（`test/services/memory-extraction-guard.test.ts`）：合法解析 / 非法丢弃 / 密钥拦截未落盘 / 体量上限（CT1–CT4）
-  - [ ] `npm run typecheck` 通过；`npm test` 通过
+  - [x] 新增 `memory-extraction-guard.ts`：`parseAndValidate(raw): MemoryEntry[]`，zod schema 校验 `name/description/type/content`，`type` ∈ `user|feedback|project|reference`
+  - [x] 非法条目（缺字段/未知 type/坏 YAML）**丢弃**并记 debug，绝不 throw；返回合法子集
+  - [x] `redactSecrets(content)`：复用 `RunTool/secrets.ts` 密钥模式 + `permissions/protectedPaths.ts` 路径正则；含密钥→拒绝该条，含路径→占位脱敏
+  - [x] 复用 `passesQualityCheck`（min length / code-only）+ 条数上限（`maxMemoriesPerType`）+ 单条 ≤ 2KB
+  - [x] 护栏为**纯函数、无副作用、确定性**（Q1 锚点）
+  - [x] 新增确定性单测（`test/services/memory-extraction-guard.test.ts`）：合法解析 / 非法丢弃 / 密钥拦截未落盘 / 体量上限（CT1–CT4）
+  - [x] `npm run typecheck` 通过；`npm test` 通过
 - **Files:**
   - NEW: `src/services/memory-extraction-guard.ts`
   - 关联: `src/tools/RunTool/secrets.ts`、`src/permissions/protectedPaths.ts`、`src/memory/protocol.ts`
@@ -66,12 +66,12 @@ Phase 3 (P2 — 配置/置信度/测试):
   - blockedBy: none
   - blocks: T3
 - **Checklist:**
-  - [ ] 新增 `shouldRunLlmExtraction(context, budget): {run, reason}`：仅反馈信号 / 空闲达 `idleThresholdMinutes` / consolidation 窗口放行；普通轮次不调 LLM
-  - [ ] 接入 `budgetEnforcer`：调用前用 `subAgentTokenLimit`/`costLimitUsd`（`budget.ts:16-19,158-165`）预估校验，超限→跳过并记 reason
-  - [ ] 去抖：同游标窗口 LLM 只提取一次；沿用 mutex（`state.inProgress`）与 trailing run（`pendingContext`）
-  - [ ] 普通轮次仍每 `turnThrottle`（默认 3）跑启发式门控，零 LLM 成本
-  - [ ] 契约单测：反馈信号→调用（CT5）；throttle 未到→不调用（CT6）；预算超限→跳过且 client 未被调用（CT7）
-  - [ ] `npm run typecheck` 通过；`npm test` 通过
+  - [x] 新增 `shouldRunLlmExtraction(context, budget): {run, reason}`：仅反馈信号 / 空闲达 `idleThresholdMinutes` / consolidation 窗口放行；普通轮次不调 LLM
+  - [x] 接入 `budgetEnforcer`：调用前用 `subAgentTokenLimit`/`costLimitUsd`（`budget.ts:16-19,158-165`）预估校验，超限→跳过并记 reason
+  - [x] 去抖：同游标窗口 LLM 只提取一次；沿用 mutex（`state.inProgress`）与 trailing run（`pendingContext`）
+  - [x] 普通轮次仍每 `turnThrottle`（默认 3）跑启发式门控，零 LLM 成本
+  - [x] 契约单测：反馈信号→调用（CT5）；throttle 未到→不调用（CT6）；预算超限→跳过且 client 未被调用（CT7）
+  - [x] `npm run typecheck` 通过；`npm test` 通过
 - **Files:**
   - MODIFY: `src/services/memoryExtraction.ts`（`shouldRunLlmExtraction` + 触发接线）
   - 关联: `src/services/budget.ts`、`src/memory/protocol.ts`（`idleThresholdMinutes`）
@@ -91,14 +91,14 @@ Phase 3 (P2 — 配置/置信度/测试):
   - blockedBy: T1, T2
   - blocks: T4, T5
 - **Checklist:**
-  - [ ] 门控层：保留现有正则 + `passesQualityCheck` + 哈希去重作为快速预筛（便宜、确定）
-  - [ ] 精提取层：T2 放行后用 `buildExtractionPrompt(existingMemories)`（`extractionPrompts.ts` 已就绪）+ 游标窗口新消息，发起隔离轻量 API 调用
-  - [ ] **隔离调用**经 `api/BaseApiClient` 直连，**不走完整 QueryEngine**，不注册 memory/post-turn hook，独立 `AbortController` + 超时（GR5）
-  - [ ] LLM 产出经 **T1 护栏** `parseAndValidate` + `redactSecrets` 后合并；LLM 候选优先、启发式补充
-  - [ ] 保留 `checkIfMainAgentWroteMemories`（主 Agent 已写则跳过）；游标/mutex/trailing 语义不变
-  - [ ] 强化 `extractionPrompts.ts` 输出格式硬约束（严格 frontmatter），配合 T1 校验降低丢弃率
-  - [ ] 契约单测：递归隔离——提取调用不触发自身 hook（调用计数=1，CT9）；LLM 未放行时等价现启发式
-  - [ ] `npm run typecheck` 通过；`npm test` 通过
+  - [x] 门控层：保留现有正则 + `passesQualityCheck` + 哈希去重作为快速预筛（便宜、确定）
+  - [x] 精提取层：T2 放行后用 `buildExtractionPrompt(existingMemories)`（`extractionPrompts.ts` 已就绪）+ 游标窗口新消息，发起隔离轻量 API 调用
+  - [x] **隔离调用**经 `api/BaseApiClient` 直连，**不走完整 QueryEngine**，不注册 memory/post-turn hook，独立 `AbortController` + 超时（GR5）
+  - [x] LLM 产出经 **T1 护栏** `parseAndValidate` + `redactSecrets` 后合并；LLM 候选优先、启发式补充
+  - [x] 保留 `checkIfMainAgentWroteMemories`（主 Agent 已写则跳过）；游标/mutex/trailing 语义不变
+  - [x] 强化 `extractionPrompts.ts` 输出格式硬约束（严格 frontmatter），配合 T1 校验降低丢弃率
+  - [x] 契约单测：递归隔离——提取调用不触发自身 hook（调用计数=1，CT9）；LLM 未放行时等价现启发式
+  - [x] `npm run typecheck` 通过；`npm test` 通过
 - **Files:**
   - MODIFY: `src/services/memoryExtraction.ts`（两级管线）
   - MODIFY: `src/services/extractionPrompts.ts`（输出格式硬约束）
@@ -118,11 +118,11 @@ Phase 3 (P2 — 配置/置信度/测试):
   - blockedBy: T3
   - blocks: none
 - **Checklist:**
-  - [ ] 落盘前将候选与现有 manifest 描述做相似度比对，复用 `relevanceSearch.ts` 打分
-  - [ ] 超过 `semanticDedupThreshold`（默认 0.85）判语义重复 → 跳过或更新既有 `updatedAt`
-  - [ ] 保留 `hashContent` 精确去重为第一道过滤，语义去重为第二道
-  - [ ] 契约单测：语义相似候选（mock 高分）被跳过（CT8）；不相关候选正常入库；阈值可配
-  - [ ] `npm run typecheck` 通过；`npm test` 通过
+  - [x] 落盘前将候选与现有 manifest 描述做相似度比对，复用 `relevanceSearch.ts` 打分
+  - [x] 超过 `semanticDedupThreshold`（默认 0.85）判语义重复 → 跳过或更新既有 `updatedAt`
+  - [x] 保留 `hashContent` 精确去重为第一道过滤，语义去重为第二道
+  - [x] 契约单测：语义相似候选（mock 高分）被跳过（CT8）；不相关候选正常入库；阈值可配
+  - [x] `npm run typecheck` 通过；`npm test` 通过
 - **Files:**
   - MODIFY: `src/services/memoryExtraction.ts`（去重接线）
   - 关联: `src/memory/relevanceSearch.ts`、`src/memory/integration.ts`（`getMemoryManifest`）
@@ -139,12 +139,12 @@ Phase 3 (P2 — 配置/置信度/测试):
   - blockedBy: T3
   - blocks: none
 - **Checklist:**
-  - [ ] LLM 提取包裹错误边界：异常经 `classifyApiError`（`error-classifier.ts:63`）分类后**静默降级**到启发式候选
-  - [ ] 无 API key / 无网络 / 超预算（T2）→ 直接走启发式
-  - [ ] 连续失败达阈值 → **熔断** LLM 层至会话结束
-  - [ ] 失败计数进遥测（T7）
-  - [ ] 契约单测：client 抛限流/超时→回退启发式、主流程不抛错、错误被分类（CT10）；连续失败→熔断（CT11）
-  - [ ] `npm run typecheck` 通过；`npm test` 通过
+  - [x] LLM 提取包裹错误边界：异常经 `classifyApiError`（`error-classifier.ts:63`）分类后**静默降级**到启发式候选
+  - [x] 无 API key / 无网络 / 超预算（T2）→ 直接走启发式
+  - [x] 连续失败达阈值 → **熔断** LLM 层至会话结束
+  - [x] 失败计数进遥测（T7）
+  - [x] 契约单测：client 抛限流/超时→回退启发式、主流程不抛错、错误被分类（CT10）；连续失败→熔断（CT11）
+  - [x] `npm run typecheck` 通过；`npm test` 通过
 - **Files:**
   - MODIFY: `src/services/memoryExtraction.ts`（错误边界 + 熔断）
   - 关联: `src/services/error-classifier.ts`（`classifyApiError` 复用）
@@ -163,12 +163,12 @@ Phase 3 (P2 — 配置/置信度/测试):
   - blockedBy: none
   - blocks: none
 - **Checklist:**
-  - [ ] `config.ts` `memory` 节新增：`llmExtraction.enabled`（默认 `false`）、`llmExtractionModel?`、`semanticDedupThreshold`（默认 0.85）、`llmTriggerOnFeedbackSignal`（默认 true）、`maxExtractionCostUsdPerSession?`
-  - [ ] `MemoryConfig`（`memory/protocol.ts:107-138`）+ `DEFAULT_MEMORY_CONFIG` 同步扩展
-  - [ ] env 覆盖（`KC_MEMORY_LLM_EXTRACTION` 等）走 `loadEnvConfig` 校验（`config.ts:256-408`），非法值丢弃（沿用 QUAL-04）
-  - [ ] 置信度规则：LLM + 通过 T1 校验 + 通过 T4 去重 → `high`；否则 `low`
-  - [ ] 契约单测：开关默认关闭 → 无 LLM 调用（CT14）；env 覆盖生效且非法丢弃；置信度分级（CT12）
-  - [ ] `npm run typecheck` 通过；`npm test` 通过
+  - [x] `config.ts` `memory` 节新增：`llmExtraction.enabled`（默认 `false`）、`llmExtractionModel?`、`semanticDedupThreshold`（默认 0.85）、`llmTriggerOnFeedbackSignal`（默认 true）、`maxExtractionCostUsdPerSession?`
+  - [x] `MemoryConfig`（`memory/protocol.ts:107-138`）+ `DEFAULT_MEMORY_CONFIG` 同步扩展
+  - [x] env 覆盖（`KC_MEMORY_LLM_EXTRACTION` 等）走 `loadEnvConfig` 校验（`config.ts:256-408`），非法值丢弃（沿用 QUAL-04）
+  - [x] 置信度规则：LLM + 通过 T1 校验 + 通过 T4 去重 → `high`；否则 `low`
+  - [x] 契约单测：开关默认关闭 → 无 LLM 调用（CT14）；env 覆盖生效且非法丢弃；置信度分级（CT12）
+  - [x] `npm run typecheck` 通过；`npm test` 通过
 - **Files:**
   - MODIFY: `src/bootstrap/config.ts`（`memory.llmExtraction` schema + env）
   - MODIFY: `src/memory/protocol.ts`（`MemoryConfig` + 默认值）
@@ -186,11 +186,11 @@ Phase 3 (P2 — 配置/置信度/测试):
   - blockedBy: T3, T5
   - blocks: none
 - **Checklist:**
-  - [ ] 用可注入 mock LLM client 编写契约测试，覆盖 CT1–CT14，**断言行为契约不断言文案**
-  - [ ] 确定性：固定 mock 输出 → 结果可重复（CT13），CI 稳定
-  - [ ] 扩展 `memory/telemetry.ts`：`llmExtractionCalls / heuristicFallbacks / memoriesFromLlm / redactedSecrets / dedupSkipped / estimatedCostUsd / circuitBroken`
-  - [ ] `memoryExtraction.ts` 暴露依赖注入点（client/budget/now）便于 mock
-  - [ ] `npm run typecheck` 通过；`npm test` 全绿（新增契约套件 + 现有确定性启发式单测无回归）
+  - [x] 用可注入 mock LLM client 编写契约测试，覆盖 CT1–CT14，**断言行为契约不断言文案**
+  - [x] 确定性：固定 mock 输出 → 结果可重复（CT13），CI 稳定
+  - [x] 扩展 `memory/telemetry.ts`：`llmExtractionCalls / heuristicFallbacks / memoriesFromLlm / redactedSecrets / dedupSkipped / estimatedCostUsd / circuitBroken`
+  - [x] `memoryExtraction.ts` 暴露依赖注入点（client/budget/now）便于 mock
+  - [x] `npm run typecheck` 通过；`npm test` 全绿（新增契约套件 + 现有确定性启发式单测无回归）
 - **Files:**
   - NEW: `test/services/memory-llm-extraction.test.ts`（CT1–CT14）
   - MODIFY: `src/memory/telemetry.ts`（遥测字段）
@@ -218,3 +218,5 @@ Phase 3 (P2 — 配置/置信度/测试):
 > 证据：typecheck 干净；契约套件 guard(18)+llm(25)+wiring(4)=**47/47**；大范围套件 993/1053，失败均为 Windows 环境预存在问题（对照还原基线确认与改动无关）。
 
 > 进度维护约定：始终保持至少一个任务 `in_progress`。建议顺序：T1 → T2（护栏与闸门先行）→ T3（解锁链起点）→ T4/T5 并行 → T6（可提前接开关）→ T7 收尾。护栏（T1/T2）未 `done` 前，**不得开启 `llmExtraction.enabled`**。
+>
+> **2026-07-28 状态对账**：checkbox 已按代码现状全部勾选，与 T1–T7 `done` 状态一致。抽样复验：`src/services/memory-extraction-guard.ts`（349 行）、`memoryExtraction.ts` 含 `shouldRunLlmExtraction`/`classifyApiError` 降级/`circuitBroken` 熔断；`config.ts` 含 `llmExtraction` schema + `KC_MEMORY_LLM_*` env 覆盖；`memory/telemetry.ts` 含全部遥测字段；契约测试 `memory-extraction-guard/memory-llm-extraction/memory-wiring` 三套件在位。`npm run typecheck` 实测通过；Windows 本机失败项均为环境差异（见上文基线对照结论）。

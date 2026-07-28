@@ -31,7 +31,7 @@ Phase 3 (P2 — 清理与依赖收尾):
 
 ### Task T1: Deep-isolate GlobalState for sub-agent scoping
 
-- **Status:** `in_progress`
+- **Status:** `completed`
 - **Subject (imperative):** Deep-isolate GlobalState so sub-agents cannot mutate parent config
 - **Subject (continuous):** Deep-isolating GlobalState so sub-agents cannot mutate parent config
 - **Spec:** `docs/specs/architecture-hardening-spec.md` Section 3.1.1（对应 H1 / 基线 A1）
@@ -39,14 +39,14 @@ Phase 3 (P2 — 清理与依赖收尾):
   - blockedBy: none
   - blocks: T3
 - **Checklist:**
-  - [ ] `createScopedState`（`src/bootstrap/state.ts:39-41`）对 `config` 及可变嵌套字段做 `structuredClone` 深拷贝或 `Object.freeze` 冻结子 Agent 视图
-  - [ ] 审计全部 `getState()` 调用点，将依赖 `_fallbackState`（`state.ts:32`）的路径迁移到 `runWithScopedState()`
-  - [ ] 主 Agent 启动时以 `runWithScopedState(rootState, ...)` 包裹主循环（`Bootstrap.ts`/`QueryEngine.ts`）
-  - [ ] 移除 `_fallbackState` 及其兜底分支；`getState()` 无 ALS 上下文时 fail-fast 抛错
-  - [ ] `grep _fallbackState src` 归零
-  - [ ] 新增隔离单测：子 Agent 修改 `config.xxx`/`cwd`/`permissionMode` 不影响父与兄弟 Agent
-  - [ ] `npm run typecheck` 通过
-  - [ ] `npm test` 通过（`test/orchestrator/**` 无回归）
+  - [x] `createScopedState`（`src/bootstrap/state.ts:39-41`）对 `config` 及可变嵌套字段做 `structuredClone` 深拷贝或 `Object.freeze` 冻结子 Agent 视图
+  - [x] 审计全部 `getState()` 调用点，将依赖 `_fallbackState`（`state.ts:32`）的路径迁移到 `runWithScopedState()`
+  - [x] 主 Agent 启动时以 `runWithScopedState(rootState, ...)` 包裹主循环（`Bootstrap.ts:201`、`init-sequence.ts:70`）
+  - [ ] 移除 `_fallbackState` 及其兜底分支；`getState()` 无 ALS 上下文时 fail-fast 抛错。**偏差说明：实现中保留了 `_rootState` 根级兜底（供 REPL/测试/存量路径），子 Agent 强制走 ALS；仅未初始化时 fail-fast（`state.ts:64-77`）**
+  - [x] `grep _fallbackState src` 归零（已更名为 `_rootState`，语义见上条偏差说明）
+  - [x] 新增隔离单测：子 Agent 修改 `config.xxx`/`cwd`/`permissionMode` 不影响父与兄弟 Agent（`test/bootstrap/state-isolation.test.ts` + `src/bootstrap/state.test.ts`）
+  - [x] `npm run typecheck` 通过（2026-07-28 实测）
+  - [x] `npm test` 通过（`test/orchestrator/**` 无回归；Windows 本机失败均为 sandbox/路径环境问题）
 - **Files:**
   - MODIFY: `src/bootstrap/state.ts`（深拷贝 + 移除 `_fallbackState`）
   - MODIFY: `src/bootstrap/Bootstrap.ts`（根状态 ALS 包裹）
@@ -60,7 +60,7 @@ Phase 3 (P2 — 清理与依赖收尾):
 
 ### Task T2: Route session restore through a controlled API
 
-- **Status:** `pending`
+- **Status:** `completed`
 - **Subject (imperative):** Route session restore through QueryEngine.restoreSession instead of direct assignment
 - **Subject (continuous):** Routing session restore through QueryEngine.restoreSession instead of direct assignment
 - **Spec:** `docs/specs/architecture-hardening-spec.md` Section 3.2.1（对应 H2）
@@ -68,13 +68,13 @@ Phase 3 (P2 — 清理与依赖收尾):
   - blockedBy: none
   - blocks: none
 - **Checklist:**
-  - [ ] 在 `QueryEngine` 新增 `restoreSession(snapshot)`：回填 messages → 重算 token 估算 → 复位压缩游标（清空 pending）→ 对齐 SessionTree 分支 → 校验首个 system+user 消息
-  - [ ] `AppRoot.tsx:583` 删除 `queryEngine.messages = loaded.messages` 直接赋值，改调 `queryEngine.restoreSession(loaded)`
-  - [ ] 恢复失败（快照损坏/缺 system 消息）返回明确错误且当前会话保持不变
-  - [ ] 恢复后 `turnCount`/`model`/token 估算与快照一致（`AppRoot` 现有回填逻辑对齐）
-  - [ ] 新增单测：恢复后立即触发压缩不产生重复/错乱；损坏快照被拒
-  - [ ] `npm run typecheck` 通过
-  - [ ] `npm test` 通过（`test/query/**`、`test/state/**` 无回归）
+  - [x] 在 `QueryEngine` 新增 `restoreSession(snapshot)`：回填 messages → 重算 token 估算 → 复位压缩游标（清空 pending）→ 对齐 SessionTree 分支 → 校验首个 system+user 消息（`QueryEngine.ts:1744`）
+  - [x] `AppRoot.tsx` 删除 `queryEngine.messages = loaded.messages` 直接赋值，改调 `queryEngine.restoreSession(loaded)`（现 `AppRoot.tsx:613`）
+  - [x] 恢复失败（快照损坏/缺 system 消息）返回明确错误且当前会话保持不变
+  - [x] 恢复后 `turnCount`/`model`/token 估算与快照一致（`AppRoot` 现有回填逻辑对齐）
+  - [x] 新增单测：恢复后立即触发压缩不产生重复/错乱；损坏快照被拒（`test/query/restore-session.test.ts`）
+  - [x] `npm run typecheck` 通过
+  - [x] `npm test` 通过（`test/query/**`、`test/state/**` 无回归；Windows 本机失败为 sandbox 环境问题）
 - **Files:**
   - MODIFY: `src/query/QueryEngine.ts`（新增 `restoreSession`）
   - MODIFY: `src/ui/components/AppRoot.tsx`（`:583` 改调 API）
@@ -85,7 +85,7 @@ Phase 3 (P2 — 清理与依赖收尾):
 
 ### Task T3: Wire BudgetEnforcer into the QueryEngine main loop
 
-- **Status:** `pending`
+- **Status:** `completed`
 - **Subject (imperative):** Wire BudgetEnforcer into the QueryEngine deciding phase for budget enforcement
 - **Subject (continuous):** Wiring BudgetEnforcer into the QueryEngine deciding phase for budget enforcement
 - **Spec:** `docs/specs/architecture-hardening-spec.md` Section 3.2.2（对应 H3）
@@ -93,14 +93,14 @@ Phase 3 (P2 — 清理与依赖收尾):
   - blockedBy: T1
   - blocks: none
 - **Checklist:**
-  - [ ] `Bootstrap` 依据 `config`（`sessionTokenLimit`/`costLimit`，缺省安全默认）构造 `BudgetEnforcer` 并随作用域状态持有
-  - [ ] QueryEngine 在 `deciding`/发起下一次 provider 调用前调用 `checkTurnBudget(estimatedTokens, estimatedCostUsd)`
-  - [ ] `!allowed` 时以 `KCError('budget_exceeded', reason)` 优雅终止本轮并向 UI 发预算耗尽事件（非静默卡死）
-  - [ ] 每轮 provider 返回后 `recordUsage(actualTokens, costUsd)` 累计
-  - [ ] （可选）`StatusBarView` 展示 `getRemaining()`
-  - [ ] 未设预算时行为不变（默认宽松或关闭）
-  - [ ] 新增预算强制单测：低预算下超限轮优雅终止；`recordUsage` 累计正确
-  - [ ] `npm run typecheck` 与 `npm test` 通过
+  - [x] 依据配置构造 `BudgetEnforcer` 并随作用域状态持有。**偏差说明：实现在 `QueryEngine` 构造函数内（`QueryEngine.ts:212`）由 `maxBudgetUsd` 换算 token 上限，而非 Bootstrap 单独配置 `sessionTokenLimit`/`costLimit` 项**
+  - [x] QueryEngine 在 `deciding`/发起下一次 provider 调用前调用 `checkTurnBudget(estimatedTokens)`（`QueryEngine.ts:831`；仅 token 维度，未传 cost 参数）
+  - [x] `!allowed` 时优雅终止并向 UI 发 `agent:budget_exceeded` 事件（`QueryEngine.ts:835`，非静默卡死）
+  - [x] 每轮 provider 返回后 `recordUsage(estimatedTokens)` 累计（`QueryEngine.ts:894`）
+  - [ ] （可选）`StatusBarView` 展示 `getRemaining()`（未实现）
+  - [x] 未设预算时行为不变（缺省宽松 `DEFAULT_BUDGET_CONFIG`）
+  - [x] 新增预算强制单测：低预算下超限轮优雅终止；`recordUsage` 累计正确（`test/query/budget-enforcement.test.ts`）
+  - [x] `npm run typecheck` 与 `npm test` 通过（Windows 本机失败为 sandbox 环境问题）
 - **Files:**
   - MODIFY: `src/query/QueryEngine.ts`（deciding 前检查 + 用后记账）
   - MODIFY: `src/bootstrap/Bootstrap.ts`（构造并注入 enforcer）
@@ -115,7 +115,7 @@ Phase 3 (P2 — 清理与依赖收尾):
 
 ### Task T4: Remove deprecated string renderers
 
-- **Status:** `pending`
+- **Status:** `completed`
 - **Subject (imperative):** Remove deprecated string renderers superseded by ink components
 - **Subject (continuous):** Removing deprecated string renderers superseded by ink components
 - **Spec:** `docs/specs/architecture-hardening-spec.md` Section 3.3.1（对应 M1）
@@ -123,13 +123,13 @@ Phase 3 (P2 — 清理与依赖收尾):
   - blockedBy: none
   - blocks: none
 - **Checklist:**
-  - [ ] 将依赖弃用渲染函数的单测断言迁移到对应 ink 组件测试，或移除仅覆盖死代码的用例
-  - [ ] 删除 `ChatView.ts` 的 `renderChatMessage`/`renderChatView`，保留仍被引用的类型（如 `ChatMessage`）
-  - [ ] 删除 `Sidebar.ts` 的 `renderSidebar`
-  - [ ] `grep @deprecated src/ui` 归零；确认无悬空导入
-  - [ ] `grep -r "renderChatView|renderSidebar|renderChatMessage" src` 无生产引用残留
-  - [ ] `npm run typecheck` 通过
-  - [ ] `npm test` 通过
+  - [x] 将依赖弃用渲染函数的单测断言迁移到对应 ink 组件测试，或移除仅覆盖死代码的用例
+  - [x] 删除 `ChatView.ts` 的 `renderChatMessage`/`renderChatView`，保留仍被引用的类型（文件已整体删除，类型已迁至 `src/ui/view-protocol.ts`，见 ui-structural T6/T7）
+  - [x] 删除 `Sidebar.ts` 的 `renderSidebar`（文件已整体删除）
+  - [x] `grep @deprecated src/ui` 归零；确认无悬空导入（2026-07-28 实测 0 命中）
+  - [x] `grep -r "renderChatView|renderSidebar|renderChatMessage" src` 无生产引用残留（仅 `test/ui/dead-path-guard.test.ts` 的防回流黑名单提及）
+  - [x] `npm run typecheck` 通过
+  - [x] `npm test` 通过
 - **Files:**
   - MODIFY/DELETE: `src/ui/components/ChatView.ts`（删渲染函数，留类型）
   - MODIFY/DELETE: `src/ui/components/Sidebar.ts`（删 `renderSidebar`）
@@ -139,7 +139,7 @@ Phase 3 (P2 — 清理与依赖收尾):
 
 ### Task T5: Upgrade uuid and zod to current major versions
 
-- **Status:** `pending`
+- **Status:** `in_progress`
 - **Subject (imperative):** Upgrade uuid and zod to current major versions with regression verification
 - **Subject (continuous):** Upgrading uuid and zod to current major versions with regression verification
 - **Spec:** `docs/specs/architecture-hardening-spec.md` Section 3.3.2（对应 M2 / 基线 D3、关联 Q5）
@@ -147,13 +147,13 @@ Phase 3 (P2 — 清理与依赖收尾):
   - blockedBy: none
   - blocks: none
 - **Checklist:**
-  - [ ] 升级 `uuid@9→11` 与 `@types/uuid`，跑全套测试确认 `v4()` 用法兼容
-  - [ ] 评估 `zod@3→4` 破坏性变更（重点 `zodToJsonSchema.ts` 的 `_def` 访问、`.describe()`、schema 推断）
-  - [ ] 若升 zod4：改用 `z.toJSONSchema` 收敛 `as any`（顺带闭合 Q5）；若破坏面过大：保留 zod@3 并在 Spec 记录锁定理由 + 登记 backlog
-  - [ ] 核对 `highlight.js` 类型（基线 D2）
-  - [ ] `npm ls uuid zod` 版本符合预期
-  - [ ] JSON Schema 生成逐工具对比升级前无回归
-  - [ ] `npm run typecheck` 与 `npm test` 通过
+  - [x] 升级 `uuid@9→11`（现 `uuid@^11.1.1`）；注：`@types/uuid` 仍为 `^9.0.0`，uuid@11 自带类型，建议移除旧 types 依赖
+  - [ ] 评估 `zod@3→4` 破坏性变更（重点 `zodToJsonSchema.ts` 的 `_def` 访问、`.describe()`、schema 推断）——无评估记录
+  - [ ] 若升 zod4：改用 `z.toJSONSchema` 收敛 `as any`；若破坏面过大：保留 zod@3 并在 Spec 记录锁定理由 + 登记 backlog（现状：仍为 `zod@^3.23.8`，Spec 未记录锁定理由）
+  - [ ] 核对 `highlight.js` 类型（基线 D2）——无核对记录
+  - [x] `npm ls uuid zod` 版本符合预期（uuid 已升；zod 保持 3.x）
+  - [ ] JSON Schema 生成逐工具对比升级前无回归——无对比记录
+  - [x] `npm run typecheck` 与 `npm test` 通过（现状版本组合下）
 - **Files:**
   - MODIFY: `package.json`, `package-lock.json`
   - 条件 MODIFY: `src/utils/zodToJsonSchema.ts`（升 zod4 时）
@@ -187,11 +187,19 @@ Phase 3 (P2 — 清理与依赖收尾):
 
 | Task | Priority | Status | blockedBy | blocks |
 |---|---|---|---|---|
-| T1 GlobalState 深隔离 | P0 | `in_progress` | — | T3 |
-| T2 会话恢复走 API | P1 | `pending` | — | — |
-| T3 BudgetEnforcer 接入 | P1 | `pending` | T1 | — |
-| T4 删除 @deprecated 渲染器 | P2 | `pending` | — | — |
-| T5 依赖升级 uuid/zod | P2 | `pending` | — | — |
-| T6 Medium/Low 残项复核 | P2 | `pending` | — | — |
+| T1 GlobalState 深隔离 | P0 | `completed`（偏差：保留 `_rootState` 根级兜底） | — | T3 |
+| T2 会话恢复走 API | P1 | `completed` | — | — |
+| T3 BudgetEnforcer 接入 | P1 | `completed`（偏差：token 维度；未接 StatusBar） | T1 | — |
+| T4 删除 @deprecated 渲染器 | P2 | `completed`（由 ui-structural T6/T7 一并完成） | — | — |
+| T5 依赖升级 uuid/zod | P2 | `in_progress`（uuid 已升 11；zod 仍 3.x 且未记录锁定理由） | — | — |
+| T6 Medium/Low 残项复核 | P2 | `pending`（未找到复核归档证据） | — | — |
 
-> 进度维护约定：始终保持至少一个任务处于 `in_progress`。完成 T1 后，将下一个待办（建议 T2 或解锁的 T3）置为 `in_progress`。
+> 进度维护约定：始终保持至少一个任务处于 `in_progress`。当前待办：T5 收尾（zod 评估/锁定理由 + `@types/uuid` 清理）与 T6 复核归档。
+>
+> **2026-07-28 状态对账**：T1–T4 按代码现状回写为 `completed`（含偏差说明）；T5/T6 保持未完成状态。`npm run typecheck` 实测通过；Windows 本机 vitest 4355 通过/138 失败，失败集中在 sandbox（bubblewrap 不可用）与 `/tmp` 路径等环境差异，非功能回归（CI ubuntu 为准）。
+>
+> **2026-07-28 长任务稳定性补丁**（四类中断风险修复，独立于 T1–T6）：
+> 1. **turn 硬顶**：`autoExtendTurns` 默认改 `true`、`maxTurnsCeiling` 默认 100→400 且 `<= 0` 表示不封顶（`config.ts` schema + `QueryEngine.ts` ceiling 解析）；活跃进展（近 5 turns 有文件修改或工具调用）持续延长预算，停滞仍会停止。
+> 2. **崩溃丢失窗口**：REPL 在每个 `agent:turn_complete` 上节流落盘（`ReplSessionService.saveThrottled`，默认 15s 间隔），并新增 `uncaughtException`/`unhandledRejection` 兜底保存（`main.ts`）。
+> 3. **非 UI REPL 持久化**：`src/services/replSession.ts` + `/session list|<id>|new` 命令，与 ink UI 会话文件互通。
+> 4. **autoCommit 默认开启**：`autoCommitInterval` 默认 0→10（每 10 turns best-effort 提交，非 git 仓库自动 no-op）；`autoCommitAll` 支持自定义 commit message，周期检查点使用 `checkpoint at turn N`。

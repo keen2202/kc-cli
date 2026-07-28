@@ -46,7 +46,7 @@ Phase 3 (P2 — 审计证据与验收报告):
   - [x] 放行决策记 `logger` 显式日志（含 tool 与 sessionId）
   - [x] 交互路径（已注册 handler）与 `acceptEdits` 语义完全不变
   - [x] 确认 ACP/IM 无头入口继承默认 deny（`acp/handlers.ts`、`im/im-bridge.ts`）
-  - [x] 新增单测：无 handler 下 `ask` 默认被拒；`proceed`/CLI 开关下放行且有日志
+  - [x] 新增单测：无 handler 下 ask 默认被拒；proceed/CLI 开关下放行且有日志 **（偏差：未单建 `noninteractive-ask.test.ts`；覆盖并入既有 `test/executors/toolExecutor-permission.test.ts:113-136`——no-handler `Permission denied (non-interactive)` + `setNoninteractiveAskPolicy('proceed'|'allow')` 放行）**
   - [x] `npm run typecheck` 通过
   - [x] `npm test` 通过（`test/executors/**`、`test/permissions/**` 无回归）
 - **Files:**
@@ -55,7 +55,7 @@ Phase 3 (P2 — 审计证据与验收报告):
   - MODIFY: `src/bootstrap/config.ts`（`noninteractiveAskPolicy` 配置项）
   - MODIFY: `src/bootstrap/Bootstrap.ts`（注入策略）
   - 关联: `src/acp/handlers.ts`, `src/im/im-bridge.ts`
-  - NEW: `test/executors/noninteractive-ask.test.ts`
+  - MODIFY: `test/executors/toolExecutor-permission.test.ts`（no-handler 默认拒 + proceed/allow 放行覆盖；未单建 `noninteractive-ask.test.ts`）
 
 ---
 

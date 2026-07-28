@@ -19,6 +19,7 @@ import { Spinner } from './ui/spinner';
 import { handleBranch, handleCheckout, handleHistory } from './commands/branch';
 import { UserProfileService } from './services/userProfile';
 import type { UserLevel } from './services/userProfile';
+import { ReplSessionService } from './services/replSession';
 
 import { main } from './bootstrap/app';
 
@@ -202,6 +203,10 @@ async function runREPL(queryEngine: QueryEngine) {
     output: process.stdout,
   });
 
+  // Session persistence parity with the ink UI: snapshot after each completed
+  // turn so an interrupted REPL session can be resumed via /session.
+  const replSession = new ReplSessionService();
+
   console.log(chalk.bold('\n💬 Ready! What would you like me to do?\n'));
   console.log(chalk.gray('Type your prompt and press Enter.'));
   console.log(chalk.gray('Type /help for commands, /exit to quit.\n'));
@@ -209,17 +214,28 @@ async function runREPL(queryEngine: QueryEngine) {
   const cleanup = () => {
     console.log(chalk.yellow('\n👋 Goodbye!'));
     rl.close();
-    process.exit(0);
+    // Best-effort final snapshot before exiting (save() never throws).
+    void replSession.save(queryEngine).finally(() => process.exit(0));
   };
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
+
+  // Crash-loss guard: on a fatal error, flush a best-effort snapshot before
+  // exiting so hours of accumulated conversation survive the crash
+  // (save() never throws, so this handler cannot itself crash-loop).
+  const emergencySave = (err: unknown) => {
+    console.error(chalk.red(`\n\u{1F4A5} Fatal error: ${getErrorMessage(err)} \u2014 saving session before exit...`));
+    void replSession.save(queryEngine).finally(() => process.exit(1));
+  };
+  process.on('uncaughtException', emergencySave);
+  process.on('unhandledRejection', emergencySave);
 
   const askQuestion = () => {
     rl.question(chalk.cyan.bold('kc> '), async (input) => {
       const trimmed = input.trim();
 
       if (trimmed.startsWith('/')) {
-        await handleCommand(trimmed, queryEngine, rl);
+        await handleCommand(trimmed, queryEngine, rl, replSession);
         askQuestion();
         return;
       }
@@ -230,7 +246,14 @@ async function runREPL(queryEngine: QueryEngine) {
       }
 
       try {
+        replSession.bumpTurn();
         for await (const event of queryEngine.submitMessage(trimmed)) {
+          replSession.noteEvent(event);
+          // Narrow the crash-loss window inside a long multi-turn query:
+          // throttled snapshot after each completed agent turn.
+          if (event.type === 'agent:turn_complete') {
+            void replSession.saveThrottled(queryEngine);
+          }
           handleStreamEvent(event);
         }
       } catch (error) {
@@ -238,6 +261,9 @@ async function runREPL(queryEngine: QueryEngine) {
           chalk.red(`\n❌ Error: ${getErrorMessage(error)}`)
         );
       }
+
+      // Persist the conversation after every turn (best-effort).
+      await replSession.save(queryEngine);
 
       console.log();
       askQuestion();
@@ -252,7 +278,8 @@ async function runREPL(queryEngine: QueryEngine) {
 async function handleCommand(
   command: string,
   queryEngine: QueryEngine,
-  rl: import('readline').Interface
+  rl: import('readline').Interface,
+  replSession: ReplSessionService
 ) {
   const parts = command.split(' ');
   const cmd = parts[0]!.toLowerCase();
@@ -267,6 +294,7 @@ async function handleCommand(
       console.log(chalk.gray('  /tools         - List available tools'));
       console.log(chalk.gray('  /level [level] - Show/set user level (beginner|intermediate|advanced)'));
       console.log(chalk.gray('  /status        - Show current status'));
+      console.log(chalk.gray('  /session [sub] - List (default), load <id>, or start a new session'));
       console.log(chalk.gray('  /branch [name] - List or create branches'));
       console.log(chalk.gray('  /checkout <id> - Switch to a branch'));
       console.log(chalk.gray('  /history       - Show conversation tree'));
@@ -329,7 +357,41 @@ async function handleCommand(
       break;
     }
 
+    case '/session': {
+      const sub = (parts[1] || 'list').trim();
+      if (sub === 'list') {
+        const sessions = await replSession.list(10);
+        if (sessions.length === 0) {
+          console.log(chalk.gray('No saved sessions yet.\n'));
+        } else {
+          console.log(chalk.bold('\n💾 Recent sessions:'));
+          for (const s of sessions) {
+            const when = new Date(s.metadata.lastModified).toLocaleString();
+            console.log(chalk.gray(`  ${s.sessionId}  ·  ${when}  ·  ${s.messages.length} msg(s)`));
+          }
+          console.log(chalk.gray('\nUse /session <id> to load, or /session new to start fresh.\n'));
+        }
+      } else if (sub === 'new') {
+        const newId = replSession.startNew(queryEngine);
+        console.log(chalk.green(`✓ Started new session: ${newId}\n`));
+      } else {
+        try {
+          const loaded = await replSession.load(queryEngine, sub);
+          if (!loaded) {
+            console.log(chalk.yellow(`Session not found: ${sub}\n`));
+          } else {
+            console.log(chalk.green(`✓ Loaded session: ${sub} (${loaded.messages.length} message(s))\n`));
+          }
+        } catch (err) {
+          console.log(chalk.red(`✗ Failed to restore session: ${getErrorMessage(err)}. Current session unchanged.\n`));
+        }
+      }
+      break;
+    }
+
     case '/exit':
+      // Persist the conversation before quitting so it can be resumed.
+      await replSession.save(queryEngine);
       console.log(chalk.yellow('\n👋 Goodbye!'));
       rl.close();
       process.exit(0);

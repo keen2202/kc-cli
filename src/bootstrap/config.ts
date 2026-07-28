@@ -149,8 +149,22 @@ export const ConfigSchema = z.object({
 
   // Agent Turn Configuration
   maxTurns: z.number().default(80),
-  autoExtendTurns: z.boolean().default(false),
-  maxTurnsCeiling: z.number().default(100),
+  // Auto-extend the turn budget while the agent is actively making progress
+  // (editing files or issuing tool calls). Default ON so long-running tasks
+  // are not force-stopped at the initial maxTurns; a stalled agent (no
+  // progress in the last 5 turns) still stops at the current budget.
+  autoExtendTurns: z.boolean().default(true),
+  // Hard ceiling for auto-extended turns. 0 (or negative) = unbounded: an
+  // actively-progressing task is never cut off by a turn ceiling.
+  maxTurnsCeiling: z.number().default(400),
+  // Minimum turns before the agent may exit (0 = disabled). Guards long tasks
+  // against premature abandonment during read/exploration-heavy phases.
+  minTurns: z.number().default(0),
+  // Periodic auto-commit checkpoint interval in turns (0 = disabled). Default
+  // ON (every 10 turns) so long-running task progress survives an
+  // interruption/crash between turns; commits are best-effort no-ops outside
+  // a git repository or when nothing changed.
+  autoCommitInterval: z.number().default(10),
 
   // General
   verbose: z.boolean().default(false),
@@ -393,6 +407,22 @@ export function loadEnvConfig(): Partial<Config> {
       config.maxTurnsCeiling = parsed;
     } else {
       logger.services.warn(`Invalid KC_MAX_TURNS_CEILING value: "${process.env.KC_MAX_TURNS_CEILING}" -- using default`);
+    }
+  }
+  if (process.env.KC_MIN_TURNS) {
+    const parsed = parseInt(process.env.KC_MIN_TURNS, 10);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      config.minTurns = parsed;
+    } else {
+      logger.services.warn(`Invalid KC_MIN_TURNS value: "${process.env.KC_MIN_TURNS}" -- using default`);
+    }
+  }
+  if (process.env.KC_AUTO_COMMIT_INTERVAL) {
+    const parsed = parseInt(process.env.KC_AUTO_COMMIT_INTERVAL, 10);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      config.autoCommitInterval = parsed;
+    } else {
+      logger.services.warn(`Invalid KC_AUTO_COMMIT_INTERVAL value: "${process.env.KC_AUTO_COMMIT_INTERVAL}" -- using default`);
     }
   }
 

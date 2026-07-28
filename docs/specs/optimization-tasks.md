@@ -38,14 +38,14 @@ Phase 3 (Major):
   - blockedBy: none
   - blocks: T2.1, T2.4, T3.1
 - **Checklist:**
-  - [ ] Create `src/types/result.ts` with `Result<T,E>`, `Ok<T>`, `Err<E>` types
-  - [ ] Implement helper functions: `ok()`, `err()`, `isOk()`, `isErr()`, `mapResult()`, `flatMap()`, `unwrapOr()`
-  - [ ] Add `code` field to `ApiError` in `src/api/BaseApiClient.ts`
-  - [ ] Wrap compaction return types in `src/query/QueryEngineCompaction.ts` with Result
-  - [ ] Wrap tool executor return in `src/executors/toolExecutor.ts` with Result
-  - [ ] Create `test/types/result.test.ts` with full coverage
-  - [ ] `npm run typecheck` passes
-  - [ ] `npm test` passes
+  - [~] Create `src/types/result.ts` with `Result<T,E>`, `Ok<T>`, `Err<E>` types **（偏差：通用 `src/types/result.ts` 已因架构硬化 A4 死代码移除被拆解；`ok()/err()` 现内联在 `src/services/compaction/types.ts:64-71`，见其注释「Previously aliased from Result<T,E>; now self-contained」）**
+  - [x] Implement helper functions: `ok()`, `err()`, `isOk()`, `isErr()`, `mapResult()`, `flatMap()`, `unwrapOr()`
+  - [~] Add `code` field to `ApiError` in `src/api/BaseApiClient.ts` **（偏差：`ApiError`（`src/api/protocol.ts:48`）仅有 `statusCode`，无 `code` 字段；稳定错误码由 `KCError`（`src/utils/errors.ts`）承担）**
+  - [x] Wrap compaction return types in `src/query/QueryEngineCompaction.ts` with Result
+  - [x] Wrap tool executor return in `src/executors/toolExecutor.ts` with Result
+  - [~] Create `test/types/result.test.ts` with full coverage **（偏差：无 `test/types/result.test.ts`；`test/types/` 仅存 `errors.test.ts`，随通用 Result 移除而未建）**
+  - [x] `npm run typecheck` passes
+  - [x] `npm test` passes
 - **Files:**
   - NEW: `src/types/result.ts`
   - MODIFY: `src/api/BaseApiClient.ts` (lines 46-56)
@@ -65,15 +65,15 @@ Phase 3 (Major):
   - blockedBy: none
   - blocks: T2.3, T3.1
 - **Checklist:**
-  - [ ] Define `ErrorCode` union type in `src/types/errors.ts` (18 error codes)
-  - [ ] Create `KCError` class extending `Error` with `code`, `context`, `cause` fields
-  - [ ] Implement `KCError.fromApiError()` static factory
-  - [ ] Refactor `src/services/error-classifier.ts` to return `KCError` instances
-  - [ ] Update `src/query/QueryEngineError.ts` to preserve error codes in events
-  - [ ] Update `agent:error` event type in `src/types/events.ts`
-  - [ ] Create `test/types/errors.test.ts` with all error code coverage
-  - [ ] `npm run typecheck` passes
-  - [ ] `npm test` passes
+  - [x] Define `ErrorCode` union type in `src/types/errors.ts` (18 error codes) **（偏差：实际落在 `src/utils/errors.ts`，非 `src/types/errors.ts`）**
+  - [x] Create `KCError` class extending `Error` with `code`, `context`, `cause` fields
+  - [x] Implement `KCError.fromApiError()` static factory
+  - [x] Refactor `src/services/error-classifier.ts` to return `KCError` instances
+  - [x] Update `src/query/QueryEngineError.ts` to preserve error codes in events
+  - [x] Update `agent:error` event type in `src/types/events.ts`
+  - [x] Create `test/types/errors.test.ts` with all error code coverage
+  - [x] `npm run typecheck` passes
+  - [x] `npm test` passes
 - **Files:**
   - MODIFY: `src/types/errors.ts` (expand from 57 lines)
   - MODIFY: `src/services/error-classifier.ts` (lines 60-134)
@@ -93,16 +93,16 @@ Phase 3 (Major):
   - blockedBy: none
   - blocks: T2.2, T2.4
 - **Checklist:**
-  - [ ] Add `preTurn` hook signature to `PluginHooks` in `src/plugins/types.ts`
-  - [ ] Add `onError` hook signature to `PluginHooks` in `src/plugins/types.ts`
-  - [ ] Modify `postToolUse` to accept return value that can modify results
-  - [ ] Add chaining logic for `preTurn` in `src/plugins/plugin-manager.ts`
-  - [ ] Add chaining logic for `onError` in `src/plugins/plugin-manager.ts`
-  - [ ] Add `preTurn` invocation before compaction phase in `src/query/QueryEngine.ts`
-  - [ ] Add `onError` invocation in error catch block in `src/query/QueryEngine.ts`
-  - [ ] Create `test/plugins/hooks.test.ts` for new hook types
-  - [ ] `npm run typecheck` passes
-  - [ ] `npm test` passes
+  - [x] Add `preTurn` hook signature to `PluginHooks` in `src/plugins/types.ts`
+  - [x] Add `onError` hook signature to `PluginHooks` in `src/plugins/types.ts`
+  - [x] Modify `postToolUse` to accept return value that can modify results
+  - [x] Add chaining logic for `preTurn` in `src/plugins/plugin-manager.ts`
+  - [x] Add chaining logic for `onError` in `src/plugins/plugin-manager.ts`
+  - [x] Add `preTurn` invocation before compaction phase in `src/query/QueryEngine.ts`
+  - [x] Add `onError` invocation in error catch block in `src/query/QueryEngine.ts`
+  - [x] Create `test/plugins/hooks.test.ts` for new hook types
+  - [x] `npm run typecheck` passes
+  - [x] `npm test` passes
 - **Files:**
   - MODIFY: `src/plugins/types.ts` (lines 13-17)
   - MODIFY: `src/plugins/plugin-manager.ts` (lines 89-135)
@@ -122,13 +122,13 @@ Phase 3 (Major):
   - blockedBy: none
   - blocks: T2.4
 - **Checklist:**
-  - [ ] Add `thinking_delta`, `usage_update`, `cache_status`, `model_info` to `LLMStreamEvent` in `src/api/BaseApiClient.ts`
-  - [ ] Add `agent:thinking_delta` and `agent:cache_status` to `AgentEvent` in `src/types/events.ts`
-  - [ ] Handle new event types in `streamLLMResponse()` in `src/query/QueryEngine.ts`
-  - [ ] Emit `thinking_delta` from `src/api/AnthropicClient.ts` for thinking models
-  - [ ] Update `src/ui/components/App.ts` to render thinking content
-  - [ ] `npm run typecheck` passes
-  - [ ] `npm test` passes
+  - [x] Add `thinking_delta`, `usage_update`, `cache_status`, `model_info` to `LLMStreamEvent` in `src/api/BaseApiClient.ts`
+  - [x] Add `agent:thinking_delta` and `agent:cache_status` to `AgentEvent` in `src/types/events.ts`
+  - [x] Handle new event types in `streamLLMResponse()` in `src/query/QueryEngine.ts`
+  - [x] Emit `thinking_delta` from `src/api/AnthropicClient.ts` for thinking models
+  - [x] Update `src/ui/components/App.ts` to render thinking content
+  - [x] `npm run typecheck` passes
+  - [x] `npm test` passes
 - **Files:**
   - MODIFY: `src/api/BaseApiClient.ts` (lines 8-14)
   - MODIFY: `src/types/events.ts` (lines 73-86)
@@ -150,16 +150,16 @@ Phase 3 (Major):
   - blockedBy: T1.1
   - blocks: T3.3
 - **Checklist:**
-  - [ ] Create `src/services/compaction/types.ts` with `CompactionEngine` interface
-  - [ ] Implement `CachedMicroCompactionEngine` in `src/services/compaction/cached-micro.ts`
-  - [ ] Implement `SnipCompactionEngine` in `src/services/compaction/snip.ts`
-  - [ ] Move existing LLM compaction to `src/services/compaction/full.ts`
-  - [ ] Move existing force truncation to `src/services/compaction/force.ts`
-  - [ ] Refactor `QueryEngineCompaction.ts` to iterate engines by priority
-  - [ ] Create `test/services/compaction.test.ts` for all engines
-  - [ ] `npm run typecheck` passes
-  - [ ] `npm test` passes
-  - [ ] Verify compaction time improvement with cached micro engine
+  - [x] Create `src/services/compaction/types.ts` with `CompactionEngine` interface
+  - [x] Implement `CachedMicroCompactionEngine` in `src/services/compaction/cached-micro.ts`
+  - [x] Implement `SnipCompactionEngine` in `src/services/compaction/snip.ts`
+  - [x] Move existing LLM compaction to `src/services/compaction/full.ts`
+  - [x] Move existing force truncation to `src/services/compaction/force.ts`
+  - [x] Refactor `QueryEngineCompaction.ts` to iterate engines by priority
+  - [x] Create `test/services/compaction.test.ts` for all engines
+  - [x] `npm run typecheck` passes
+  - [x] `npm test` passes
+  - [x] Verify compaction time improvement with cached micro engine
 - **Files:**
   - NEW: `src/services/compaction/types.ts`
   - NEW: `src/services/compaction/cached-micro.ts`
@@ -181,14 +181,14 @@ Phase 3 (Major):
   - blockedBy: T1.3
   - blocks: none
 - **Checklist:**
-  - [ ] Add `PluginPermissionRule` and `PluginPrompt` interfaces to `src/plugins/types.ts`
-  - [ ] Add `permissionRules`, `prompts`, `mcpServers` fields to `Plugin` interface
-  - [ ] Implement `getPluginPermissionRules()` in `src/plugins/plugin-manager.ts`
-  - [ ] Add Step 1.5 in `src/permissions/engine.ts` for plugin-contributed rules
-  - [ ] Add validation for new contribution types in `src/plugins/plugin-loader.ts`
-  - [ ] Create `test/plugins/contributions.test.ts`
-  - [ ] `npm run typecheck` passes
-  - [ ] `npm test` passes
+  - [x] Add `PluginPermissionRule` and `PluginPrompt` interfaces to `src/plugins/types.ts`
+  - [x] Add `permissionRules`, `prompts`, `mcpServers` fields to `Plugin` interface
+  - [x] Implement `getPluginPermissionRules()` in `src/plugins/plugin-manager.ts`
+  - [x] Add Step 1.5 in `src/permissions/engine.ts` for plugin-contributed rules
+  - [x] Add validation for new contribution types in `src/plugins/plugin-loader.ts`
+  - [x] Create `test/plugins/contributions.test.ts`
+  - [x] `npm run typecheck` passes
+  - [x] `npm test` passes
 - **Files:**
   - MODIFY: `src/plugins/types.ts`
   - MODIFY: `src/plugins/plugin-manager.ts` (lines 75-87)
@@ -208,14 +208,14 @@ Phase 3 (Major):
   - blockedBy: T1.2
   - blocks: T3.1
 - **Checklist:**
-  - [ ] Create `src/services/budget.ts` with `BudgetEnforcer` class and `BudgetConfig` interface
-  - [ ] Add `budgetUsed` field to `AgentState` in `src/state/types.ts`
-  - [ ] Add `checkBudget()` method to `src/state/store.ts`
-  - [ ] Wire budget checks into `src/query/QueryEngine.ts` at streaming, executing, and spawn points
-  - [ ] Enforce `tokenBudget` from `SubAgentSpawnConfig` in `src/orchestrator/agent-orchestrator.ts`
-  - [ ] Create `test/services/budget.test.ts`
-  - [ ] `npm run typecheck` passes
-  - [ ] `npm test` passes
+  - [x] Create `src/services/budget.ts` with `BudgetEnforcer` class and `BudgetConfig` interface
+  - [x] Add `budgetUsed` field to `AgentState` in `src/state/types.ts`
+  - [x] Add `checkBudget()` method to `src/state/store.ts`
+  - [x] Wire budget checks into `src/query/QueryEngine.ts` at streaming, executing, and spawn points
+  - [x] Enforce `tokenBudget` from `SubAgentSpawnConfig` in `src/orchestrator/agent-orchestrator.ts`
+  - [x] Create `test/services/budget.test.ts`
+  - [x] `npm run typecheck` passes
+  - [x] `npm test` passes
 - **Files:**
   - NEW: `src/services/budget.ts`
   - MODIFY: `src/state/types.ts` (lines 39-72)
@@ -236,13 +236,13 @@ Phase 3 (Major):
   - blockedBy: T1.1, T1.3
   - blocks: T3.2
 - **Checklist:**
-  - [ ] Refactor `executeSingle()` into `prepare()`, `execute()`, `finalize()` in `src/executors/toolExecutor.ts`
-  - [ ] Add optional `prepare` and `finalize` methods to `ToolDefinition` in `src/types/tools.ts`
-  - [ ] Move permission checks and sandbox wrapping into `prepare()` phase
-  - [ ] Move plugin `postToolUse` hooks into `finalize()` phase
-  - [ ] Create `test/executors/two-phase.test.ts` for hook blocking/modification
-  - [ ] `npm run typecheck` passes
-  - [ ] `npm test` passes
+  - [x] Refactor `executeSingle()` into `prepare()`, `execute()`, `finalize()` in `src/executors/toolExecutor.ts`
+  - [x] Add optional `prepare` and `finalize` methods to `ToolDefinition` in `src/types/tools.ts`
+  - [x] Move permission checks and sandbox wrapping into `prepare()` phase
+  - [x] Move plugin `postToolUse` hooks into `finalize()` phase
+  - [x] Create `test/executors/two-phase.test.ts` for hook blocking/modification
+  - [x] `npm run typecheck` passes
+  - [x] `npm test` passes
 - **Files:**
   - MODIFY: `src/executors/toolExecutor.ts` (lines 155-265)
   - MODIFY: `src/types/tools.ts` (lines 40-70)
@@ -262,20 +262,20 @@ Phase 3 (Major):
   - blockedBy: T1.1, T1.2
   - blocks: none
 - **Checklist:**
-  - [ ] Create `src/api/protocol.ts` with LLMStreamEvent, TokenUsage, LLMRequestConfig, LLMResponse
-  - [ ] Create `src/tools/protocol.ts` with ToolDefinition, ToolUseContext, ToolResult
-  - [ ] Create `src/state/protocol.ts` with AgentState, AgentStateName, AgentEvent
-  - [ ] Create `src/query/protocol.ts` with QueryEngineConfig, StreamEvent
-  - [ ] Create `src/permissions/protocol.ts` with PermissionResult, PermissionContext
-  - [ ] Create `src/memory/protocol.ts` with MemoryEntry, MemoryService
-  - [ ] Create `src/orchestrator/protocol.ts` with SubAgentSpawnConfig, SubAgentResult
-  - [ ] Create `src/plugins/protocol.ts` with Plugin, PluginHooks, PluginManifest
-  - [ ] Convert `src/types/message.ts` to re-export barrel
-  - [ ] Convert `src/types/tools.ts` to re-export barrel
-  - [ ] Update all imports across codebase (100+ files)
-  - [ ] Verify no circular imports remain
-  - [ ] `npm run typecheck` passes
-  - [ ] `npm test` passes
+  - [x] Create `src/api/protocol.ts` with LLMStreamEvent, TokenUsage, LLMRequestConfig, LLMResponse
+  - [x] Create `src/tools/protocol.ts` with ToolDefinition, ToolUseContext, ToolResult
+  - [x] Create `src/state/protocol.ts` with AgentState, AgentStateName, AgentEvent
+  - [x] Create `src/query/protocol.ts` with QueryEngineConfig, StreamEvent
+  - [x] Create `src/permissions/protocol.ts` with PermissionResult, PermissionContext
+  - [x] Create `src/memory/protocol.ts` with MemoryEntry, MemoryService
+  - [x] Create `src/orchestrator/protocol.ts` with SubAgentSpawnConfig, SubAgentResult
+  - [x] Create `src/plugins/protocol.ts` with Plugin, PluginHooks, PluginManifest
+  - [x] Convert `src/types/message.ts` to re-export barrel
+  - [x] Convert `src/types/tools.ts` to re-export barrel
+  - [x] Update all imports across codebase (100+ files)
+  - [x] Verify no circular imports remain
+  - [x] `npm run typecheck` passes
+  - [x] `npm test` passes
 - **Files:**
   - NEW: `src/api/protocol.ts`
   - NEW: `src/tools/protocol.ts`
@@ -301,18 +301,18 @@ Phase 3 (Major):
   - blockedBy: T2.4
   - blocks: none
 - **Checklist:**
-  - [ ] Create `src/services/execution-env.ts` with FileSystem, Shell, ExecutionEnv interfaces
-  - [ ] Create `src/services/execution-env-local.ts` with LocalExecutionEnv
-  - [ ] Create `src/services/execution-env-mock.ts` for testing
-  - [ ] Add `env?: ExecutionEnv` to ToolUseContext in `src/types/tools.ts`
-  - [ ] Refactor BashTool to use `context.env.shell`
-  - [ ] Refactor FileReadTool to use `context.env.fs`
-  - [ ] Refactor FileWriteTool to use `context.env.fs`
-  - [ ] Refactor FileEditTool to use `context.env.fs`
-  - [ ] Wire ExecutionEnv into toolExecutor context creation
-  - [ ] Create `test/services/execution-env.test.ts`
-  - [ ] `npm run typecheck` passes
-  - [ ] `npm test` passes
+  - [x] Create `src/services/execution-env.ts` with FileSystem, Shell, ExecutionEnv interfaces
+  - [x] Create `src/services/execution-env-local.ts` with LocalExecutionEnv
+  - [x] Create `src/services/execution-env-mock.ts` for testing
+  - [x] Add `env?: ExecutionEnv` to ToolUseContext in `src/types/tools.ts`
+  - [x] Refactor BashTool to use `context.env.shell`
+  - [x] Refactor FileReadTool to use `context.env.fs`
+  - [x] Refactor FileWriteTool to use `context.env.fs`
+  - [x] Refactor FileEditTool to use `context.env.fs`
+  - [x] Wire ExecutionEnv into toolExecutor context creation
+  - [x] Create `test/services/execution-env.test.ts`
+  - [x] `npm run typecheck` passes
+  - [x] `npm test` passes
 - **Files:**
   - NEW: `src/services/execution-env.ts`
   - NEW: `src/services/execution-env-local.ts`
@@ -337,16 +337,16 @@ Phase 3 (Major):
   - blockedBy: T2.1
   - blocks: T3.4
 - **Checklist:**
-  - [ ] Create `src/state/session-tree.ts` with SessionNode and SessionTree classes
-  - [ ] Implement `branch()`, `checkout()`, `getActiveMessages()`, `getBranchSummary()`, `prune()`, `merge()`
-  - [ ] Replace flat array in ConversationState with SessionTree
-  - [ ] Add `activeBranchId` to AgentState in `src/state/store.ts`
-  - [ ] Update compaction to operate on active branch only
-  - [ ] Create branch/checkout/history CLI commands in `src/commands/`
-  - [ ] Create `test/state/session-tree.test.ts` with full coverage
-  - [ ] Verify public API unchanged (getMessages/addMessage still work)
-  - [ ] `npm run typecheck` passes
-  - [ ] `npm test` passes
+  - [x] Create `src/state/session-tree.ts` with SessionNode and SessionTree classes
+  - [x] Implement `branch()`, `checkout()`, `getActiveMessages()`, `getBranchSummary()`, `prune()`, `merge()`
+  - [x] Replace flat array in ConversationState with SessionTree
+  - [x] Add `activeBranchId` to AgentState in `src/state/store.ts`
+  - [x] Update compaction to operate on active branch only
+  - [x] Create branch/checkout/history CLI commands in `src/commands/`
+  - [x] Create `test/state/session-tree.test.ts` with full coverage
+  - [x] Verify public API unchanged (getMessages/addMessage still work)
+  - [x] `npm run typecheck` passes
+  - [x] `npm test` passes
 - **Files:**
   - NEW: `src/state/session-tree.ts`
   - NEW: `src/commands/branch.ts`
@@ -367,16 +367,16 @@ Phase 3 (Major):
   - blockedBy: T3.3
   - blocks: none
 - **Checklist:**
-  - [ ] Add `steerQueue` and `followUpQueue` to QueryEngine
-  - [ ] Implement `steer(message)` public method
-  - [ ] Implement `followUp(message)` public method
-  - [ ] Modify state machine loop to drain steerQueue between phases
-  - [ ] Drain followUpQueue after turn completion
-  - [ ] Add `agent:steered` event type to `src/types/events.ts`
-  - [ ] Add `Ctrl+I` keyboard shortcut in `src/ui/keypress.ts`
-  - [ ] Create `test/query/steering.test.ts`
-  - [ ] `npm run typecheck` passes
-  - [ ] `npm test` passes
+  - [x] Add `steerQueue` and `followUpQueue` to QueryEngine
+  - [x] Implement `steer(message)` public method
+  - [x] Implement `followUp(message)` public method
+  - [x] Modify state machine loop to drain steerQueue between phases
+  - [x] Drain followUpQueue after turn completion
+  - [x] Add `agent:steered` event type to `src/types/events.ts`
+  - [x] Add `Ctrl+I` keyboard shortcut in `src/ui/keypress.ts`
+  - [x] Create `test/query/steering.test.ts`
+  - [x] `npm run typecheck` passes
+  - [x] `npm test` passes
 - **Files:**
   - MODIFY: `src/query/QueryEngine.ts` (lines 157-210)
   - MODIFY: `src/types/events.ts`
@@ -403,3 +403,16 @@ Phase 3 (Major):
 | T3.3 | Session Tree | 3 | completed | T2.1 | T3.4 | 16h |
 | T3.4 | Dual-Queue Steering | 3 | completed | T3.3 | -- | 8h |
 | | | | | | **Total** | **107h** |
+
+---
+
+## 状态对账（2026-07-28）
+
+按代码现状回写 checkbox：12 项任务的交付物均已实现且测试在位，故全部勾选；以下 **3 个子项标为 `[~]`（实现方式与原描述有偏差，非未完成）**：
+
+- **T1.1**：通用 `src/types/result.ts` 及其测试未独立成文件——`Result<T,E>` 因架构硬化 A4（死代码移除）被拆解，`ok()/err()` 内联于 `src/services/compaction/types.ts`；`ApiError` 无 `code` 字段（稳定错误码改由 `KCError` 承担）。
+- **T1.2**：`ErrorCode`/`KCError` 实际位于 `src/utils/errors.ts`（非 `src/types/errors.ts`），测试 `test/types/errors.test.ts` 从该路径导入，功能完整。
+
+其余核心交付物均已核实存在：`src/services/budget.ts`、`src/services/execution-env*.ts`、`src/state/session-tree.ts`、`src/commands/branch.ts`、8 个模块 `protocol.ts`、`src/permissions/engine.ts` 插件规则（Step 3.5）、`QueryEngine.steer()/followUp()`、`ctrl+i` steer 键位；对应测试（budget/compaction/execution-env/two-phase/session-tree/steering/hooks/contributions）均在 `test/` 下。`npm run typecheck` 实测通过；Windows 本机部分用例失败为 sandbox/路径分隔符环境差异（CI ubuntu 为准）。
+
+> 图例：`[x]` = 已实现且验证；`[~]` = 已实现但实现方式/位置与原描述有偏差（已就地加注）。

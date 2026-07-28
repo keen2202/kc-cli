@@ -93,11 +93,11 @@ export interface QueryEngineConfig {
   };
   /** Auto-extend turn budget when active progress is detected */
   autoExtendTurns?: boolean;
-  /** Hard ceiling for auto-extended turns (default 100) */
+  /** Hard ceiling for auto-extended turns; 0 or negative = unbounded (engine-local default 100) */
   maxTurnsCeiling?: number;
   /** Minimum turns before agent is allowed to exit (prevents early abandonment) */
   minTurns?: number;
-  /** Auto-commit interval in turns (0 = disabled, default 0) */
+  /** Auto-commit interval in turns (0 = disabled; engine-local default 0, production default flows from config) */
   autoCommitInterval?: number;
 
   /** Context window efficiency configuration (Area 3) */
@@ -165,6 +165,12 @@ export class QueryEngine {
   // File modification tracking (for incremental memory and patch guarantee)
   private modifiedFiles: Set<string> = new Set();
   private lastModifiedTurn: number = 0;
+  /**
+   * Last turn that made non-file progress (i.e. issued tool calls). Enables
+   * turn auto-extension for read/research-heavy long tasks that make genuine
+   * progress without editing files. Reset alongside lastModifiedTurn.
+   */
+  private lastProgressTurn: number = 0;
   // T3 (H3): session-scoped undo journal, consumed by the FileRestore tool.
   private fileJournal: FileOperationJournal = new FileOperationJournal();
 
@@ -403,7 +409,11 @@ export class QueryEngine {
     try {
       let turnCount = 0;
       let maxTurns = this.config.maxTurns;
-      const maxTurnsCeiling = this.config.maxTurnsCeiling || 100;
+      // Ceiling semantics: 0 or negative = unbounded — an actively-progressing
+      // long task is never cut off by the ceiling (stall detection below still
+      // stops a stagnant agent at the current budget).
+      const ceilingRaw = this.config.maxTurnsCeiling ?? 100;
+      const maxTurnsCeiling = ceilingRaw <= 0 ? Number.POSITIVE_INFINITY : ceilingRaw;
       const autoExtend = this.config.autoExtendTurns || false;
 
       // Complexity-aware turn adjustment (only if no explicit CLI override)
@@ -547,6 +557,18 @@ export class QueryEngine {
             if (this.stateMachine.isTerminal()) break;
             turnCount++;
 
+            // Long-task progress signal for turn auto-extension: a turn that
+            // issued tool calls counts as progress even when it modifies no
+            // files (e.g. read/research-heavy tasks). File edits update
+            // lastModifiedTurn separately (see recordModifiedFile).
+            const lastStreamedMsg = this.conversation.getLastMessage();
+            if (
+              lastStreamedMsg?.role === 'assistant' &&
+              ((lastStreamedMsg as AssistantMessage).toolCalls?.length ?? 0) > 0
+            ) {
+              this.lastProgressTurn = turnCount;
+            }
+
             // Area 3: Context Efficiency — tag each turn for smart compaction
             if (this.config.contextEfficiency?.importanceTagging ?? true) {
               this.fileContentCache.setTurn(turnCount);
@@ -620,7 +642,7 @@ export class QueryEngine {
             const autoCommitInterval = this.config.autoCommitInterval || 0;
             if (autoCommitInterval > 0 && turnCount > 0 && turnCount % autoCommitInterval === 0) {
               try {
-                const committed = await autoCommitAll(getState().cwd);
+                const committed = await autoCommitAll(getState().cwd, `kc-cli auto-commit: checkpoint at turn ${turnCount}`);
                 if (committed) {
                   logger.query.info(`[QueryEngine] Periodic auto-commit at turn ${turnCount}`);
                   yield this.createTextDeltaEvent(`[Auto-commit checkpoint at turn ${turnCount}]\n`);
@@ -642,8 +664,14 @@ export class QueryEngine {
             }
 
             if (turnCount >= maxTurns) {
-              // Dynamic turn extension: if auto-extend enabled and agent is actively making progress
-              if (autoExtend && maxTurns < maxTurnsCeiling && this.modifiedFiles.size > 0 && (turnCount - this.lastModifiedTurn) < 5) {
+              // Dynamic turn extension: extend when auto-extend is enabled and
+              // the agent is actively making progress — either editing files or
+              // (for read/research-heavy long tasks) still issuing tool calls.
+              const madeRecentFileProgress =
+                this.modifiedFiles.size > 0 && (turnCount - this.lastModifiedTurn) < 5;
+              const madeRecentToolProgress =
+                this.lastProgressTurn > 0 && (turnCount - this.lastProgressTurn) < 5;
+              if (autoExtend && maxTurns < maxTurnsCeiling && (madeRecentFileProgress || madeRecentToolProgress)) {
                 maxTurns += 20;
                 maxTurns = Math.min(maxTurns, maxTurnsCeiling);
                 logger.query.info(`[QueryEngine] Extended turn budget to ${maxTurns} — active progress detected`);
@@ -1714,6 +1742,7 @@ export class QueryEngine {
     this.followUpQueue = [];
     this.modifiedFiles.clear();
     this.lastModifiedTurn = 0;
+    this.lastProgressTurn = 0;
     this.zeroPatchRetries = 0;
     this.verificationRetries = 0;
     this.typeCheckRetries = 0;
@@ -1761,6 +1790,7 @@ export class QueryEngine {
     this.followUpQueue = [];
     this.modifiedFiles.clear();
     this.lastModifiedTurn = 0;
+    this.lastProgressTurn = 0;
     this.zeroPatchRetries = 0;
     this.verificationRetries = 0;
     this.typeCheckRetries = 0;
