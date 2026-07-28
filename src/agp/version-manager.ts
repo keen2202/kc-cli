@@ -190,6 +190,42 @@ export class VersionManager {
     return restoredRecord;
   }
 
+  // ─── Merge Accepted (T7) ─────────────────────────────────────────
+
+  /**
+   * Merge multiple accepted edits from one evolution round into a single
+   * new version snapshot (T7). Later records win on conflicting
+   * instantiation params; the entity/descriptor come from the last record.
+   * The commit message should list the source candidates.
+   *
+   * @returns The merged snapshot, or null when no records are given
+   */
+  mergeAccepted<T extends ResourceType>(
+    type: T,
+    name: string,
+    records: ResourceRegistrationRecord<T>[],
+    commitMessage: string
+  ): VersionSnapshot<T> | null {
+    if (records.length === 0) return null;
+
+    // Later edits win on param conflicts; entity fields come from the last.
+    const mergedParams: Record<string, unknown> = {};
+    for (const record of records) {
+      Object.assign(mergedParams, record.instantiationParams);
+    }
+
+    const merged: ResourceRegistrationRecord<T> = {
+      ...structuredClone(records[records.length - 1]),
+      instantiationParams: mergedParams,
+      version: this.nextVersion(type, name),
+    };
+
+    return this.createSnapshot(merged, {
+      resourceType: type,
+      commitMessage,
+    });
+  }
+
   // ─── Branching ─────────────────────────────────────────────────────────────
 
   /**

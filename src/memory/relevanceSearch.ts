@@ -240,6 +240,17 @@ function calculateRelevanceScoreInner(
     score += 1; // Within a month
   }
 
+  // T8: failure-signature weighting (additive, applied before multipliers).
+  // Memories without a signature keep the exact legacy scoring path.
+  if (memory.signature) {
+    if (memory.signature.terminalCause && queryLower.includes(memory.signature.terminalCause.toLowerCase())) {
+      score += 25;
+    }
+    if (memory.signature.mechanism && queryLower.includes(memory.signature.mechanism.toLowerCase())) {
+      score += 15;
+    }
+  }
+
   // Apply feedback multiplier
   score *= getFeedbackMultiplier(memory.fileName);
 

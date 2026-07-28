@@ -135,6 +135,7 @@ export function recordToMemConfig(record: ResourceRegistrationRecord<'Mem'>): Me
     semanticDedupThreshold: (p.semanticDedupThreshold as number) ?? 0.85,
     llmTriggerOnFeedbackSignal: (p.llmTriggerOnFeedbackSignal as boolean) ?? true,
     maxExtractionCostUsdPerSession: p.maxExtractionCostUsdPerSession as number | undefined,
+    failureBridging: (p.failureBridging as boolean) ?? false,
   };
 }
 

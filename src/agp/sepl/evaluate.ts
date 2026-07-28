@@ -12,6 +12,7 @@
  */
 
 import type { TraceManager } from '../trace-manager';
+import { runAcceptanceGate } from './acceptance-gate';
 import type {
   SEPLOperator,
   SEPLOutput,
@@ -20,6 +21,9 @@ import type {
   EvaluationSpace,
   EvaluationResult,
   ObjectiveSpec,
+  EvaluatorBackend,
+  GateDecision,
+  SplitResult,
 } from './protocol';
 
 // ─── Evaluate Operator ───────────────────────────────────────────────────────
@@ -30,15 +34,38 @@ export class EvaluateOperator implements SEPLOperator<ModificationSpace, Evaluat
   private objective: ObjectiveSpec;
   private traceManager: TraceManager;
   private baseline: Record<string, number>;
+  /** Optional real evaluator (T5); null keeps the heuristic path. */
+  private backend: EvaluatorBackend | null;
+  /** Baseline split results for gate comparison (fed by the caller). */
+  private baselineSplits: SplitResult[] | null = null;
+  /** Gate decision from the most recent backend-driven execute(). */
+  private lastGateDecision: GateDecision | null = null;
 
   constructor(
     objective: ObjectiveSpec,
     traceManager: TraceManager,
-    baseline?: Record<string, number>
+    baseline?: Record<string, number>,
+    backend?: EvaluatorBackend
   ) {
     this.objective = objective;
     this.traceManager = traceManager;
     this.baseline = baseline ?? {};
+    this.backend = backend ?? null;
+  }
+
+  /** Inject or clear the real evaluator backend (T5). */
+  setEvaluatorBackend(backend: EvaluatorBackend | null): void {
+    this.backend = backend;
+  }
+
+  /** Supply baseline split results so backend runs can feed the T4 gate. */
+  setBaselineSplits(splits: SplitResult[] | null): void {
+    this.baselineSplits = splits;
+  }
+
+  /** Gate decision from the last backend-driven evaluation (null if none). */
+  getLastGateDecision(): GateDecision | null {
+    return this.lastGateDecision;
   }
 
   async execute(
@@ -57,6 +84,11 @@ export class EvaluateOperator implements SEPLOperator<ModificationSpace, Evaluat
           success: true,
           durationMs: Date.now() - startTime,
         };
+      }
+
+      // Real evaluator injected (T5): score via actual verification runs
+      if (this.backend) {
+        return await this.executeWithBackend(state, input, startTime);
       }
 
       // Evaluate each modification as a candidate
@@ -97,16 +129,76 @@ export class EvaluateOperator implements SEPLOperator<ModificationSpace, Evaluat
   }
 
   /**
-   * Evaluate a single candidate modification.
+   * Backend-driven evaluation (T5): run the fixed held-in/held-out splits
+   * against the candidate state and, when baseline splits are available,
+   * derive acceptance from the T4 gate instead of heuristics.
    */
-  private evaluateCandidate(
+  private async executeWithBackend(
+    state: EvolvableState,
+    input: ModificationSpace,
+    startTime: number
+  ): Promise<SEPLOutput<EvaluationSpace>> {
+    this.lastGateDecision = null;
+
+    const candidateSplits: SplitResult[] = [
+      await this.backend!.evaluate(state, 'held_in'),
+      await this.backend!.evaluate(state, 'held_out'),
+    ];
+    const candidateRate = meanPassRate(candidateSplits);
+
+    let gate: GateDecision | null = null;
+    let improvementDelta = 0;
+    if (this.baselineSplits) {
+      gate = runAcceptanceGate(this.baselineSplits, candidateSplits, {
+        repeats: candidateSplits[0]?.repeats.length || undefined,
+      });
+      improvementDelta = candidateRate - meanPassRate(this.baselineSplits);
+      this.lastGateDecision = gate;
+    }
+
+    const results: EvaluationResult[] = input.modifications.map(mod => {
+      const failedConstraints = this.checkSafetyConstraints(state, mod);
+      const safetyPassed = failedConstraints.length === 0;
+      const gatePassed = gate
+        ? gate.decision === 'accept'
+        : candidateRate >= this.objective.minimumThreshold;
+      const accepted = safetyPassed && gatePassed;
+
+      const summary = accepted
+        ? `Accepted: ${mod.changeType} on ${mod.targetResource} (backend=${this.backend!.name}, passRate=${candidateRate.toFixed(3)}, Δ=${improvementDelta >= 0 ? '+' : ''}${improvementDelta.toFixed(3)})`
+        : `Rejected: ${mod.changeType} on ${mod.targetResource} (${!safetyPassed ? 'safety violation: ' + failedConstraints.join(', ') : gate ? `gate: ${gate.reason}` : `passRate=${candidateRate.toFixed(3)} below threshold`})`;
+
+      return {
+        accepted,
+        primaryScore: candidateRate,
+        metricScores: { [this.objective.primaryMetric]: candidateRate },
+        safetyPassed,
+        failedConstraints,
+        improvementDelta,
+        summary,
+      };
+    });
+
+    const bestIndex = results.findIndex(r => r.accepted);
+
+    return {
+      state,
+      output: {
+        results,
+        baseline: this.baseline,
+        bestCandidateIndex: bestIndex,
+      },
+      success: true,
+      durationMs: Date.now() - startTime,
+    };
+  }
+
+  /** Check safety constraints for one candidate; returns failed names. */
+  private checkSafetyConstraints(
     state: EvolvableState,
     mod: import('./protocol').Modification
-  ): EvaluationResult {
-    const metricScores: Record<string, number> = {};
+  ): string[] {
     const failedConstraints: string[] = [];
-
-    // 1. Check safety constraints
     for (const constraint of this.objective.safetyConstraints) {
       const constraintState = {
         modification: mod,
@@ -117,6 +209,20 @@ export class EvaluateOperator implements SEPLOperator<ModificationSpace, Evaluat
         failedConstraints.push(constraint.name);
       }
     }
+    return failedConstraints;
+  }
+
+  /**
+   * Evaluate a single candidate modification.
+   */
+  private evaluateCandidate(
+    state: EvolvableState,
+    mod: import('./protocol').Modification
+  ): EvaluationResult {
+    const metricScores: Record<string, number> = {};
+
+    // 1. Check safety constraints
+    const failedConstraints = this.checkSafetyConstraints(state, mod);
 
     const safetyPassed = failedConstraints.length === 0;
 
@@ -217,4 +323,17 @@ export class EvaluateOperator implements SEPLOperator<ModificationSpace, Evaluat
   updateBaseline(newBaseline: Record<string, number>): void {
     this.baseline = { ...this.baseline, ...newBaseline };
   }
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Mean pass rate across splits (each split averaged over its repeats). */
+function meanPassRate(splits: SplitResult[]): number {
+  if (splits.length === 0) return 0;
+  const perSplit = splits.map(s => {
+    if (s.repeats.length === 0) return 0;
+    const rates = s.repeats.map(r => (r.total > 0 ? r.passed / r.total : 0));
+    return rates.reduce((a, b) => a + b, 0) / rates.length;
+  });
+  return perSplit.reduce((a, b) => a + b, 0) / perSplit.length;
 }

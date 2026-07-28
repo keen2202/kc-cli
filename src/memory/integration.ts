@@ -4,8 +4,9 @@
 import type { ChatMessage } from '../query/protocol';
 import type { MemoryConfig, MemoryEntry } from '../memory/types';
 import { DEFAULT_MEMORY_CONFIG } from '../memory/types';
-import { findRelevantMemories } from '../memory/relevanceSearch';
+import { findRelevantMemories, invalidateScoreCache } from '../memory/relevanceSearch';
 import type { MemoryManifestEntry } from '../memory/types';
+import type { EvidenceBundle, EvidenceCluster } from '../agp/sepl/protocol';
 import {
   extractMemoriesHybrid,
   type LlmExtractionClient,
@@ -27,6 +28,47 @@ export interface MemoryIntegrationConfig {
   budget?: BudgetEnforcer | null;
   /** Injectable clock for deterministic tests. */
   now?: () => number;
+}
+
+/** Minimum cluster occurrence count before a failure signature is bridged (T8). */
+const DEFAULT_BRIDGE_THRESHOLD = 2;
+
+/** Slug for deterministic failure-memory file names. */
+function signatureSlug(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
+}
+
+/** Deterministic file name so re-bridging the same signature merges, never forks. */
+function failureMemoryFileName(cluster: EvidenceCluster): string {
+  const { terminalCause, mechanism } = cluster.signature;
+  return `failure-${signatureSlug(terminalCause)}-${signatureSlug(mechanism)}.md`;
+}
+
+/**
+ * Render the bridged memory body, separating verifier-level facts (observed,
+ * countable) from the inferred mechanism (deterministic heuristic) per T8.
+ * The `Occurrences:` line doubles as the merge-update count anchor.
+ */
+function renderFailureMemoryBody(cluster: EvidenceCluster, totalCount: number): string {
+  const lines: string[] = ['## Verifier-level facts', ''];
+  lines.push(`- Terminal cause: ${cluster.signature.terminalCause}`);
+  lines.push(`- Occurrences: ${totalCount}`);
+  if (cluster.sharedSymptoms.length > 0) {
+    lines.push('- Shared symptoms:');
+    for (const symptom of cluster.sharedSymptoms) {
+      lines.push(`  - ${symptom}`);
+    }
+  }
+  if (cluster.representativeEvents.length > 0) {
+    lines.push('- Representative events:');
+    for (const event of cluster.representativeEvents) {
+      lines.push(`  - [${event.source}] ${event.message}`);
+    }
+  }
+  lines.push('', '## Inferred mechanism', '');
+  lines.push(`- Mechanism: ${cluster.signature.mechanism}`);
+  lines.push(`- Causal status: ${cluster.signature.causalStatus}`);
+  return lines.join('\n');
 }
 
 /**
@@ -152,6 +194,95 @@ export class MemoryIntegration {
     } catch (error) {
       console.warn('[MemoryIntegration] Failed to extract memories:', error);
     }
+  }
+
+  /**
+   * T8: Bridge recurring failure signatures into feedback memories.
+   * Gated by `memory.failureBridging` (default false — zero behaviour change).
+   * Clusters below the occurrence threshold are skipped; a signature that was
+   * bridged before is merged into the existing memory (count accumulates)
+   * instead of creating a duplicate.
+   */
+  async bridgeFailureSignatures(
+    evidence: EvidenceBundle,
+    opts?: { threshold?: number }
+  ): Promise<void> {
+    if (!this.config.enabled || !this.config.failureBridging) {
+      return;
+    }
+
+    const threshold = opts?.threshold ?? DEFAULT_BRIDGE_THRESHOLD;
+    try {
+      const eligible = evidence.clusters.filter(c => c.count >= threshold);
+      if (eligible.length === 0) {
+        return;
+      }
+
+      const manifest = await this.getMemoryManifest();
+      let savedCount = 0;
+      for (const cluster of eligible) {
+        try {
+          await this.bridgeCluster(cluster, manifest);
+          savedCount++;
+        } catch (err) {
+          console.warn('[MemoryIntegration] Failed to bridge failure signature:', err);
+        }
+      }
+
+      if (savedCount > 0) {
+        // Bridged memories change manifest signatures/descriptions — drop stale scores.
+        invalidateScoreCache();
+      }
+    } catch (error) {
+      console.warn('[MemoryIntegration] Failed to bridge failure signatures:', error);
+    }
+  }
+
+  /** Merge-or-create a single failure cluster as a feedback memory. */
+  private async bridgeCluster(
+    cluster: EvidenceCluster,
+    manifest: MemoryManifestEntry[]
+  ): Promise<void> {
+    const { terminalCause, mechanism } = cluster.signature;
+
+    // Dedup by signature match (mechanism + terminalCause); deterministic
+    // file name is the fallback for legacy entries without a manifest signature.
+    const existing =
+      manifest.find(
+        m => m.signature?.terminalCause === terminalCause && m.signature?.mechanism === mechanism
+      ) ?? manifest.find(m => m.fileName === failureMemoryFileName(cluster));
+
+    const previousCount =
+      existing?.signature?.count ??
+      (existing ? await this.readOccurrenceCount(existing.fileName) : 0);
+    const totalCount = previousCount + cluster.count;
+
+    const now = this.now();
+    const entry: MemoryEntry = {
+      header: {
+        name: `Recurring failure: ${terminalCause}`,
+        description: `Recurring ${mechanism} failure (${terminalCause}) observed ${totalCount} time(s)`,
+        type: 'feedback',
+        createdAt: existing ? undefined : now,
+        updatedAt: now,
+        signature: { terminalCause, mechanism, count: totalCount },
+      },
+      content: renderFailureMemoryBody(cluster, totalCount),
+      filePath: '',
+      fileName: existing?.fileName ?? failureMemoryFileName(cluster),
+      mtime: now,
+    };
+
+    // saveMemory overwrites the same fileName → merge update, never a duplicate.
+    await this.saveMemory(entry);
+  }
+
+  /** Fallback occurrence count parser (`Occurrences: N` anchor in the body). */
+  private async readOccurrenceCount(fileName: string): Promise<number> {
+    const content = await this.getMemoryContent(fileName);
+    if (!content) return 0;
+    const match = content.match(/Occurrences:\s*(\d+)/);
+    return match ? parseInt(match[1], 10) : 0;
   }
 
   /**

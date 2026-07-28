@@ -11,6 +11,209 @@
 
 import type { ResourceType, ResourceRegistrationRecord } from '../protocol';
 
+// ─── Failure Signatures (harness-evolution T3 / H3) ─────────────────────────
+
+/**
+ * Deterministic failure mechanism inferred from the trace sequence.
+ * Rules are applied in a fixed priority order so the same trace always
+ * yields the same mechanism.
+ */
+export type FailureMechanism =
+  | 'retry_loop'             // Same call (source + input) failed consecutively >= 2 times
+  | 'missing_artifact'       // ENOENT-class: a required file/resource does not exist
+  | 'exploration_stall'      // Long read-only streak (or runtime-control break) before failure
+  | 'schema_invalid'         // Input/output failed schema or syntax validation
+  | 'timeout_unbounded'      // Operation exceeded its time budget
+  | 'permission_blocked'     // Permission/ACL denied the operation
+  | 'env_missing_dependency' // Missing command/module in the execution environment
+  | 'unknown';
+
+/** Causal role of a failure relative to the terminal (last) failure. */
+export type FailureCausalStatus = 'direct' | 'contributing' | 'incidental';
+
+/**
+ * Three-part structured failure signature. Replaces raw error-message
+ * string counting as the clustering key.
+ */
+export interface FailureSignature {
+  /** Stable cause identifier — reuses KCError ErrorCode / classifyToolError context prefixes */
+  terminalCause: string;
+  /** Causal role relative to the terminal failure of the trace */
+  causalStatus: FailureCausalStatus;
+  /** Deterministically inferred failure mechanism */
+  mechanism: FailureMechanism;
+}
+
+/** Minimal reference to a trace event backing an evidence cluster. */
+export interface EvidenceEventRef {
+  id: string;
+  source: string;
+  message: string;
+  timestamp: number;
+}
+
+/**
+ * A cluster of failures sharing the exact same signature.
+ * Intentionally contains NO prescriptions (no fix direction, no repair
+ * suggestion) — evaluator/optimizer separation is enforced by type shape.
+ */
+export interface EvidenceCluster {
+  signature: FailureSignature;
+  /** Number of failure events in this cluster */
+  count: number;
+  /** Up to 3 minimal event references */
+  representativeEvents: EvidenceEventRef[];
+  /** Up to 5 de-duplicated symptom messages */
+  sharedSymptoms: string[];
+}
+
+/**
+ * Evidence bundle produced by TraceManager.buildEvidenceBundle().
+ * Deterministic: the same trace sequence always yields the same bundle
+ * (modulo generatedAt).
+ */
+export interface EvidenceBundle {
+  clusters: EvidenceCluster[];
+  /** Total failure events considered */
+  totalFailures: number;
+  /** Bundle creation timestamp */
+  generatedAt: number;
+}
+
+// ─── Acceptance Gate (harness-evolution T4 / H4) ────────────────────────
+
+/** Evaluation splits — fixed before a run, identical across candidates. */
+export type EvalSplit = 'held_in' | 'held_out';
+
+/** One repeated run of a split: pass counts over a fixed denominator. */
+export interface SplitRepeat {
+  /** Repeat identifier (0-based index) */
+  repeat: number;
+  /** Number of passing tasks in this repeat */
+  passed: number;
+  /** Total tasks in this repeat (the denominator) */
+  total: number;
+}
+
+/** Result of evaluating one split (input shape for the acceptance gate). */
+export interface SplitResult {
+  split: EvalSplit;
+  repeats: SplitRepeat[];
+}
+
+/** Per-split detail in a gate decision. */
+export interface GateSplitDetail {
+  split: EvalSplit;
+  baselinePassRate: number;
+  candidatePassRate: number;
+  /** candidatePassRate - baselinePassRate */
+  delta: number;
+}
+
+/**
+ * Versioned acceptance-gate decision contract, persisted to
+ * `.kc-cli/audit/` for lineage tracking.
+ */
+export interface GateDecision {
+  format: 'kc.acceptance_gate.v1';
+  /** The acceptance rule, verbatim */
+  rule: string;
+  splits: GateSplitDetail[];
+  decision: 'accept' | 'reject';
+  reason: string;
+  /** Decision timestamp (ms since epoch) */
+  evaluatedAt: number;
+}
+
+/** Acceptance gate configuration (off by default). */
+export interface AcceptanceGateConfig {
+  /** Master switch — when false, SEPL behavior is unchanged */
+  enabled: boolean;
+  /** Fixed repeats per split (default 2) */
+  repeats?: number;
+  /** Directory for persisted gate decisions (default `.kc-cli/audit/`) */
+  auditDir?: string;
+}
+
+// ─── Evaluator Backend (T5 / H5) ─────────────────────────────────────────────
+
+/** Options for a single evaluator backend run. */
+export interface EvaluatorBackendOptions {
+  /** Fixed repeats per split (defaults to the eval-set setting, then 2) */
+  repeats?: number;
+  /** Per-task execution timeout in milliseconds */
+  timeoutMs?: number;
+  /** Abort signal propagated to task executions */
+  signal?: AbortSignal;
+}
+
+/**
+ * A real evaluation backend that scores a candidate state on a fixed eval
+ * split by executing actual verification tasks. Output aligns with the T4
+ * acceptance-gate input (`SplitResult`), so gate and evaluator compose
+ * without adapters.
+ */
+export interface EvaluatorBackend {
+  /** Backend identifier (e.g. "vitest") */
+  readonly name: string;
+  evaluate(
+    candidateState: EvolvableState,
+    split: EvalSplit,
+    opts?: EvaluatorBackendOptions
+  ): Promise<SplitResult>;
+}
+
+/**
+ * Placeholder for the SWE-bench-backed evaluator bridging SEPL to the
+ * QueryEngine benchmark pipeline (`query/protocol.ts` v3.3). Interface
+ * reserved as the integration point; intentionally not implemented yet.
+ */
+export interface SweBenchEvaluatorBackend extends EvaluatorBackend {
+  readonly name: 'swe-bench';
+  /** Benchmark subset identifier (e.g. "swe-bench-lite") */
+  readonly subset: string;
+}
+
+/**
+ * Evaluation-set definition loaded from `.kc-cli/evolution-eval.json`.
+ * Held-in / held-out task lists are fixed before a run and identical
+ * across all candidates (see `.kc-cli/evolution-eval-example.json`).
+ */
+export interface EvolutionEvalConfig {
+  format: 'kc.evolution_eval.v1';
+  /** Held-in verification tasks (e.g. vitest file paths) */
+  heldIn: string[];
+  /** Held-out verification tasks; must be disjoint from heldIn */
+  heldOut: string[];
+  /** Fixed repeats per split (default 2) */
+  repeats?: number;
+}
+
+// ─── LLM Proposer (T6 / M1) ─────────────────────────────────────────────────────
+
+/**
+ * Mandatory audit quadruple attached to every LLM proposal. Proposals
+ * missing any field are rejected before entering the pipeline.
+ */
+export interface ProposalAudit {
+  /** Which clustered failure pattern this edit targets */
+  targetFailurePattern: string;
+  /** The single instruction surface / resource being edited */
+  editedSurface: string;
+  /** Expected effect of the edit on the target pattern */
+  expectedEffect: string;
+  /** Self-assessed regression risk */
+  regressionRisk: string;
+}
+
+/** One bounded candidate edit produced by the LLM proposer. */
+export interface ProposalCandidate {
+  /** Proposed new value for the target variable */
+  proposedValue: string;
+  /** Mandatory audit quadruple */
+  audit: ProposalAudit;
+}
+
 // ─── Auxiliary Spaces ────────────────────────────────────────────────────────
 
 /**
@@ -29,6 +232,12 @@ export interface TraceSpace {
   };
   /** Session ID this trace covers */
   sessionId?: string;
+  /**
+   * Structured failure evidence (harness-evolution T3). Optional for
+   * backward compatibility — when absent, Reflect falls back to the
+   * legacy string-count heuristics.
+   */
+  evidence?: EvidenceBundle;
 }
 
 /**
@@ -270,6 +479,11 @@ export interface SEPLConfig {
   auditTrail: boolean;
   /** Timeout per operator (ms) */
   operatorTimeoutMs: number;
+  /**
+   * Non-regressive acceptance gate (harness-evolution T4). Optional for
+   * backward compatibility; disabled by default.
+   */
+  acceptanceGate?: AcceptanceGateConfig;
 }
 
 export const DEFAULT_SEPL_CONFIG: SEPLConfig = {
@@ -283,6 +497,7 @@ export const DEFAULT_SEPL_CONFIG: SEPLConfig = {
   autoRollback: true,
   auditTrail: true,
   operatorTimeoutMs: 30000,
+  acceptanceGate: { enabled: false, repeats: 2 },
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

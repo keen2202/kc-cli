@@ -19,9 +19,38 @@ import type {
   TraceSpace,
   HypothesisSpace,
   Hypothesis,
+  EvidenceCluster,
+  FailureMechanism,
 } from './protocol';
 import { generateHypothesisId } from './protocol';
 import type { ResourceType } from '../protocol';
+
+// ─── Mechanism → hypothesis mapping (harness-evolution T3) ─────────────────
+
+/**
+ * Deterministic mapping from failure mechanism to fix direction and
+ * implicated resource types. Lives in Reflect (the optimizer side) — the
+ * evidence bundle itself carries no prescriptions.
+ */
+const MECHANISM_HINTS: Record<FailureMechanism, {
+  fixDirection: Hypothesis['fixDirection'];
+  implicatedTypes: ResourceType[];
+}> = {
+  retry_loop: { fixDirection: 'prompt_tune', implicatedTypes: ['Agent', 'Prompt'] as ResourceType[] },
+  missing_artifact: { fixDirection: 'tool_replace', implicatedTypes: ['Tool'] as ResourceType[] },
+  exploration_stall: { fixDirection: 'prompt_tune', implicatedTypes: ['Agent', 'Prompt'] as ResourceType[] },
+  schema_invalid: { fixDirection: 'tool_replace', implicatedTypes: ['Tool'] as ResourceType[] },
+  timeout_unbounded: { fixDirection: 'config_change', implicatedTypes: ['Tool', 'Agent'] as ResourceType[] },
+  permission_blocked: { fixDirection: 'config_change', implicatedTypes: ['Tool'] as ResourceType[] },
+  env_missing_dependency: { fixDirection: 'config_change', implicatedTypes: ['Tool'] as ResourceType[] },
+  unknown: { fixDirection: 'prompt_tune', implicatedTypes: ['Agent', 'Tool'] as ResourceType[] },
+};
+
+const CAUSAL_BASE_CONFIDENCE: Record<string, number> = {
+  direct: 0.5,
+  contributing: 0.35,
+  incidental: 0.2,
+};
 
 // ─── Reflect Operator ────────────────────────────────────────────────────────
 
@@ -68,9 +97,68 @@ export class ReflectOperator implements SEPLOperator<TraceSpace, HypothesisSpace
 
   /**
    * Analyze trace data to generate causal hypotheses.
-   * Uses pattern matching heuristics (no LLM required for basic analysis).
+   *
+   * When a structured evidence bundle is present (harness-evolution T3),
+   * hypotheses are derived from signature clusters. The legacy string-count
+   * heuristics remain as a fallback for traces without evidence.
    */
   private generateHypotheses(trace: TraceSpace, state: EvolvableState): Hypothesis[] {
+    if (trace.evidence && trace.evidence.clusters.length > 0) {
+      return this.generateHypothesesFromEvidence(trace.evidence.clusters, state);
+    }
+    return this.generateLegacyHypotheses(trace, state);
+  }
+
+  /**
+   * Evidence-driven path: one hypothesis per signature cluster, ordered by
+   * cluster weight (deterministic given a deterministic bundle).
+   */
+  private generateHypothesesFromEvidence(
+    clusters: EvidenceCluster[],
+    state: EvolvableState
+  ): Hypothesis[] {
+    const hypotheses: Hypothesis[] = [];
+
+    for (const cluster of clusters) {
+      const { terminalCause, causalStatus, mechanism } = cluster.signature;
+      const hints = MECHANISM_HINTS[mechanism];
+      const base = CAUSAL_BASE_CONFIDENCE[causalStatus] ?? 0.2;
+      const confidence = Math.min(0.9, base + cluster.count * 0.1);
+
+      // Suspect the tools that produced the representative events, but only
+      // if they are actually in the evolvable subspace.
+      const suspectedResources = Array.from(new Set(
+        cluster.representativeEvents
+          .map(e => `Tool:${e.source}`)
+          .filter(key => state.trainableSubset.some(k => k.startsWith(key)))
+      ));
+
+      hypotheses.push({
+        id: generateHypothesisId(),
+        description: `Failure cluster [${mechanism}] terminalCause=${terminalCause} (${causalStatus}), observed ${cluster.count} time(s)`,
+        confidence,
+        implicatedTypes: hints.implicatedTypes,
+        suspectedResources,
+        fixDirection: hints.fixDirection,
+        evidence: [
+          `terminalCause=${terminalCause}`,
+          `mechanism=${mechanism}`,
+          `causalStatus=${causalStatus}`,
+          `count=${cluster.count}`,
+          ...cluster.sharedSymptoms.map(s => `symptom: ${s}`),
+        ],
+      });
+    }
+
+    hypotheses.sort((a, b) => b.confidence - a.confidence);
+    return hypotheses;
+  }
+
+  /**
+   * Legacy fallback: pattern matching heuristics over the string-count
+   * execution summary (no LLM required for basic analysis).
+   */
+  private generateLegacyHypotheses(trace: TraceSpace, state: EvolvableState): Hypothesis[] {
     const hypotheses: Hypothesis[] = [];
     const summary = trace.executionSummary;
 
@@ -216,5 +304,8 @@ export function buildTraceSpace(
       llmIssues,
     },
     sessionId,
+    // harness-evolution T3: structured failure evidence for the Reflect
+    // operator. Optional field — consumers without evidence still work.
+    evidence: traceManager.buildEvidenceBundle(sessionId),
   };
 }

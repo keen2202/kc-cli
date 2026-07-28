@@ -2,6 +2,8 @@
 
 import type { ChatMessage } from '../query/protocol';
 import type { AgentState } from '../state/types';
+import type { MemoryIntegration } from '../memory/integration';
+import type { EvidenceBundle } from '../agp/sepl/protocol';
 import { flushOperationAudit } from '../services/operation-audit-log';
 
 export interface PostTurnHookContext {
@@ -21,6 +23,27 @@ const hooks: PostTurnHook[] = [];
  */
 export function registerPostTurnHook(hook: PostTurnHook): void {
   hooks.push(hook);
+}
+
+/**
+ * T8: Register the failure-signature → memory bridging hook.
+ * The evidence provider returns the current EvidenceBundle (or null when no
+ * failure evidence is available this turn). Bridging itself is gated by
+ * `memory.failureBridging` (default false) inside MemoryIntegration, so
+ * registering this hook alone changes no behaviour.
+ */
+export function registerFailureBridgingHook(
+  integration: MemoryIntegration,
+  getEvidence: () => EvidenceBundle | null,
+  opts?: { threshold?: number }
+): void {
+  registerPostTurnHook(async () => {
+    const evidence = getEvidence();
+    if (!evidence || evidence.clusters.length === 0) {
+      return;
+    }
+    await integration.bridgeFailureSignatures(evidence, opts);
+  });
 }
 
 /**

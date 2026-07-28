@@ -77,6 +77,7 @@ export type ErrorCode =
   | 'session_not_found'
   | 'budget_exceeded'
   | 'model_no_patch'
+  | 'evaluation_incomparable'
   | 'unknown';
 
 /**

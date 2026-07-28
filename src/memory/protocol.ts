@@ -9,6 +9,20 @@ import type { ChatMessage } from '../query/protocol';
 export type MemoryType = 'user' | 'feedback' | 'project' | 'reference';
 
 /**
+ * Failure signature attached to bridged feedback memories (T8).
+ * Mirrors the deterministic part of the SEPL FailureSignature so relevance
+ * search can weight mechanism-matching memories without importing agp types.
+ */
+export interface MemorySignature {
+  /** Stable terminal cause identifier (KCError code / context prefix). */
+  terminalCause: string;
+  /** Deterministically inferred failure mechanism. */
+  mechanism: string;
+  /** Cumulative number of failure events observed for this signature. */
+  count?: number;
+}
+
+/**
  * Memory file frontmatter - YAML header for memory files
  */
 export interface MemoryHeader {
@@ -18,6 +32,8 @@ export interface MemoryHeader {
   createdAt?: number;
   updatedAt?: number;
   confidence?: 'low' | 'high';
+  /** Failure signature for bridged failure memories (T8, optional). */
+  signature?: MemorySignature;
 }
 
 /**
@@ -91,6 +107,8 @@ export interface MemoryManifestEntry {
   type: MemoryType;
   mtime: number;
   confidence?: 'low' | 'high';
+  /** Failure signature for bridged failure memories (T8, optional). */
+  signature?: MemorySignature;
 }
 
 /**
@@ -138,6 +156,9 @@ export interface MemoryConfig {
   llmTriggerOnFeedbackSignal: boolean;
   /** Optional per-session USD cap for extraction calls. */
   maxExtractionCostUsdPerSession?: number;
+  // ── Failure signature → memory bridging (T8) ──
+  /** Bridge recurring failure signatures into feedback memories (default false). */
+  failureBridging: boolean;
 }
 
 /**
@@ -160,4 +181,6 @@ export const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   llmExtraction: { enabled: false },
   semanticDedupThreshold: 0.85,
   llmTriggerOnFeedbackSignal: true,
+  // ── Failure signature bridging (T8) — off by default (zero behaviour change) ──
+  failureBridging: false,
 };

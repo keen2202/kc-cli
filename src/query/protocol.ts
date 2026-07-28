@@ -140,3 +140,35 @@ export interface ContextEfficiencyConfig {
   failedAttemptMaxAge: number;
   explorationMaxAge: number;
 }
+
+// ─── Runtime Control Policy (harness-evolution T2 / H2) ─────────────────
+
+/**
+ * Cross-turn runtime behavior policy ported from the Self-Harness golden
+ * rules: retry discipline, exploration-loop breaking, and a total
+ * tool-message cap with redirection. All interventions are OFF by default
+ * (`enabled: false`) — zero behavior change when disabled.
+ */
+export interface RuntimeControlPolicy {
+  enabled: boolean;
+  /** Consecutive failures of the same (toolName, inputHash) call before intervention. */
+  maxSameCallRetries: number;
+  /** 'soft' injects a retry-discipline instruction next turn; 'hard' rejects the repeated call. */
+  retryIntervention: 'soft' | 'hard';
+  /** Consecutive read-only turns (no write/exec tools) before the loop breaker fires. */
+  maxReadOnlyStreak: number;
+  /** Total tool messages allowed before a redirect instruction is injected (0 = disabled). */
+  maxTotalToolMessages: number;
+  /** Custom redirect instruction for the tool-message cap (default provided by the engine). */
+  redirectInstruction?: string;
+}
+
+/** A single runtime-control intervention, recorded for tracing (T3 consumption). */
+export interface RuntimeControlIntervention {
+  kind: 'retry_discipline' | 'exploration_break' | 'tool_message_redirect';
+  mode: 'soft' | 'hard';
+  toolName?: string;
+  inputHash?: string;
+  detail: string;
+  timestamp: number;
+}

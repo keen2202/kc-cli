@@ -65,7 +65,12 @@ export class EvolutionLoop {
       select: new SelectOperator(),
       improve: new ImproveOperator(deps.serverInterface),
       evaluate: new EvaluateOperator(this.config.objective, deps.traceManager),
-      commit: new CommitOperator(deps.serverInterface, deps.versionManager, this.config.autoRollback),
+      commit: new CommitOperator(
+        deps.serverInterface,
+        deps.versionManager,
+        this.config.autoRollback,
+        this.config.acceptanceGate // harness-evolution T4 (disabled by default)
+      ),
     };
   }
 

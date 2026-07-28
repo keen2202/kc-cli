@@ -13,6 +13,14 @@
 
 // ─── Trace Types ─────────────────────────────────────────────────────────────
 
+import { classifyToolError, classifyApiError } from '../services/error-classifier';
+import type {
+  EvidenceBundle,
+  EvidenceCluster,
+  FailureCausalStatus,
+  FailureMechanism,
+} from './sepl/protocol';
+
 /** Categories of trace events */
 export type TraceEventCategory =
   | 'tool_call'         // External tool invocation
@@ -404,6 +412,100 @@ export class TraceManager {
     };
   }
 
+  // ─── Failure Signatures & Evidence Bundle (harness-evolution T3) ────────
+
+  /**
+   * Build a deterministic evidence bundle from the trace sequence.
+   *
+   * Each failure event gets a three-part signature
+   * (terminalCause, causalStatus, mechanism); failures are clustered by
+   * exact signature equality. The bundle carries evidence only — no
+   * prescriptions — so the evaluator/optimizer separation holds.
+   */
+  buildEvidenceBundle(sessionId?: string): EvidenceBundle {
+    const events = sessionId
+      ? this.query({ sessionId })
+      : this.getRecent(500);
+
+    // Pre-compute consecutive-failure streaks per (source + canonical input)
+    // so retry_loop detection is O(n) and order-deterministic.
+    const streaks = new Map<string, number>();
+    const failures: Array<{ event: TraceEvent; index: number; streak: number }> = [];
+    events.forEach((event, index) => {
+      if (event.category === 'tool_call' || event.isError) {
+        const key = `${event.source}|${canonicalizeInput(event.data?.input)}`;
+        if (event.isError) {
+          const next = (streaks.get(key) ?? 0) + 1;
+          streaks.set(key, next);
+          failures.push({ event, index, streak: next });
+        } else {
+          streaks.set(key, 0);
+        }
+      }
+    });
+
+    // Derive (terminalCause, mechanism) per failure.
+    const signed = failures.map(({ event, index, streak }) => ({
+      event,
+      terminalCause: deriveTerminalCause(event),
+      mechanism: deriveMechanism(event, index, streak, events),
+    }));
+
+    // Causal status relative to the terminal (last) failure.
+    const coreCounts = new Map<string, number>();
+    for (const s of signed) {
+      const core = `${s.terminalCause}|${s.mechanism}`;
+      coreCounts.set(core, (coreCounts.get(core) ?? 0) + 1);
+    }
+    const last = signed[signed.length - 1];
+    const terminalCore = last ? `${last.terminalCause}|${last.mechanism}` : null;
+
+    // Cluster by exact signature equality.
+    const clusters = new Map<string, EvidenceCluster>();
+    for (const s of signed) {
+      const core = `${s.terminalCause}|${s.mechanism}`;
+      const causalStatus: FailureCausalStatus =
+        core === terminalCore ? 'direct'
+        : (coreCounts.get(core) ?? 0) >= 2 ? 'contributing'
+        : 'incidental';
+      const key = `${s.terminalCause}|${causalStatus}|${s.mechanism}`;
+      let cluster = clusters.get(key);
+      if (!cluster) {
+        cluster = {
+          signature: { terminalCause: s.terminalCause, causalStatus, mechanism: s.mechanism },
+          count: 0,
+          representativeEvents: [],
+          sharedSymptoms: [],
+        };
+        clusters.set(key, cluster);
+      }
+      cluster.count++;
+      if (cluster.representativeEvents.length < 3) {
+        cluster.representativeEvents.push({
+          id: s.event.id,
+          source: s.event.source,
+          message: s.event.errorMessage ?? s.event.message,
+          timestamp: s.event.timestamp,
+        });
+      }
+      const symptom = s.event.errorMessage ?? s.event.message;
+      if (cluster.sharedSymptoms.length < 5 && !cluster.sharedSymptoms.includes(symptom)) {
+        cluster.sharedSymptoms.push(symptom);
+      }
+    }
+
+    // Deterministic ordering: count desc, then signature key asc.
+    const sorted = Array.from(clusters.entries())
+      .sort((a, b) => b[1].count - a[1].count || (a[0] < b[0] ? -1 : 1))
+      .map(([, cluster]) => cluster);
+
+    return {
+      clusters: sorted,
+      totalFailures: signed.length,
+      generatedAt: Date.now(),
+    };
+  }
+
   // ─── Cleanup ─────────────────────────────────────────────────────────────
 
   /**
@@ -447,6 +549,99 @@ export class TraceManager {
     }
     this.currentSessionId = data.currentSessionId as string | null;
   }
+}
+
+// ─── Failure Signature Helpers (harness-evolution T3) ────────────────────
+
+/** Read-only tools — mirrors QueryEngineRuntimeControl.READ_ONLY_TOOLS. */
+const READ_ONLY_TOOLS = new Set([
+  'FileRead', 'Grep', 'Glob', 'WebSearch', 'WebFetch', 'TaskGet', 'Monitor',
+]);
+
+/** Read-only tool_call streak length that indicates exploration stall. */
+const EXPLORATION_STALL_THRESHOLD = 5;
+
+const ENV_DEPENDENCY_REGEX = /command not found|not recognized as an internal|cannot find module|no module named|is not installed/;
+const MISSING_ARTIFACT_REGEX = /enoent|no such file|does not exist/;
+const SCHEMA_INVALID_REGEX = /schema|validation failed|invalid (?:input|argument|param)|unexpected token|syntaxerror/;
+const TIMEOUT_REGEX = /timeout|timed\s*out|etimedout/;
+const PERMISSION_REGEX = /permission denied|eacces|denied/;
+
+/** Canonical, key-sorted JSON of a tool input for stable streak keys. */
+function canonicalizeInput(input: unknown): string {
+  if (input === undefined || input === null) return '';
+  try {
+    if (typeof input === 'object' && !Array.isArray(input)) {
+      const sorted = Object.keys(input as Record<string, unknown>).sort()
+        .map(k => `${k}:${JSON.stringify((input as Record<string, unknown>)[k])}`);
+      return sorted.join(',');
+    }
+    return JSON.stringify(input);
+  } catch {
+    return String(input);
+  }
+}
+
+/**
+ * Derive the stable terminal cause identifier for a failure event.
+ * Priority: explicit errorCode in event data > classifyToolError context
+ * prefix (tool calls) > classifyApiError context (everything else).
+ */
+function deriveTerminalCause(event: TraceEvent): string {
+  const explicit = event.data?.errorCode;
+  if (typeof explicit === 'string' && explicit.length > 0) return explicit;
+
+  const message = event.errorMessage ?? event.message;
+  if (event.category === 'tool_call') {
+    return classifyToolError(new Error(message), event.source).context.split(':')[0];
+  }
+  return classifyApiError(new Error(message)).context;
+}
+
+/**
+ * Infer the failure mechanism from the trace sequence using deterministic
+ * rules applied in fixed priority order.
+ */
+function deriveMechanism(
+  event: TraceEvent,
+  index: number,
+  streak: number,
+  events: TraceEvent[]
+): FailureMechanism {
+  const message = (event.errorMessage ?? event.message).toLowerCase();
+
+  // 1. Same call failed consecutively >= 2 times (must be checked first,
+  //    otherwise message-based rules would mask the loop).
+  if (streak >= 2) return 'retry_loop';
+
+  // 2–6. Message-based rules (env before artifact: "command not found"
+  //    must not be mistaken for a missing file).
+  if (ENV_DEPENDENCY_REGEX.test(message)) return 'env_missing_dependency';
+  if (MISSING_ARTIFACT_REGEX.test(message)) return 'missing_artifact';
+  if (SCHEMA_INVALID_REGEX.test(message)) return 'schema_invalid';
+  if (TIMEOUT_REGEX.test(message)) return 'timeout_unbounded';
+  if (PERMISSION_REGEX.test(message)) return 'permission_blocked';
+
+  // 7. Exploration stall: a runtime-control break was recorded earlier, or
+  //    the failure follows a long streak of successful read-only tool calls.
+  for (let i = index - 1; i >= 0; i--) {
+    const prior = events[i];
+    if (prior.category === 'decision'
+      && prior.source === 'runtime-control'
+      && prior.message.startsWith('exploration_break')) {
+      return 'exploration_stall';
+    }
+  }
+  let readOnlyStreak = 0;
+  for (let i = index - 1; i >= 0; i--) {
+    const prior = events[i];
+    if (prior.category !== 'tool_call') continue; // skip llm/state events
+    if (prior.isError || !READ_ONLY_TOOLS.has(prior.source)) break;
+    readOnlyStreak++;
+    if (readOnlyStreak >= EXPLORATION_STALL_THRESHOLD) return 'exploration_stall';
+  }
+
+  return 'unknown';
 }
 
 /**

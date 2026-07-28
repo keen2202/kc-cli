@@ -15,10 +15,15 @@ import { getServerInterface } from './server-interface';
 import * as fs from 'fs';
 import * as path from 'path';
 
+/** Versioned on-disk format for serialized AGP state (T7). */
+export const AGP_STATE_FORMAT = 'kc.agp_state.v1';
+
 /**
  * Serialized state of all AGP resources.
  */
 export interface AGPSerializedState {
+  /** Data-contract version marker; absent in legacy files (tolerated on load) */
+  format?: string;
   version: string;
   timestamp: number;
   resources: Record<ResourceType, Record<string, ResourceRegistrationRecord>>;
@@ -61,6 +66,7 @@ export class DynamicManager {
     }
 
     return {
+      format: AGP_STATE_FORMAT,
       version: '1.0.0',
       timestamp: Date.now(),
       resources: resources as Record<ResourceType, Record<string, ResourceRegistrationRecord>>,

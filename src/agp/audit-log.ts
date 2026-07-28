@@ -11,7 +11,10 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { EvolutionCycleResult } from './sepl/protocol';
-import type { Hypothesis, Modification, EvaluationResult } from './sepl/protocol';
+import type { Hypothesis, Modification, EvaluationResult, ProposalAudit } from './sepl/protocol';
+
+/** Versioned on-disk format for the persisted audit log (T7). */
+export const AUDIT_LOG_FORMAT = 'kc.audit_log.v1';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -25,7 +28,7 @@ export interface AuditEntry {
   /** Evolution iteration */
   iteration: number;
   /** Phase of the audit entry */
-  phase: 'trigger' | 'hypothesis' | 'proposal' | 'change' | 'evaluation' | 'decision' | 'version';
+  phase: 'trigger' | 'hypothesis' | 'proposal' | 'change' | 'evaluation' | 'decision' | 'version' | 'rejected';
   /** Details for this phase */
   details: Record<string, unknown>;
   /** Related resource names */
@@ -88,6 +91,43 @@ export class AuditLog {
     }
 
     return full;
+  }
+
+  /**
+   * Record an LLM proposal outcome with its mandatory audit quadruple
+   * (T6). Both accepted and rejected candidates leave a trail; rejected
+   * entries carry the rejection reason as the error.
+   */
+  recordProposal(
+    sessionId: string,
+    iteration: number,
+    proposal: {
+      targetResource: string;
+      changeType: string;
+      proposer: string;
+      audit: ProposalAudit;
+      accepted: boolean;
+      reason?: string;
+    }
+  ): AuditEntry {
+    return this.record({
+      sessionId,
+      iteration,
+      phase: 'proposal',
+      details: {
+        proposer: proposal.proposer,
+        target: proposal.targetResource,
+        changeType: proposal.changeType,
+        targetFailurePattern: proposal.audit.targetFailurePattern,
+        editedSurface: proposal.audit.editedSurface,
+        expectedEffect: proposal.audit.expectedEffect,
+        regressionRisk: proposal.audit.regressionRisk,
+        accepted: proposal.accepted,
+      },
+      resources: [proposal.targetResource],
+      success: proposal.accepted,
+      error: proposal.accepted ? undefined : proposal.reason,
+    });
   }
 
   /**
@@ -235,21 +275,23 @@ export class AuditLog {
   // ─── Persistence ──────────────────────────────────────────────────────────
 
   /**
-   * Save audit log to disk.
+   * Save audit log to disk (versioned `kc.audit_log.v1` envelope).
    */
   async save(): Promise<void> {
     if (!this.persistDir) return;
     const filePath = path.join(this.persistDir, 'audit-log.json');
     try {
       await fs.promises.mkdir(this.persistDir, { recursive: true });
-      await fs.promises.writeFile(filePath, JSON.stringify(this.entries, null, 2), 'utf-8');
+      const payload = { format: AUDIT_LOG_FORMAT, entries: this.entries };
+      await fs.promises.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf-8');
     } catch {
       // Persistence failure is non-fatal
     }
   }
 
   /**
-   * Load audit log from disk.
+   * Load audit log from disk. Tolerates both the versioned envelope and
+   * legacy format-less files (a bare entries array).
    */
   async load(): Promise<void> {
     if (!this.persistDir) return;
@@ -258,7 +300,10 @@ export class AuditLog {
       const data = await fs.promises.readFile(filePath, 'utf-8');
       const parsed = JSON.parse(data);
       if (Array.isArray(parsed)) {
+        // Legacy pre-format file: bare entries array
         this.entries = parsed;
+      } else if (parsed && Array.isArray(parsed.entries)) {
+        this.entries = parsed.entries;
       }
     } catch {
       // No existing audit log

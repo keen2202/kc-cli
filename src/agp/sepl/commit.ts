@@ -13,11 +13,14 @@
 
 import type { ServerInterface } from '../server-interface';
 import type { VersionManager } from '../version-manager';
+import type { AuditLog } from '../audit-log';
 import type {
   SEPLOperator,
   SEPLOutput,
   EvolvableState,
   EvaluationSpace,
+  AcceptanceGateConfig,
+  GateDecision,
 } from './protocol';
 
 // ─── Commit Decision ─────────────────────────────────────────────────────────
@@ -47,15 +50,66 @@ export class CommitOperator implements SEPLOperator<EvaluationSpace, CommitDecis
   private autoRollback: boolean;
   /** Snapshot of baseline versions at evolution cycle start (FUN-10) */
   private baselineVersions: Map<string, string> = new Map();
+  /** harness-evolution T4: acceptance gate config (disabled by default) */
+  private acceptanceGate?: AcceptanceGateConfig;
+  /** Latest gate decision, supplied by the evaluation pipeline */
+  private gateDecision: GateDecision | null = null;
+  /** T7: audit log for rejected-candidate lineage (optional) */
+  private auditLog?: AuditLog;
+  /** T7: audit context supplied by the evolution loop */
+  private auditContext: { sessionId: string; iteration: number } = { sessionId: 'unknown', iteration: 0 };
 
   constructor(
     serverInterface: ServerInterface,
     versionManager: VersionManager,
-    autoRollback = true
+    autoRollback = true,
+    acceptanceGate?: AcceptanceGateConfig,
+    auditLog?: AuditLog
   ) {
     this.serverInterface = serverInterface;
     this.versionManager = versionManager;
     this.autoRollback = autoRollback;
+    this.acceptanceGate = acceptanceGate;
+    this.auditLog = auditLog;
+  }
+
+  /**
+   * Set the session/iteration context stamped onto rejected-candidate
+   * audit entries (T7).
+   */
+  setAuditContext(context: { sessionId: string; iteration: number }): void {
+    this.auditContext = context;
+  }
+
+  /**
+   * T7: record rejected candidates in the audit log without changing the
+   * active harness — preserves full candidate lineage.
+   */
+  private recordRejected(input: EvaluationSpace, reason: string): void {
+    this.auditLog?.record({
+      sessionId: this.auditContext.sessionId,
+      iteration: this.auditContext.iteration,
+      phase: 'rejected',
+      details: {
+        reason,
+        candidates: input.results.map(r => ({
+          summary: r.summary,
+          score: r.primaryScore,
+          delta: r.improvementDelta,
+          accepted: r.accepted,
+        })),
+      },
+      resources: [],
+      success: true,
+    });
+  }
+
+  /**
+   * Supply the acceptance-gate decision for the current cycle
+   * (harness-evolution T4). Only honored when the gate is enabled.
+   */
+  setGateDecision(decision: GateDecision | null): void {
+    this.gateDecision = decision;
   }
 
   async execute(
@@ -77,8 +131,32 @@ export class CommitOperator implements SEPLOperator<EvaluationSpace, CommitDecis
     }
 
     try {
-      if (input.bestCandidateIndex < 0 || input.results.length === 0) {
+      // harness-evolution T4: when the acceptance gate is enabled, its
+      // conclusion overrides the heuristic accept flags entirely.
+      const gateActive = this.acceptanceGate?.enabled === true && this.gateDecision !== null;
+      if (gateActive && this.gateDecision!.decision === 'reject') {
+        this.recordRejected(input, `Acceptance gate rejected: ${this.gateDecision!.reason}`);
+        if (this.autoRollback) {
+          await this.rollbackAll(state);
+        }
+        return {
+          state,
+          output: {
+            accepted: false,
+            committedResources: [],
+            rolledBackResources: [],
+            newVersions: new Map(),
+            reason: `Acceptance gate rejected: ${this.gateDecision!.reason}`,
+            timestamp: Date.now(),
+          },
+          success: true,
+          durationMs: Date.now() - startTime,
+        };
+      }
+
+      if ((!gateActive && input.bestCandidateIndex < 0) || input.results.length === 0) {
         // No acceptable candidates — rollback if configured
+        this.recordRejected(input, 'No candidates passed evaluation');
         if (this.autoRollback) {
           await this.rollbackAll(state);
         }
@@ -98,10 +176,13 @@ export class CommitOperator implements SEPLOperator<EvaluationSpace, CommitDecis
         };
       }
 
-      // Find all accepted candidates
-      const acceptedResults = input.results.filter(r => r.accepted);
+      // Find all accepted candidates (gate acceptance overrides heuristics)
+      const acceptedResults = gateActive
+        ? input.results
+        : input.results.filter(r => r.accepted);
 
       if (acceptedResults.length === 0) {
+        this.recordRejected(input, 'All candidates rejected');
         return {
           state,
           output: {

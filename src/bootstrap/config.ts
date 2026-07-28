@@ -117,6 +117,27 @@ export const ConfigSchema = z.object({
     enabled: z.boolean().default(true),
   }).default({}),
 
+  // ── Prompt instruction surfaces (harness-evolution T1) — off by default ──
+  promptSurfaces: z.object({
+    /** Enable predicate-triggered conditional prompt injection (bootstrap/failure-recovery surfaces). */
+    conditionalInjection: z.boolean().default(false),
+  }).default({}),
+
+  // ── Cross-turn runtime control policy (harness-evolution T2) — off by default ──
+  runtimeControl: z.object({
+    enabled: z.boolean().default(false),
+    /** Consecutive failures of the same (tool, input) call before intervention. */
+    maxSameCallRetries: z.number().int().min(1).default(2),
+    /** 'soft' injects a retry-discipline instruction; 'hard' rejects the repeated call. */
+    retryIntervention: z.enum(['soft', 'hard']).default('soft'),
+    /** Consecutive read-only turns before the exploration-loop breaker fires. */
+    maxReadOnlyStreak: z.number().int().min(1).default(5),
+    /** Total tool-message cap before a redirect instruction is injected (0 = disabled). */
+    maxTotalToolMessages: z.number().int().min(0).default(0),
+    /** Custom redirect instruction injected when the tool-message cap is hit. */
+    redirectInstruction: z.string().optional(),
+  }).default({}),
+
   // IM Platform Integration
   im: z.object({
     enabled: z.boolean().default(false),
@@ -513,6 +534,29 @@ export function loadEnvConfig(): Partial<Config> {
       mem.maxExtractionCostUsdPerSession = raw;
     } else {
       logger.services.warn(`Invalid KC_MEMORY_MAX_EXTRACTION_COST_USD value: "${process.env.KC_MEMORY_MAX_EXTRACTION_COST_USD}" -- discarding`);
+    }
+  }
+
+  // Prompt instruction surfaces (harness-evolution T1)
+  if (process.env.KC_PROMPT_SURFACES_CONDITIONAL_INJECTION) {
+    if (!config.promptSurfaces) config.promptSurfaces = {} as Config['promptSurfaces'];
+    config.promptSurfaces.conditionalInjection =
+      process.env.KC_PROMPT_SURFACES_CONDITIONAL_INJECTION === 'true' || process.env.KC_PROMPT_SURFACES_CONDITIONAL_INJECTION === '1';
+  }
+
+  // Runtime control policy (harness-evolution T2)
+  if (process.env.KC_RUNTIME_CONTROL_ENABLED) {
+    if (!config.runtimeControl) config.runtimeControl = {} as Config['runtimeControl'];
+    config.runtimeControl.enabled =
+      process.env.KC_RUNTIME_CONTROL_ENABLED === 'true' || process.env.KC_RUNTIME_CONTROL_ENABLED === '1';
+  }
+  if (process.env.KC_RUNTIME_CONTROL_RETRY_INTERVENTION) {
+    const raw = process.env.KC_RUNTIME_CONTROL_RETRY_INTERVENTION;
+    if (raw === 'soft' || raw === 'hard') {
+      if (!config.runtimeControl) config.runtimeControl = {} as Config['runtimeControl'];
+      config.runtimeControl.retryIntervention = raw;
+    } else {
+      logger.services.warn(`Invalid KC_RUNTIME_CONTROL_RETRY_INTERVENTION value: "${raw}" -- discarding`);
     }
   }
 

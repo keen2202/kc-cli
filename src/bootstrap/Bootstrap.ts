@@ -428,6 +428,9 @@ export class Bootstrap {
                 ask: config.permissions.ask,
                 allow: config.permissions.allow,
               },
+              // harness-evolution T1/T2: opt-in prompt surfaces + runtime control
+              promptSurfaces: config.promptSurfaces,
+              runtimeControl: config.runtimeControl,
             },
             sessionTools,
           );
@@ -494,6 +497,9 @@ export class Bootstrap {
           ask: config.permissions.ask,
           allow: config.permissions.allow,
         },
+        // harness-evolution T1/T2: opt-in prompt surfaces + runtime control
+        promptSurfaces: config.promptSurfaces,
+        runtimeControl: config.runtimeControl,
       },
       tools,
     );

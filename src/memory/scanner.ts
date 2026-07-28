@@ -55,6 +55,7 @@ export async function scanMemoryFiles(
         type: memoryType,
         mtime: stat.mtimeMs,
         confidence: header.confidence,
+        signature: header.signature,
       });
     } catch {
       // Skip invalid files

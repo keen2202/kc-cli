@@ -12,12 +12,15 @@
  */
 
 import type { ServerInterface } from '../server-interface';
+import type { LLMProposer } from './llm-proposer';
+import { emptyEvidenceBundle } from './llm-proposer';
 import type {
   SEPLOperator,
   SEPLOutput,
   EvolvableState,
   ModificationSpace,
   Modification,
+  EvidenceBundle,
 } from './protocol';
 import type { ResourceType } from '../protocol';
 
@@ -208,9 +211,9 @@ export class ImproveOperator implements SEPLOperator<ModificationSpace, Modifica
     // Variable update: adjust numeric/boolean values
     this.improvers.set('variable_update', async (currentValue, mod, variable) => {
       if (typeof currentValue === 'number') {
-        // Small perturbation towards improvement
-        const delta = currentValue * 0.1 * (Math.random() > 0.5 ? 1 : -1);
-        return currentValue + delta;
+                // Deterministic: numeric tuning requires an explicit evidence-driven
+        // proposal (T6) — random perturbation was removed, value is unchanged.
+        return currentValue;
       }
       if (typeof currentValue === 'boolean') {
         return !currentValue; // Toggle boolean
@@ -230,6 +233,34 @@ export class ImproveOperator implements SEPLOperator<ModificationSpace, Modifica
    */
   registerImprover(changeType: string, improver: ImproverFn): void {
     this.improvers.set(changeType, improver);
+  }
+
+  /**
+   * Wire a gated LLM proposer (T6) as the improver for text surfaces
+   * (template_rewrite / description_update). Only callable with a
+   * constructed proposer — i.e. after `LLMProposer.createGated` succeeded,
+   * so the acceptance-gate + evaluator-backend enablement gate has held.
+   * Takes the first accepted candidate; multi-candidate branch evaluation
+   * is future wiring.
+   */
+    attachLLMProposer(
+    proposer: LLMProposer,
+    getContext?: () => { evidence?: EvidenceBundle; sessionId?: string; iteration?: number }
+  ): void {
+    const llmImprover: ImproverFn = async (currentValue, mod) => {
+      if (typeof currentValue !== 'string') return null;
+      const ctx = getContext?.() ?? {};
+      const candidates = await proposer.propose({
+                evidence: ctx.evidence ?? emptyEvidenceBundle(),
+        targetMod: mod,
+        currentValue,
+        sessionId: ctx.sessionId,
+        iteration: ctx.iteration,
+      });
+      return candidates[0]?.proposedValue ?? null;
+    };
+    this.improvers.set('template_rewrite', llmImprover);
+    this.improvers.set('description_update', llmImprover);
   }
 }
 

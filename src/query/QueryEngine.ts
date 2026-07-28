@@ -48,7 +48,9 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { FileContentCache } from '../services/cache/FileContentCache';
 import { ImportanceTagger } from './QueryEngineImportance';
-import type { TurnTag, ContextEfficiencyConfig, PlanningPhaseConfig, PatchGuaranteeConfig } from './protocol';
+import type { TurnTag, ContextEfficiencyConfig, PlanningPhaseConfig, PatchGuaranteeConfig, RuntimeControlPolicy } from './protocol';
+import { RuntimeControlHandler } from './QueryEngineRuntimeControl';
+import { computeSurfaceRuntime, buildConditionalInjection } from '../api/prompts/instruction-surfaces';
 
 /**
  * Result of pre-exit test verification.
@@ -118,6 +120,21 @@ export interface QueryEngineConfig {
    * explicit opt-in (config or CLI --dangerously-skip-permissions).
    */
   noninteractiveAskPolicy?: 'deny' | 'allow' | 'proceed';
+
+  /**
+   * harness-evolution T1 (H1): conditional instruction-surface injection.
+   * When enabled, bootstrap/failure-recovery surfaces are appended as the
+   * final system segment based on runtime predicates. Default off.
+   */
+    promptSurfaces?: {
+    conditionalInjection?: boolean;
+  };
+
+  /**
+   * harness-evolution T2 (H2): cross-turn runtime control policy (retry
+   * discipline, exploration-loop breaking, tool-message cap). Default off.
+   */
+    runtimeControl?: Partial<RuntimeControlPolicy>;
 }
 
 /**
@@ -201,6 +218,9 @@ export class QueryEngine {
   // T3: Budget enforcement
   private budgetEnforcer: BudgetEnforcer;
 
+  // harness-evolution T2 (H2): cross-turn runtime control policy handler
+  private runtimeControl: RuntimeControlHandler;
+
   constructor(config: QueryEngineConfig, tools: ToolDefinition[]) {
     this.config = config;
     this.abortController = new AbortController();
@@ -283,6 +303,9 @@ export class QueryEngine {
 
     // Initialize planning phase handler
     this.planningHandler = new PlanningPhaseHandler(config.planningPhase || {});
+
+    // harness-evolution T2 (H2): runtime control policy (default disabled)
+    this.runtimeControl = new RuntimeControlHandler(config.runtimeControl);
 
     // Link planning handler to tool executor for defense-in-depth filtering
     this.toolExecutor.setToolBlockCheck((toolName: string) => {
@@ -896,9 +919,25 @@ export class QueryEngine {
 
     const stableSystemPrompt = this.cachePrefix.getStableSystemPrompt();
     const ephemeral = this.cachePrefix.getEphemeralAugmentations(memoryContext, levelAdaptation);
-    const ephemeralContent = ephemeral
-      ? [ephemeral.levelAdaptation, ephemeral.memoryContext].filter(Boolean).join('\n\n')
-      : undefined;
+
+    // harness-evolution T1 (H1): conditional instruction surfaces, appended as
+    // the LAST system segment via the ephemeral zone (KV prefix-cache safe).
+    // Gated by promptSurfaces.conditionalInjection (default off).
+    let conditionalInjection = '';
+    if (this.config.promptSurfaces?.conditionalInjection) {
+      const runtime = computeSurfaceRuntime(this.conversation.getMessages());
+      conditionalInjection = buildConditionalInjection(runtime);
+    }
+    // harness-evolution T2 (H2): drain queued runtime-control interventions
+    // (empty string when the policy switch is off).
+    const runtimeInjection = this.runtimeControl.drainPendingInjections();
+
+    const ephemeralParts = [
+      ...(ephemeral ? [ephemeral.levelAdaptation, ephemeral.memoryContext] : []),
+      conditionalInjection,
+      runtimeInjection,
+    ].filter(Boolean);
+    const ephemeralContent = ephemeralParts.length > 0 ? ephemeralParts.join('\n\n') : undefined;
 
     for (let retryAttempt = 0; retryAttempt <= maxRetries; retryAttempt++) {
       // If aborted, break to error state instead of continuing
@@ -1223,10 +1262,26 @@ export class QueryEngine {
       yield this.createToolStartedEvent(tc);
     }
 
+    // harness-evolution T2 (H2): hard-mode retry-discipline gate — identical
+    // calls that already exhausted their failure budget are rejected without
+    // executing (synthetic error result). No-op unless the policy enables it.
+    const rejectedResults = new Map<string, ToolResult>();
+    const executableCalls = toolCalls.filter(tc => {
+      const rejection = this.runtimeControl.checkHardReject(tc.toolName, tc.input);
+      if (rejection) {
+        rejectedResults.set(tc.id, { toolCallId: tc.id, output: rejection, isError: true });
+        return false;
+      }
+      return true;
+    });
+
     const results = await this.toolExecutor.executeParallel(
-      toolCalls,
+      executableCalls,
       this.createToolContext()
     );
+    for (const [id, rejected] of rejectedResults) {
+      results.set(id, rejected);
+    }
 
     for (const [toolCallId, result] of results) {
       const toolCall = toolCalls.find(tc => tc.id === toolCallId);
@@ -1270,22 +1325,37 @@ export class QueryEngine {
         yield this.createToolCompletedEvent(toolCall, result as ToolResult);
       }
 
+      // harness-evolution T2 (H2): repeated-failure context is appended to the
+      // error output text (active regardless of the policy switch), then the
+      // outcome is recorded for retry-discipline / cap tracking.
+      const isErrorResult = result instanceof Error || result.isError === true;
+      const repeatContext = isErrorResult
+        ? this.runtimeControl.getRepeatedFailureContext(toolCall.toolName, toolCall.input)
+        : null;
+      this.runtimeControl.recordToolResult(toolCall.toolName, toolCall.input, isErrorResult);
+      const errorSuffix = repeatContext ? `\n\n${repeatContext}` : '';
+
       // Add tool result as message. Always preserve toolCallId so the tool
       // message can be paired with the originating assistant tool_call — an
       // Error result would otherwise drop it and break the OpenAI contract.
       const toolResultMsg: ChatMessage = {
         id: uuidv4(),
         role: 'tool',
-        content: result instanceof Error ? result.message : (result as ToolResult).output,
+        content: (result instanceof Error ? result.message : (result as ToolResult).output) + errorSuffix,
         toolResults: [
           result instanceof Error
-            ? { toolCallId, output: result.message, isError: true }
-            : (result as ToolResult),
+            ? { toolCallId, output: result.message + errorSuffix, isError: true }
+            : errorSuffix
+              ? { ...(result as ToolResult), output: (result as ToolResult).output + errorSuffix }
+              : (result as ToolResult),
         ],
         timestamp: Date.now(),
       };
       this.conversation.addMessage(toolResultMsg);
     }
+
+    // harness-evolution T2 (H2): turn composition feeds the exploration-loop breaker.
+    this.runtimeControl.recordTurn(toolCalls.map(tc => tc.toolName));
   }
 
   // ── Pre-Exit Test Verification (Area 2) ──

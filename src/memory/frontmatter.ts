@@ -68,6 +68,20 @@ function parseYamlBlock(yaml: string): Partial<MemoryHeader> {
           header.confidence = value;
         }
         break;
+      // T8: failure signature is serialized as flat keys (parser is flat-only)
+      case 'signatureTerminalCause':
+        header.signature = { ...(header.signature ?? { terminalCause: '', mechanism: '' }), terminalCause: String(value) };
+        break;
+      case 'signatureMechanism':
+        header.signature = { ...(header.signature ?? { terminalCause: '', mechanism: '' }), mechanism: String(value) };
+        break;
+      case 'signatureCount': {
+        const count = typeof value === 'number' ? value : parseInt(value as string, 10);
+        if (!isNaN(count)) {
+          header.signature = { ...(header.signature ?? { terminalCause: '', mechanism: '' }), count };
+        }
+        break;
+      }
     }
   }
 
@@ -132,6 +146,14 @@ export function generateFrontmatter(header: MemoryHeader): string {
   }
   if (header.confidence) {
     lines.push(`confidence: ${header.confidence}`);
+  }
+  // T8: flat signature keys (the frontmatter parser has no nested-object support)
+  if (header.signature) {
+    lines.push(`signatureTerminalCause: ${escapeYamlValue(header.signature.terminalCause)}`);
+    lines.push(`signatureMechanism: ${escapeYamlValue(header.signature.mechanism)}`);
+    if (header.signature.count !== undefined) {
+      lines.push(`signatureCount: ${header.signature.count}`);
+    }
   }
 
   lines.push('---');
