@@ -4,11 +4,13 @@
  * Converts kc-cli's pre-defined AgentDefinition objects into AGP
  * ResourceRegistrationRecord<'Agent'> format.
  *
- * The built-in agents (researcher, implementer, verifier, explorer, general)
+ * The built-in agents (researcher, implementer, verifier, explorer, general,
+ * plus the specialized role agents such as frontend, backend, architect)
  * become first-class evolvable RSPL resources.
  */
 
 import type { AgentDefinition } from '../../orchestrator/protocol';
+import { BUILTIN_AGENT_DEFINITIONS } from '../../orchestrator/agent-definitions';
 import type { ResourceRegistrationRecord, ResourceEntity, AgentMetadata, ExportedRepresentation } from '../protocol';
 import { createResourceEntity, createRegistrationRecord, createTextRep } from '../types';
 
@@ -76,40 +78,9 @@ export function recordToAgent(record: ResourceRegistrationRecord<'Agent'>): Agen
 
 /**
  * Create RSPL records for all built-in kc-cli agent types.
+ * Derived from the orchestrator's BUILTIN_AGENT_DEFINITIONS so newly added
+ * agent roles automatically become evolvable resources.
  */
 export function createBuiltInAgentRecords(): ResourceRegistrationRecord<'Agent'>[] {
-  const builtInAgents: AgentDefinition[] = [
-    {
-      name: 'researcher',
-      description: 'Research assistant that gathers information and analyzes findings',
-      systemPrompt: 'You are a research assistant. Your job is to thoroughly investigate topics, gather relevant information from multiple sources, and provide comprehensive analysis.',
-      defaultMaxTurns: 20,
-    },
-    {
-      name: 'implementer',
-      description: 'Code implementation specialist that writes and modifies source code',
-      systemPrompt: 'You are an implementation specialist. Write clean, well-tested code following best practices. Always consider edge cases and error handling.',
-      defaultMaxTurns: 25,
-    },
-    {
-      name: 'verifier',
-      description: 'Quality assurance agent that validates implementations and runs tests',
-      systemPrompt: 'You are a QA specialist. Verify that implementations are correct by running tests, checking edge cases, and validating against requirements.',
-      defaultMaxTurns: 15,
-    },
-    {
-      name: 'explorer',
-      description: 'Codebase explorer that navigates and understands project structure',
-      systemPrompt: 'You are a codebase explorer. Navigate project structures, understand architecture, and provide clear summaries of code organization and dependencies.',
-      defaultMaxTurns: 15,
-    },
-    {
-      name: 'general',
-      description: 'General-purpose agent for miscellaneous tasks',
-      systemPrompt: 'You are a general-purpose assistant. Help with any software development task using available tools.',
-      defaultMaxTurns: 20,
-    },
-  ];
-
-  return builtInAgents.map(agentToRecord);
+  return Object.values(BUILTIN_AGENT_DEFINITIONS).map(agentToRecord);
 }

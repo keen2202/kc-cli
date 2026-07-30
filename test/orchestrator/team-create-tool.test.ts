@@ -18,6 +18,7 @@ vi.mock('../../src/orchestrator/agent-orchestrator', () => ({
 }));
 
 vi.mock('../../src/orchestrator/agent-definitions', () => ({
+  listAgentTypes: vi.fn().mockReturnValue(['researcher', 'implementer', 'verifier', 'explorer', 'general']),
   createAgentConfig: vi.fn().mockImplementation((type: string, prompt: string, overrides?: any) => {
     const known = ['researcher', 'implementer', 'verifier', 'explorer', 'general'];
     if (!known.includes(type)) return null;

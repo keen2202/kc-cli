@@ -6,7 +6,7 @@ import type { ToolResult as ToolResultType } from '../tools/protocol.js';
 import type { PermissionResult } from '../permissions/protocol.js';
 import type { SubAgentResult } from '../state/events.js';
 import { getOrchestrator } from './agent-orchestrator.js';
-import { createAgentConfig } from './agent-definitions.js';
+import { createAgentConfig, listAgentTypes } from './agent-definitions.js';
 import type { ToolName } from '../tools/protocol.js';
 
 const TeamAgentConfigSchema = z.object({
@@ -14,7 +14,7 @@ const TeamAgentConfigSchema = z.object({
   agent_type: z
     .string()
     .optional()
-    .describe('Pre-defined agent type: researcher, implementer, verifier, explorer, general'),
+    .describe(`Pre-defined agent type: ${listAgentTypes().join(', ')}`),
   prompt: z.string().describe('Task instruction for this agent'),
   tools_allow: z
     .array(z.string())

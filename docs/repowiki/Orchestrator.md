@@ -126,12 +126,20 @@ interface SubAgentIdentity {
 
 `src/orchestrator/agent-definitions.ts`:
 
-| Agent | Purpose | Default Tools |
-|-------|---------|---------------|
-| `researcher` | Code exploration and analysis | FileRead, Grep, Glob, WebSearch |
-| `coder` | Code implementation | FileRead, FileWrite, FileEdit, Bash, Run |
-| `reviewer` | Code review | FileRead, Grep, Glob |
-| `tester` | Test execution | Bash, Run, FileRead |
+| Agent | Purpose | Capability Profile |
+|-------|---------|--------------------|
+| `researcher` | Code exploration and analysis | Read-only tools + read-only Bash |
+| `implementer` | Code implementation | Read/write files, Bash, Run, task tools |
+| `verifier` | Testing and code review | Read tools, Bash, Run, Monitor |
+| `explorer` | Project structure understanding | Read-only tools |
+| `general` | General-purpose tasks | All tools |
+| `frontend` | UI components, styling, client-side logic | Implementer tools + Web/LSP; Sql/Docker/Deploy denied |
+| `backend` | Server-side logic, APIs, databases | Implementer tools + Sql, Docker, LSP |
+| `fullstack` | End-to-end features across all layers | Frontend + backend tools + Agent/Task delegation |
+| `code-reviewer` | Quality, convention, best-practice review | Read-only tools + LSP + read-only Bash |
+| `tester` | Unit/integration/automated tests | Test file read/write, Bash, Run, LSP |
+| `architect` | Architecture design, tech selection, ADRs | Read tools + doc FileWrite + Agent/TeamCreate delegation, read-only Bash |
+| `product-manager` | Requirement analysis, planning, roadmap | Read tools + doc FileWrite + AskUser + Agent delegation, read-only Bash |
 
 ## TeamCreate Tool
 

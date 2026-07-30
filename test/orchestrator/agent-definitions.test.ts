@@ -45,6 +45,91 @@ describe('BUILTIN_AGENT_DEFINITIONS', () => {
     expect(def.name).toBe('general');
     expect(def.allowedTools).toBeUndefined();
   });
+
+  it('should define frontend agent without backend-only tools', () => {
+    const def = BUILTIN_AGENT_DEFINITIONS.frontend;
+    expect(def.name).toBe('frontend');
+    expect(def.allowedTools).toContain('FileWrite');
+    expect(def.allowedTools).toContain('LSP');
+    expect(def.allowedTools).not.toContain('Sql');
+    expect(def.deniedTools).toContain('Sql');
+    expect(def.deniedTools).toContain('Docker');
+    expect(def.defaultMaxTurns).toBe(50);
+    expect(def.defaultTimeoutSeconds).toBe(600);
+  });
+
+  it('should define backend agent with database tools', () => {
+    const def = BUILTIN_AGENT_DEFINITIONS.backend;
+    expect(def.name).toBe('backend');
+    expect(def.allowedTools).toContain('Sql');
+    expect(def.allowedTools).toContain('Docker');
+    expect(def.allowedTools).toContain('FileEdit');
+    expect(def.defaultMaxTurns).toBe(50);
+    expect(def.defaultTimeoutSeconds).toBe(600);
+  });
+
+  it('should define fullstack agent with delegation tools', () => {
+    const def = BUILTIN_AGENT_DEFINITIONS.fullstack;
+    expect(def.name).toBe('fullstack');
+    expect(def.allowedTools).toContain('Sql');
+    expect(def.allowedTools).toContain('WebSearch');
+    expect(def.allowedTools).toContain('Agent');
+    expect(def.allowedTools).toContain('TaskCreate');
+    expect(def.defaultMaxTurns).toBe(60);
+    expect(def.defaultTimeoutSeconds).toBe(900);
+  });
+
+  it('should define code-reviewer agent as read-only', () => {
+    const def = BUILTIN_AGENT_DEFINITIONS['code-reviewer'];
+    expect(def.name).toBe('code-reviewer');
+    expect(def.allowedTools).not.toContain('FileWrite');
+    expect(def.allowedTools).not.toContain('FileEdit');
+    expect(def.allowedTools).toContain('LSP');
+    expect(def.toolRestrictions).toEqual([
+      { toolName: 'Bash', restrictions: { readOnly: true } },
+    ]);
+  });
+
+  it('should define tester agent with test execution tools', () => {
+    const def = BUILTIN_AGENT_DEFINITIONS.tester;
+    expect(def.name).toBe('tester');
+    expect(def.allowedTools).toContain('FileWrite');
+    expect(def.allowedTools).toContain('Run');
+    expect(def.allowedTools).toContain('Bash');
+    expect(def.defaultMaxTurns).toBe(40);
+  });
+
+  it('should define architect agent with doc writing, delegation, and read-only Bash', () => {
+    const def = BUILTIN_AGENT_DEFINITIONS.architect;
+    expect(def.name).toBe('architect');
+    expect(def.allowedTools).toContain('FileWrite');
+    expect(def.allowedTools).toContain('Agent');
+    expect(def.allowedTools).toContain('TeamCreate');
+    expect(def.allowedTools).not.toContain('FileEdit');
+    expect(def.toolRestrictions).toEqual([
+      { toolName: 'Bash', restrictions: { readOnly: true } },
+    ]);
+  });
+
+  it('should define product-manager agent with planning and delegation tools', () => {
+    const def = BUILTIN_AGENT_DEFINITIONS['product-manager'];
+    expect(def.name).toBe('product-manager');
+    expect(def.allowedTools).toContain('AskUser');
+    expect(def.allowedTools).toContain('TodoWrite');
+    expect(def.allowedTools).toContain('Agent');
+    expect(def.allowedTools).not.toContain('FileEdit');
+    expect(def.toolRestrictions).toEqual([
+      { toolName: 'Bash', restrictions: { readOnly: true } },
+    ]);
+  });
+
+  it('should give every specialized agent a systemPrompt and description', () => {
+    for (const type of ['frontend', 'backend', 'fullstack', 'code-reviewer', 'tester', 'architect', 'product-manager']) {
+      const def = BUILTIN_AGENT_DEFINITIONS[type];
+      expect(def.systemPrompt).toBeTruthy();
+      expect(def.description).toBeTruthy();
+    }
+  });
 });
 
 describe('getAgentDefinition', () => {
@@ -73,10 +158,17 @@ describe('listAgentTypes', () => {
     expect(types).toContain('verifier');
     expect(types).toContain('explorer');
     expect(types).toContain('general');
+    expect(types).toContain('frontend');
+    expect(types).toContain('backend');
+    expect(types).toContain('fullstack');
+    expect(types).toContain('code-reviewer');
+    expect(types).toContain('tester');
+    expect(types).toContain('architect');
+    expect(types).toContain('product-manager');
   });
 
-  it('should return 5 agent types', () => {
-    expect(listAgentTypes()).toHaveLength(5);
+  it('should return 12 agent types', () => {
+    expect(listAgentTypes()).toHaveLength(12);
   });
 });
 
@@ -125,5 +217,20 @@ describe('createAgentConfig', () => {
       tools: ['FileRead' as any, 'Bash' as any],
     });
     expect(config!.tools).toEqual(['FileRead', 'Bash']);
+  });
+
+  it('should carry deniedTools from definition into spawn config', () => {
+    const config = createAgentConfig('frontend', 'build a settings page');
+    expect(config).not.toBeNull();
+    expect(config!.deniedTools).toEqual(BUILTIN_AGENT_DEFINITIONS.frontend.deniedTools);
+  });
+
+  it('should create spawn configs for all specialized types', () => {
+    for (const type of ['frontend', 'backend', 'fullstack', 'code-reviewer', 'tester', 'architect', 'product-manager']) {
+      const config = createAgentConfig(type, 'task');
+      expect(config).not.toBeNull();
+      expect(config!.systemPrompt).toBeTruthy();
+      expect(config!.tools).toEqual(BUILTIN_AGENT_DEFINITIONS[type].allowedTools);
+    }
   });
 });

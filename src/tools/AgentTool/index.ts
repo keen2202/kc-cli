@@ -6,7 +6,7 @@ import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import type { SubAgentSpawnConfig } from '../../orchestrator/types';
 import { getOrchestrator } from '../../orchestrator/agent-orchestrator.js';
-import { createAgentConfig } from '../../orchestrator/agent-definitions.js';
+import { createAgentConfig, listAgentTypes } from '../../orchestrator/agent-definitions.js';
 import { toolRegistry } from '../../tools.js';
 import { secondsToMs } from '../../utils/timeout';
 
@@ -17,7 +17,7 @@ const AgentInputSchema = z.object({
   agent_type: z
     .string()
     .optional()
-    .describe('Pre-defined agent type: researcher, implementer, verifier, explorer, general'),
+    .describe(`Pre-defined agent type: ${listAgentTypes().join(', ')}`),
   background: z
     .boolean()
     .default(false)
@@ -29,7 +29,8 @@ type AgentInput = z.infer<typeof AgentInputSchema>;
 export const tool = buildTool<AgentInput, string>({
   name: 'Agent',
   description:
-    'Spawn sub-agents for parallel task execution. Use agent_type for pre-configured specialists (researcher, implementer, verifier, explorer).',
+    'Spawn sub-agents for parallel task execution. Use agent_type for pre-configured specialists ' +
+    `(${listAgentTypes().join(', ')}).`,
 
   inputSchema: AgentInputSchema,
 
@@ -46,7 +47,7 @@ export const tool = buildTool<AgentInput, string>({
         });
         if (!agentConfig) {
           return toolError(
-            `Unknown agent type: ${input.agent_type}. Available types: researcher, implementer, verifier, explorer, general`
+            `Unknown agent type: ${input.agent_type}. Available types: ${listAgentTypes().join(', ')}`
           );
         }
         config = agentConfig;
