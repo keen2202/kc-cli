@@ -80,6 +80,11 @@ class ToolRegistryImpl implements ToolRegistry {
         this.registerTool(toolDef);
         this.lazyManifest.delete(name);
         logger.tools.info(`Lazy-loaded tool: ${name}`);
+      } else {
+        // loadToolModule already logged the root cause; correlate the failure here
+        logger.tools.warn(`Lazy-load returned no tool definition: ${name}`, {
+          modulePath: entry.modulePath,
+        });
       }
       this.pendingLoads.delete(name);
       return toolDef ?? undefined;

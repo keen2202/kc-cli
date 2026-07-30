@@ -1,4 +1,5 @@
 import type { ToolDefinition } from '../tools/protocol';
+import { logger } from '../services/logger';
 
 /**
  * Tool module convention interface.
@@ -85,11 +86,18 @@ export async function loadToolModule(entry: ToolManifestEntry): Promise<ToolDefi
     // Extract tool from module using convention order
     const toolDef = mod.tool ?? mod.default ?? mod.register?.();
     if (!toolDef) {
+      logger.tools.warn(`Tool module has no tool/default/register export: ${entry.name}`, {
+        modulePath: entry.modulePath,
+      });
       return undefined;
     }
 
     return toolDef;
-  } catch {
+  } catch (error) {
+    logger.tools.warn(`Failed to load tool module: ${entry.name}`, {
+      modulePath: entry.modulePath,
+      error: String(error),
+    });
     return undefined;
   }
 }
