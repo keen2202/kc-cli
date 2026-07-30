@@ -10,6 +10,11 @@ import { normalizeCommand } from '../../permissions/commandNormalizer';
 import { isAlreadySandboxWrapped } from '../../executors/toolExecutor';
 import { isExecError, getErrorMessage } from '../../utils/errors';
 import { buildSafeEnv } from '../RunTool/secrets';
+import {
+  detectUnixFindOnWindows,
+  getWindowsCommandHint,
+  isCommandNotFoundOutput,
+} from './windows-compat';
 
 const BashInputSchema = z.object({
   command: z.string().describe('The bash command to execute'),
@@ -36,6 +41,17 @@ export const tool = buildTool<BashInput, string>({
 
       const workingDir = input.workingDir || context.cwd;
       const timeout = (Number.isFinite(input.timeout) ? input.timeout : 30) * 1000; // Convert to ms
+
+      // Windows guard: Unix `find` syntax resolves to FIND.EXE (text search)
+      // under cmd.exe and fails with a cryptic parameter error. Fail fast with
+      // an actionable diagnosis instead of a confusing downstream failure.
+      const findIncompat = detectUnixFindOnWindows(input.command);
+      if (findIncompat) {
+        return toolError(`[tool_execution_failed] Command not executed: ${findIncompat}`, {
+          command: input.command,
+          platform: process.platform,
+        });
+      }
 
       // The ToolExecutor pre-wraps commands for 'Bash' tool at the executor level
       // (the authoritative sandbox enforcement point). If the command has already
@@ -74,9 +90,15 @@ export const tool = buildTool<BashInput, string>({
       });
 
       if (result.exitCode !== 0) {
+        // Append a Windows-native replacement hint when a Unix-only command
+        // fails with a "not recognized" error (e.g. grep/awk on cmd.exe).
+        const combinedOutput = `${result.stderr}\n${result.stdout}`;
+        const winHint = isCommandNotFoundOutput(combinedOutput)
+          ? getWindowsCommandHint(input.command)
+          : null;
         return toolResult(result.stdout, {
           isError: true,
-          message: `Command failed: ${result.stderr || 'non-zero exit code'}`,
+          message: `Command failed (exit ${result.exitCode}): ${result.stderr || 'non-zero exit code'}${winHint ? `\n${winHint}` : ''}`,
           metadata: { exitCode: result.exitCode, stderr: result.stderr },
         });
       }

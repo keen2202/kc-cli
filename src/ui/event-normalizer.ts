@@ -17,6 +17,7 @@ export type CanonicalEventType =
   | 'tool_started'
   | 'tool_completed'
   | 'tool_failed'
+  | 'tool_permission_denied'
   | 'subagent_spawned'
   | 'subagent_completed'
   | 'subagent_failed'
@@ -52,6 +53,7 @@ const AGENT_PREFIX_MAP: Record<string, CanonicalEventType> = {
   'agent:tool_started': 'tool_started',
   'agent:tool_completed': 'tool_completed',
   'agent:tool_failed': 'tool_failed',
+  'agent:tool_permission_denied': 'tool_permission_denied',
   'agent:subagent_spawned': 'subagent_spawned',
   'agent:subagent_completed': 'subagent_completed',
   'agent:subagent_failed': 'subagent_failed',

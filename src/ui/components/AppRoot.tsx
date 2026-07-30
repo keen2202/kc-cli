@@ -82,9 +82,13 @@ function ErrorBar({ errors }: ErrorBarProps) {
       paddingRight={1}
       marginBottom={1}
     >
-      <Text color={colors.error}>⚠ Error: </Text>
-      <Text wrap="truncate-end">{latest}</Text>
-      <Text dimColor>  [Esc to dismiss]</Text>
+      {/* Single truncating Text keeps the bar exactly one row tall even for
+          long coded messages (nested Texts render inline; the outer truncates). */}
+      <Text wrap="truncate-end">
+        <Text color={colors.error}>⚠ Error: </Text>
+        {latest}
+        <Text dimColor>  [Esc to dismiss]</Text>
+      </Text>
     </Box>
   );
 }
@@ -205,6 +209,7 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
     thinkingChains,
     sidebarData,
     isStreaming,
+    activity,
     errors,
     totalTokensUsed,
     addMessage,
@@ -253,9 +258,25 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
 
   // Status bar mode is derived live: any open overlay reports 'overlay' so the
   // bar tracks what actually owns the screen, not just the base interaction mode.
+  // While an engine turn is in flight, refine 'streaming' with the live
+  // activity from the event stream (executing tools / error) so the bar
+  // reflects the real engine phase instead of a stale 'streaming' label.
   const overlayOpen =
     showExitConfirm || showPalette || showFilePicker || showDiffDetail || permissionRequest !== null;
-  const statusMode: 'idle' | 'streaming' | 'overlay' | 'steer' = overlayOpen ? 'overlay' : mode;
+  const statusMode: 'idle' | 'streaming' | 'executing' | 'error' | 'overlay' | 'steer' = overlayOpen
+    ? 'overlay'
+    : mode === 'streaming'
+      ? (activity === 'executing' ? 'executing' : activity === 'error' ? 'error' : 'streaming')
+      : mode;
+
+  // Live wall-clock tick (1s) while a query is in flight: drives the running
+  // tool spinner/elapsed in the chat area and the status-bar elapsed/ETA.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (mode !== 'streaming') return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [mode]);
 
   // Input history (↑/↓ recall of previously submitted messages)
   const [submittedHistory, setSubmittedHistory] = useState<string[]>([]);
@@ -389,6 +410,14 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
       }
     } catch (error) {
       const errMsg = `Error: ${getErrorMessage(error)}`;
+      // Route the failure through the event pipeline as well: the 'error'
+      // branch in useStreamingEvents clears isStreaming (input guard) and
+      // surfaces a coded, actionable message in the error bar. Previously this
+      // path only rewrote the bubble text and left isStreaming stuck at true.
+      eventBus.emit({
+        type: 'error',
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
       setMessages((prev) =>
         prev.map((m) => (m.id === assistantId ? { ...m, content: errMsg } : m)),
       );
@@ -755,6 +784,11 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
         return true;
       case 'cancel':
         if (goalState?.active) goalCancelledRef.current = true;
+        // Actually stop the engine: resetting the UI mode alone left the
+        // background query running (silent-cancel bug).
+        try {
+          queryEngine.abort?.('User cancelled (Ctrl+X)');
+        } catch { /* engines without abort support just reset the UI */ }
         setMode('idle');
         return true;
       case 'quit':
@@ -787,7 +821,7 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
       default:
         return false;
     }
-  }, [startNewSession, setMessages, inputState.text, openFilePicker, requestExit, addSystemMsg, keybindingManager, historyPrev, historyNext, applyUiMode, goalState]);
+  }, [startNewSession, setMessages, inputState.text, openFilePicker, requestExit, addSystemMsg, keybindingManager, historyPrev, historyNext, applyUiMode, goalState, queryEngine]);
 
   // ── Editor base layer ──
   // Handles everything a key can do when no overlay/mode owns the keyboard:
@@ -1051,9 +1085,30 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
     const running = (sidebarData.tools ?? []).filter((t) => t.status === 'running');
     return running.length > 0 ? running[running.length - 1]!.name : undefined;
   }, [sidebarData.tools]);
+  const runningToolStart = useMemo(() => {
+    const running = (sidebarData.tools ?? []).filter((t) => t.status === 'running');
+    return running.length > 0 ? running[running.length - 1]!.startTime : undefined;
+  }, [sidebarData.tools]);
+  // Live elapsed for the running tool, ticked by `now` while a query runs.
+  const operationElapsedSec = mode === 'streaming' && runningToolStart !== undefined
+    ? Math.max(0, (now - runningToolStart) / 1000)
+    : undefined;
   const progressPercent = goalState?.active
     ? (goalState.iteration / Math.max(1, goalState.maxIterations)) * 100
     : (turnCount / Math.max(1, maxTurns)) * 100;
+  // Best-effort ETA matching the progress-bar semantics: average pace so far
+  // (per goal iteration, else per turn) extrapolated over what remains.
+  const etaSec = useMemo(() => {
+    if (mode !== 'streaming') return undefined;
+    const elapsedSec = (now - sessionStartTime) / 1000;
+    if (goalState?.active && goalState.iteration > 0) {
+      return (elapsedSec / goalState.iteration) * Math.max(0, goalState.maxIterations - goalState.iteration);
+    }
+    if (turnCount > 0) {
+      return (elapsedSec / turnCount) * Math.max(0, maxTurns - turnCount);
+    }
+    return undefined;
+  }, [mode, now, sessionStartTime, goalState, turnCount, maxTurns]);
 
   return (
     <FocusStackProvider value={focusStack}>
@@ -1079,6 +1134,7 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
             thinkingChains={thinkingChains}
             scrollRef={chatScrollRef}
             toolOutputExpanded={toolOutputExpanded}
+            now={mode === 'streaming' ? now : undefined}
           />
         }
         editor={
@@ -1108,7 +1164,9 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
             maxTurns={maxTurns}
             tokensUsed={totalTokensUsed}
             currentOperation={currentOperation}
+            operationElapsedSec={operationElapsedSec}
             progressPercent={progressPercent}
+            etaSec={etaSec}
           />
         }
         overlay={

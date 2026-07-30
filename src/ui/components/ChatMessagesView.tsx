@@ -34,6 +34,7 @@ export function renderMessageLines(
   tokens: ThemeTokens,
   width: number,
   toolOutputExpanded: boolean,
+  now?: number,
 ): string[] {
   const lines: string[] = [];
 
@@ -49,7 +50,7 @@ export function renderMessageLines(
       }
     }
     for (const tc of message.toolCalls ?? []) {
-      lines.push(...wrapToWidth(renderToolCallCard(tc, undefined, { expanded: toolOutputExpanded }), width));
+      lines.push(...wrapToWidth(renderToolCallCard(tc, undefined, { expanded: toolOutputExpanded, now }), width));
     }
   } else {
     // system message
@@ -75,9 +76,11 @@ interface ChatViewProps {
   scrollRef?: React.MutableRefObject<ChatScrollHandle | null>;
   /** Global tool-output expansion toggle (Ctrl+O). */
   toolOutputExpanded?: boolean;
+  /** Wall-clock tick driving live spinner/elapsed on running tool cards. */
+  now?: number;
 }
 
-export function ChatView({ messages, thinkingChains, scrollRef, toolOutputExpanded = false }: ChatViewProps) {
+export function ChatView({ messages, thinkingChains, scrollRef, toolOutputExpanded = false, now }: ChatViewProps) {
   const { tokens } = useTheme();
   const { height: termHeight, width: termWidth } = useTerminalSize();
 
@@ -100,12 +103,12 @@ export function ChatView({ messages, thinkingChains, scrollRef, toolOutputExpand
   const lines = useMemo(() => {
     const out: string[] = [];
     for (const msg of messages) {
-      out.push(...renderMessageLines(msg, thinkingChains?.get(msg.id), tokens, cols, toolOutputExpanded));
+      out.push(...renderMessageLines(msg, thinkingChains?.get(msg.id), tokens, cols, toolOutputExpanded, now));
     }
     // Drop the trailing separator so the newest real row sits on the bottom edge.
     while (out.length > 0 && out[out.length - 1] === '') out.pop();
     return out;
-  }, [messages, thinkingChains, tokens, cols, toolOutputExpanded]);
+  }, [messages, thinkingChains, tokens, cols, toolOutputExpanded, now]);
 
   const total = lines.length;
 

@@ -9,6 +9,11 @@ import { getErrorMessage } from '../../utils/errors';
 import { isDangerousBashCommand } from '../../permissions/readonlyCommands';
 import { logger } from '../../services/logger';
 import { filterEnvVars } from './secrets';
+import {
+  detectUnixFindOnWindows,
+  getWindowsCommandHint,
+  isCommandNotFoundOutput,
+} from '../BashTool/windows-compat';
 
 const RunInputSchema = z.object({
   command: z.string().describe('Command to execute'),
@@ -30,6 +35,16 @@ export const tool = buildTool<RunInput, string>({
     try {
       const workingDir = input.cwd || context.cwd;
       const timeout = (Number.isFinite(input.timeout) ? input.timeout : 60) * 1000;
+
+      // Windows guard: Unix `find` syntax resolves to FIND.EXE under cmd.exe
+      // and fails with a cryptic error — fail fast with actionable guidance.
+      const findIncompat = detectUnixFindOnWindows(input.command);
+      if (findIncompat) {
+        return toolError(`[tool_execution_failed] Command not executed: ${findIncompat}`, {
+          command: input.command,
+          platform: process.platform,
+        });
+      }
 
       // Filter KC_* secrets and dangerous vars from parent env (SEC-03)
       const env = {
@@ -75,7 +90,10 @@ export const tool = buildTool<RunInput, string>({
 
       if (result.exitCode !== 0) {
         const output = (result.stdout || result.stderr || '').trim();
-        return toolError(`Command failed: ${output}`, {
+        const winHint = isCommandNotFoundOutput(output)
+          ? getWindowsCommandHint(input.command)
+          : null;
+        return toolError(`Command failed (exit ${result.exitCode}): ${output}${winHint ? `\n${winHint}` : ''}`, {
           command: input.command,
           exitCode: result.exitCode,
         });

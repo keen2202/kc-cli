@@ -10,9 +10,11 @@ interface ChatPanelProps {
   scrollRef?: React.MutableRefObject<ChatScrollHandle | null>;
   /** Global tool-output expansion toggle (Ctrl+O). */
   toolOutputExpanded?: boolean;
+  /** Wall-clock tick driving live spinner/elapsed on running tool cards. */
+  now?: number;
 }
 
-export function ChatPanel({ messages, thinkingChains, scrollRef, toolOutputExpanded }: ChatPanelProps) {
+export function ChatPanel({ messages, thinkingChains, scrollRef, toolOutputExpanded, now }: ChatPanelProps) {
   if (messages.length === 0) {
     return (
       <Box padding={1} flexDirection="column">
@@ -31,6 +33,7 @@ export function ChatPanel({ messages, thinkingChains, scrollRef, toolOutputExpan
         thinkingChains={thinkingChains}
         scrollRef={scrollRef}
         toolOutputExpanded={toolOutputExpanded}
+        now={now}
       />
     </Box>
   );

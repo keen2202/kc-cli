@@ -995,6 +995,15 @@ export class QueryEngine {
         // Check circuit breaker
         if (!this.errorHandler.canExecuteApi()) {
           logger.query.warn('API circuit breaker is open, skipping request');
+          // Surface a real error event (not just inline text) so the UI error
+          // bar and non-UI consumers are notified instead of failing silently.
+          const cbError = new KCError(
+            'api_server_error',
+            'API circuit breaker is open — too many consecutive API failures',
+            { lastError: err.message },
+            err,
+          );
+          yield { type: 'agent:error', error: cbError, recoverable: false, timestamp: Date.now() };
           yield this.createTextDeltaEvent('\n[API temporarily unavailable — please retry later]\n');
           return;
         }
@@ -1063,8 +1072,13 @@ export class QueryEngine {
       }
     } catch (error) {
       if (this._aborted) {
-        logger.query.warn(`[QueryEngine] LLM stream aborted after ${streamTimeoutMs / 1000}s`);
-        throw new Error('LLM stream aborted');
+        // Preserve the underlying cause instead of replacing it with a generic
+        // message — the original reason must reach the user, not just debug logs.
+        const cause = error instanceof Error ? error : new Error(String(error));
+        logger.query.warn(
+          `[QueryEngine] LLM stream aborted (timeout ${streamTimeoutMs / 1000}s): ${cause.message}`
+        );
+        throw new Error(`LLM stream aborted: ${cause.message}`, { cause });
       } else {
         throw error;
       }

@@ -65,11 +65,13 @@ describe('ESC matrix (characterization)', () => {
 
     await h.type('trigger');
     await h.press(KEYS.enter);
-    await h.waitForText('Error: boom-failure');
+    // Error messages now render as `[code] message — Suggestion: …`; assert on
+    // the raw message which uniquely identifies the error bar content.
+    await h.waitForText('boom-failure');
 
     await h.press(KEYS.escape);
 
-    await h.waitFor(() => !h!.plainFrame().includes('Error: boom-failure'), 3000, 'error bar to clear');
+    await h.waitFor(() => !h!.plainFrame().includes('boom-failure'), 3000, 'error bar to clear');
   });
 
   it('idle: ESC has no visible side effects', async () => {
@@ -141,14 +143,14 @@ describe('ESC matrix — stacked layers (T8)', () => {
 
     await h.type('/goal ship it');
     await h.press(KEYS.enter);
-    await h.waitForText('Error: goal-turn-error');
+    await h.waitForText('goal-turn-error');
 
     await h.press(KEYS.escape);
 
     // Goal cancellation wins (error layer is not mounted while a goal runs);
     // the error bar is untouched.
     await h.waitForText('[Goal mode] Stopping after the current step...');
-    expect(h.plainFrame()).toContain('Error: goal-turn-error');
+    expect(h.plainFrame()).toContain('goal-turn-error');
 
     engine.releaseGate();
     await h.waitForText('[Goal mode] Stopped by user.');

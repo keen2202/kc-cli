@@ -200,11 +200,19 @@ export class LocalShell implements Shell {
       };
     } catch (error: unknown) {
       // exec throws on non-zero exit codes
-      const err = error as { stdout?: string; stderr?: string; code?: number };
+      const err = error as { stdout?: string; stderr?: string; code?: number; killed?: boolean; signal?: string };
+      const exitCode = typeof err.code === 'number' ? err.code : 1;
+      const stderr = typeof err.stderr === 'string' ? err.stderr : String(error);
+      // Always leave a structured trace for failed commands so shell failures
+      // are diagnosable from logs (command, exit code, stderr, timeout kill).
+      logger.services.warn(
+        `[shell] Command failed (exit ${exitCode}${err.killed ? `, killed${err.signal ? ` by ${err.signal}` : ''}` : ''}): ` +
+          `${command.slice(0, 200)}${stderr.trim() ? ` — stderr: ${stderr.trim().slice(0, 300)}` : ''}`
+      );
       return {
         stdout: typeof err.stdout === 'string' ? err.stdout : '',
-        stderr: typeof err.stderr === 'string' ? err.stderr : String(error),
-        exitCode: typeof err.code === 'number' ? err.code : 1,
+        stderr,
+        exitCode,
       };
     }
   }

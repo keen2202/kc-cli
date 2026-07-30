@@ -10,6 +10,16 @@ import type { ToolCallData } from '../view-protocol';
 export interface ToolCallCardOptions {
   /** When true, show the full tool output (capped); default is a collapsed preview. */
   expanded?: boolean;
+  /** Wall-clock "now" for live spinner/elapsed rendering of running tools. */
+  now?: number;
+}
+
+/** Braille spinner frames for the running-tool indicator. */
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+/** Pick a spinner frame from wall-clock time so periodic re-renders animate it. */
+function spinnerFrame(now: number): string {
+  return SPINNER_FRAMES[Math.floor(now / 120) % SPINNER_FRAMES.length]!;
 }
 
 /** Collapsed cards preview at most this many output lines. */
@@ -24,15 +34,21 @@ export function renderToolCallCard(
 ): string {
   const tokens = theme?.resolve();
   const expanded = options?.expanded ?? false;
+  const now = options?.now ?? Date.now();
 
   const statusIcon = tc.status === 'running'
-    ? (tokens ? tokens['tool.running']('⠋') : chalk.yellow('⠋'))
+    ? (tokens ? tokens['tool.running'](spinnerFrame(now)) : chalk.yellow(spinnerFrame(now)))
     : tc.status === 'completed'
       ? (tokens ? tokens['tool.success']('✓') : chalk.green('✓'))
       : (tokens ? tokens['tool.failed']('✗') : chalk.red('✗'));
 
+  // Completed/failed cards freeze the duration; running cards tick live so the
+  // user can monitor in-flight tool execution from the chat area.
   const elapsed = tc.startTime && tc.endTime
-    ? chalk.gray(` (${((tc.endTime - tc.startTime) / 1000).toFixed(1)}s)`) : '';
+    ? chalk.gray(` (${((tc.endTime - tc.startTime) / 1000).toFixed(1)}s)`)
+    : tc.status === 'running' && tc.startTime
+      ? chalk.gray(` (running · ${((now - tc.startTime) / 1000).toFixed(1)}s)`)
+      : '';
 
   const nameColor = tokens ? tokens['tool.name'] : chalk.bold;
   const inputSummary = tc.input ? chalk.dim(` · ${tc.input}`) : '';
@@ -75,7 +91,7 @@ export function renderToolCallCard(
 export function renderToolCallCompact(tc: ToolCallData, theme?: Theme): string {
   const tokens = theme?.resolve();
   const icon = tc.status === 'running'
-    ? (tokens ? tokens['tool.running']('⠋') : chalk.yellow('⠋'))
+    ? (tokens ? tokens['tool.running'](spinnerFrame(Date.now())) : chalk.yellow(spinnerFrame(Date.now())))
     : tc.status === 'completed'
       ? (tokens ? tokens['tool.success']('✓') : chalk.green('✓'))
       : (tokens ? tokens['tool.failed']('✗') : chalk.red('✗'));

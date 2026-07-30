@@ -97,4 +97,33 @@ describe('StatusBar progress bar', () => {
     const frame = await renderStatusBar({ mode: 'overlay' });
     expect(frame).toContain('◉ overlay');
   });
+
+  it('renders the executing mode indicator (tool phase)', async () => {
+    const frame = await renderStatusBar({ mode: 'executing' });
+    expect(frame).toContain('▶ executing');
+  });
+
+  it('renders the error mode indicator', async () => {
+    const frame = await renderStatusBar({ mode: 'error' });
+    expect(frame).toContain('✖ error');
+  });
+
+  it('shows live elapsed for the running operation', async () => {
+    const frame = await renderStatusBar({
+      mode: 'executing',
+      currentOperation: 'Bash',
+      operationElapsedSec: 12,
+    });
+    expect(frame).toContain('running: Bash (12s)');
+  });
+
+  it('shows the ETA segment when provided', async () => {
+    const frame = await renderStatusBar({ mode: 'streaming', turnCount: 5, progressPercent: 10, etaSec: 125 });
+    expect(frame).toContain('ETA ~2m05s');
+  });
+
+  it('omits the ETA segment when unknown', async () => {
+    const frame = await renderStatusBar({ mode: 'streaming', turnCount: 5 });
+    expect(frame).not.toContain('ETA');
+  });
 });

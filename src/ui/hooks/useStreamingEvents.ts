@@ -3,14 +3,20 @@ import type { UIEventBus } from '../event-bus';
 import type { ChatMessage, ThinkingChain, ToolCallData, SidebarData } from '../view-protocol';
 import { createSidebarData, classifyThinkingSteps, summarizeToolInput } from '../view-protocol';
 import { normalizeUIEvent } from '../event-normalizer';
+import { formatUserFacingError } from '../../utils/errors';
 import type { AgentEvent } from '../../state/types';
 import type { StreamEvent } from '../../query/protocol';
+
+/** Live engine activity derived from the event stream (drives the status bar). */
+export type StreamActivity = 'idle' | 'streaming' | 'executing' | 'error';
 
 export interface StreamingState {
   messages: ChatMessage[];
   thinkingChains: Map<string, ThinkingChain>;
   sidebarData: SidebarData;
   isStreaming: boolean;
+  /** Fine-grained live activity: streaming LLM text vs executing tools vs error. */
+  activity: StreamActivity;
   errors: string[];
   totalTokensUsed: number;
 }
@@ -32,6 +38,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
   const [thinkingChains, setThinkingChains] = useState<Map<string, ThinkingChain>>(new Map());
   const [sidebarData, setSidebarData] = useState<SidebarData>(createSidebarData());
   const [isStreaming, setIsStreaming] = useState(false);
+  const [activity, setActivity] = useState<StreamActivity>('idle');
   const [errors, setErrors] = useState<string[]>([]);
   const [totalTokensUsed, setTotalTokensUsed] = useState(0);
 
@@ -68,6 +75,47 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
       const ev = normalized.raw as any;
       const assistantId = currentAssistantIdRef.current;
 
+      // Close out the last running tool card + sidebar entry with a final
+      // status. Shared by tool_completed / tool_failed / tool_permission_denied
+      // so no lifecycle path leaves a tool stuck in 'running'.
+      const finalizeLastRunningTool = (
+        status: ToolCallData['status'],
+        output: string | undefined,
+        toolName: string | undefined,
+      ): void => {
+        if (assistantId !== null) {
+          const msgs = messagesRef.current;
+          const idx = msgs.findIndex((m) => m.id === assistantId);
+          if (idx >= 0) {
+            const toolCalls = [...(msgs[idx].toolCalls || [])];
+            for (let i = toolCalls.length - 1; i >= 0; i--) {
+              const tc = toolCalls[i]!;
+              if (tc.status === 'running' && (toolName === undefined || tc.toolName === toolName)) {
+                tc.status = status;
+                tc.endTime = Date.now();
+                if (output !== undefined) tc.output = output;
+                break;
+              }
+            }
+            msgs[idx] = { ...msgs[idx], toolCalls };
+            messagesRef.current = [...msgs];
+          }
+        }
+        // Close out the matching sidebar entry (last running tool with this
+        // name) so the Tools panel reflects the real lifecycle + duration.
+        const sidebarTools = sidebarDataRef.current.tools;
+        for (let i = sidebarTools.length - 1; i >= 0; i--) {
+          const entry = sidebarTools[i];
+          if (entry.status === 'running' && (toolName === undefined || entry.name === toolName)) {
+            entry.status = status === 'completed' ? 'completed' : 'failed';
+            if (entry.startTime !== undefined) {
+              entry.duration = `${((Date.now() - entry.startTime) / 1000).toFixed(1)}s`;
+            }
+            break;
+          }
+        }
+      };
+
       switch (type) {
         case 'text_delta': {
           // QueryEngine emits turn_complete per internal turn; a follow-up turn
@@ -83,6 +131,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
             ];
             setIsStreaming(true);
           }
+          setActivity('streaming');
           const msgs = messagesRef.current;
           const idx = msgs.findIndex((m) => m.id === targetId);
           if (idx >= 0) {
@@ -138,6 +187,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
             detail: summarizeToolInput(ev.toolCall.input),
             startTime: toolCall.startTime,
           });
+          setActivity('executing');
           flushRender();
           break;
         }
@@ -146,37 +196,35 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
         case 'tool_use_end': {
           const failed = 'isError' in ev ? ev.result.isError : false;
           const status: ToolCallData['status'] = failed ? 'failed' : 'completed';
-          if (assistantId !== null) {
-            const msgs = messagesRef.current;
-            const idx = msgs.findIndex((m) => m.id === assistantId);
-            if (idx >= 0) {
-              const toolCalls = [...(msgs[idx].toolCalls || [])];
-              const last = toolCalls[toolCalls.length - 1];
-              if (last) {
-                last.status = status;
-                last.endTime = Date.now();
-                last.output = typeof ev.result.output === 'string'
-                  ? ev.result.output
-                  : JSON.stringify(ev.result.output);
-              }
-              msgs[idx] = { ...msgs[idx], toolCalls };
-              messagesRef.current = [...msgs];
-            }
-          }
-          // Close out the matching sidebar entry (last running tool with this
-          // name) so the Tools panel reflects the real lifecycle + duration.
-          const sidebarTools = sidebarDataRef.current.tools;
-          const toolName = ev.toolCall?.toolName;
-          for (let i = sidebarTools.length - 1; i >= 0; i--) {
-            const entry = sidebarTools[i];
-            if (entry.status === 'running' && (toolName === undefined || entry.name === toolName)) {
-              entry.status = status;
-              if (entry.startTime !== undefined) {
-                entry.duration = `${((Date.now() - entry.startTime) / 1000).toFixed(1)}s`;
-              }
-              break;
-            }
-          }
+          const output = typeof ev.result?.output === 'string'
+            ? ev.result.output
+            : ev.result !== undefined ? JSON.stringify(ev.result.output) : undefined;
+          finalizeLastRunningTool(status, output, ev.toolCall?.toolName);
+          setActivity('streaming');
+          flushRender();
+          break;
+        }
+
+        case 'tool_failed': {
+          // agent:tool_failed carries an Error instead of a result. Without
+          // this branch the tool card stayed 'running' forever (silent failure).
+          const errText = formatUserFacingError(ev.error);
+          finalizeLastRunningTool('failed', errText, ev.toolCall?.toolName);
+          setActivity('streaming');
+          flushRender();
+          break;
+        }
+
+        case 'tool_permission_denied': {
+          const reason = typeof ev.reason === 'string' && ev.reason.trim()
+            ? ev.reason
+            : 'Permission denied';
+          finalizeLastRunningTool(
+            'failed',
+            `[tool_permission_denied] ${reason} — Suggestion: adjust permission mode (/mode) or approve the request when prompted.`,
+            ev.toolCall?.toolName,
+          );
+          setActivity('streaming');
           flushRender();
           break;
         }
@@ -184,6 +232,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
         case 'turn_complete': {
           currentAssistantIdRef.current = null;
           setIsStreaming(false);
+          setActivity('idle');
           const chain = currentThinkingChainRef.current;
           if (chain && assistantId) {
             // Freeze the displayed duration now that the turn is done.
@@ -202,7 +251,9 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
         }
 
         case 'error': {
-          const errorMsg = ev.error?.message || 'Unknown error';
+          // Surface a structured, actionable message (stable error code +
+          // suggestion) instead of a bare error string.
+          const errorMsg = ev.error !== undefined ? formatUserFacingError(ev.error) : 'Unknown error';
           setErrors((prev) => [...prev, errorMsg]);
           // A stream error means the turn will never emit turn_complete, so we
           // must clear the streaming flag here — otherwise isStreaming stays
@@ -211,6 +262,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
           currentAssistantIdRef.current = null;
           currentThinkingChainRef.current = null;
           setIsStreaming(false);
+          setActivity('error');
           flushRender();
           break;
         }
@@ -240,6 +292,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
     thinkingChains,
     sidebarData,
     isStreaming,
+    activity,
     errors,
     totalTokensUsed,
     addMessage,
