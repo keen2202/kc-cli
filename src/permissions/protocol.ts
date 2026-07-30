@@ -97,6 +97,10 @@ export interface UIPermissionRequest {
   toolName: string;
   /** Human-readable one-line summary of the tool input. */
   inputSummary?: string;
+  /** Full, untruncated operation detail (e.g. the complete command, query or
+   *  argument list) shown when the user expands the request to review exactly
+   *  what will run before authorizing. */
+  details?: string;
   /** Pending file changes, when the tool writes/edits files. */
   diffs?: FilePatchPreview[];
 }

@@ -49,17 +49,35 @@ export async function isPathAllowed(filePath: string, options: {
 }
 
 /**
- * Synchronous check: does a resolved path stay within the workspace?
- * Rejects path traversal (..) and symlink escape.
+ * The filesystem scope tools may operate in: the workspace itself plus its
+ * sibling directories (projects living next to the workspace). The scope is
+ * the workspace's parent directory; at a filesystem root path.dirname reaches
+ * its fixed point, so the root itself becomes the boundary.
+ *
+ * Protected paths (credentials, system files) remain guarded independently by
+ * the permission engine, and write tools still go through the ask/deny flow —
+ * this boundary only stops traversal far outside the project area.
+ */
+export function getWorkspaceAccessRoot(cwd: string): string {
+  const resolvedCwd = path.resolve(cwd);
+  const parent = path.dirname(resolvedCwd);
+  return parent === resolvedCwd ? resolvedCwd : parent;
+}
+
+/**
+ * Synchronous check: does a resolved path stay within the workspace scope
+ * (the workspace and its sibling directories)?
+ * Rejects path traversal (..) beyond that scope and symlink escape.
  */
 export function assertPathWithinWorkspace(filePath: string, cwd: string): void {
+  const accessRoot = getWorkspaceAccessRoot(cwd);
   const resolved = path.resolve(cwd, filePath);
-  const normalizedCwd = cwd.endsWith(path.sep) ? cwd : cwd + path.sep;
+  const normalizedRoot = accessRoot.endsWith(path.sep) ? accessRoot : accessRoot + path.sep;
 
-  // Check for path traversal: resolved path must be within cwd
-  if (resolved !== cwd && !resolved.startsWith(normalizedCwd)) {
+  // Check for path traversal: resolved path must stay within the access root
+  if (resolved !== accessRoot && !resolved.startsWith(normalizedRoot)) {
     throw new Error(
-      `Path traversal denied: "${filePath}" resolves to "${resolved}" which is outside workspace "${cwd}"`
+      `Path traversal denied: "${filePath}" resolves to "${resolved}" which is outside the workspace scope "${accessRoot}"`
     );
   }
 
@@ -71,7 +89,7 @@ export function assertPathWithinWorkspace(filePath: string, cwd: string): void {
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       // File doesn't exist yet — resolve parent directory and verify
-      realPath = resolveParentForNewFile(resolved, normalizedCwd);
+      realPath = resolveParentForNewFile(resolved, normalizedRoot);
     } else if ((err as NodeJS.ErrnoException).code === 'ELOOP') {
       throw new Error(
         `Symlink loop detected: "${filePath}" contains a circular symlink reference`
@@ -81,23 +99,23 @@ export function assertPathWithinWorkspace(filePath: string, cwd: string): void {
     }
   }
 
-  // Check that the real (symlink-resolved) path is still within workspace
-  if (realPath !== cwd && !realPath.startsWith(normalizedCwd)) {
+  // Check that the real (symlink-resolved) path is still within the scope
+  if (realPath !== accessRoot && !realPath.startsWith(normalizedRoot)) {
     throw new Error(
-      `Symlink escape denied: "${filePath}" resolves to "${realPath}" which is outside workspace "${cwd}"`
+      `Symlink escape denied: "${filePath}" resolves to "${realPath}" which is outside the workspace scope "${accessRoot}"`
     );
   }
 }
 
-function resolveParentForNewFile(filePath: string, normalizedCwd: string): string {
+function resolveParentForNewFile(filePath: string, normalizedRoot: string): string {
   let dir = path.dirname(filePath);
 
   while (dir !== filePath) {
     try {
       const realDir = fs.realpathSync.native(dir);
-      if (realDir !== normalizedCwd.slice(0, -1) && !realDir.startsWith(normalizedCwd)) {
+      if (realDir !== normalizedRoot.slice(0, -1) && !realDir.startsWith(normalizedRoot)) {
         throw new Error(
-          `Symlink escape denied: parent directory "${dir}" resolves to "${realDir}" outside workspace`
+          `Symlink escape denied: parent directory "${dir}" resolves to "${realDir}" outside the workspace scope`
         );
       }
       const relative = path.relative(dir, filePath);

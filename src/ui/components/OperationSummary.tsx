@@ -131,9 +131,9 @@ export function OperationSummary({ operations, mode, compact = false, autoApprov
   // shows up to 3 one-line ops, or a single op on compact widths.
   const maxVisible = mode === 'confirm' ? 1 : compact ? 1 : 3;
   const visible = operations.slice(0, maxVisible);
-  // Whether any visible op carries file diffs, so the confirm bar can advertise
-  // the Ctrl+O expand affordance only when there is something to expand.
-  const hasPendingDiffs = mode === 'confirm' && visible.some((op) => !!op.diffs && op.diffs.length > 0);
+  // In confirm mode the user can always expand the request into the full-detail
+  // dialog (Ctrl+O) to review the complete operation before deciding.
+  const canExpand = mode === 'confirm';
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor={colors.border} paddingLeft={1} paddingRight={1}>
@@ -187,11 +187,11 @@ export function OperationSummary({ operations, mode, compact = false, autoApprov
           <Text color={colors.muted}> Always  </Text>
           <Text color={colors.error} bold>[Esc]</Text>
           <Text color={colors.muted}> Cancel</Text>
-          {hasPendingDiffs ? (
+          {canExpand ? (
             <>
               <Text color={colors.muted}>  </Text>
               <Text color={colors.primary} bold>[Ctrl+O]</Text>
-              <Text color={colors.muted}> Expand diff</Text>
+              <Text color={colors.muted}> Details</Text>
             </>
           ) : null}
         </Box>

@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { useTheme } from '../hooks/useTheme';
 import { useTerminalSize } from '../hooks/useTerminalSize';
+import { useNowTick } from '../hooks/useNowTick';
 import { abbreviateModel, truncate, getBreakpoint } from '../layout';
 
 interface StatusBarProps {
@@ -13,12 +14,23 @@ interface StatusBarProps {
   tokensUsed?: number;
   /** Name of the tool currently running, shown as `· running: <name>`. */
   currentOperation?: string;
-  /** Seconds the current operation has been running (live-ticked). */
+  /** Seconds the current operation has been running (live-ticked). Prefer
+   *  `operationStartTime` for the live path; this stays for direct/test use. */
   operationElapsedSec?: number;
+  /** Start timestamp of the running operation. When set, the bar self-ticks
+   *  the elapsed time internally (no per-second re-render of the app tree). */
+  operationStartTime?: number;
   /** Overall progress 0-100 (turn-based normally, iteration-based in goal mode). */
   progressPercent?: number;
-  /** Estimated seconds remaining for the current query (best-effort). */
+  /** Estimated seconds remaining for the current query (best-effort). Prefer
+   *  the `queryStartTime`/`eta*Units` inputs for the live path. */
   etaSec?: number;
+  /** Query start timestamp; with the unit counts below the bar self-ticks the ETA. */
+  queryStartTime?: number;
+  /** Units completed so far (turns, or goal iterations) for the ETA estimate. */
+  etaCompletedUnits?: number;
+  /** Units still remaining for the ETA estimate. */
+  etaRemainingUnits?: number;
 }
 
 const MODE_ICONS: Record<string, string> = {
@@ -48,11 +60,26 @@ function formatDuration(sec: number): string {
   return `${m}m${String(s).padStart(2, '0')}s`;
 }
 
-export function StatusBar({ mode, provider, model, turnCount, maxTurns, tokensUsed, currentOperation, operationElapsedSec, progressPercent, etaSec }: StatusBarProps) {
+export function StatusBar({ mode, provider, model, turnCount, maxTurns, tokensUsed, currentOperation, operationElapsedSec, operationStartTime, progressPercent, etaSec, queryStartTime, etaCompletedUnits, etaRemainingUnits }: StatusBarProps) {
   const { tokens } = useTheme();
   const { width } = useTerminalSize();
   const icon = MODE_ICONS[mode] || '○';
   const label = MODE_LABELS[mode] || mode;
+
+  // Live time is ticked here (scoped to the one-row bar) rather than lifted to
+  // AppRoot, so a running clock never repaints the whole frame. Precomputed
+  // `operationElapsedSec`/`etaSec` still win when start timestamps are absent
+  // (direct/test use).
+  const tickActive = operationStartTime !== undefined || queryStartTime !== undefined;
+  const now = useNowTick(tickActive);
+  const liveOpElapsed = operationStartTime !== undefined
+    ? Math.max(0, (now - operationStartTime) / 1000)
+    : operationElapsedSec;
+  const liveEta = queryStartTime !== undefined
+    && etaCompletedUnits !== undefined && etaCompletedUnits > 0
+    && etaRemainingUnits !== undefined && etaRemainingUnits > 0
+    ? ((now - queryStartTime) / 1000 / etaCompletedUnits) * etaRemainingUnits
+    : etaSec;
 
   // Progress bar follows progressPercent when provided (goal mode reports
   // iteration progress there); otherwise fall back to turn-based progress.
@@ -67,8 +94,8 @@ export function StatusBar({ mode, provider, model, turnCount, maxTurns, tokensUs
   // Live operation + progress percent are the lowest-priority segments: they
   // are appended after the essentials and dropped first when width is tight.
   const pct = progressPercent !== undefined ? ` ${Math.round(progressPercent)}%` : '';
-  const eta = etaSec !== undefined && etaSec > 0 ? ` · ETA ~${formatDuration(etaSec)}` : '';
-  const opElapsed = operationElapsedSec !== undefined ? ` (${formatDuration(operationElapsedSec)})` : '';
+  const eta = liveEta !== undefined && liveEta > 0 ? ` · ETA ~${formatDuration(liveEta)}` : '';
+  const opElapsed = liveOpElapsed !== undefined ? ` (${formatDuration(liveOpElapsed)})` : '';
   const opSuffix = currentOperation ? ` · running: ${currentOperation}${opElapsed}` : '';
   const plain = `${icon} ${label} ${provider}/${modelLabel} ${progressBar} ${turnCount}/${maxTurns}${pct}${eta}${opSuffix}${tokenSuffix}`;
   const avail = Math.max(0, width - 2);

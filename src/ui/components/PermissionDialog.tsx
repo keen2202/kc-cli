@@ -16,6 +16,8 @@ export type PermissionDecision = 'allow' | 'allow_always' | 'deny';
 export interface PermissionRequest {
   toolName: string;
   inputSummary?: string;
+  /** Full, untruncated operation detail shown in the expanded dialog. */
+  details?: string;
   diffs?: FilePatchPreview[];
   onDecide: (decision: PermissionDecision) => void;
 }
@@ -69,6 +71,16 @@ export function PermissionDialog({ request, onClose }: PermissionDialogProps) {
       }))
     : [];
 
+  // Full operation detail, capped to keep the dialog within a sane height; the
+  // expanded view exists precisely so the user can read the complete command /
+  // arguments (not just the one-line summary) before authorizing.
+  const DETAIL_MAX_LINES = 16;
+  const detailLines = request.details
+    ? request.details.replace(/\r\n/g, '\n').split('\n')
+    : [];
+  const shownDetail = detailLines.slice(0, DETAIL_MAX_LINES);
+  const detailTruncated = detailLines.length > DETAIL_MAX_LINES;
+
   // flexShrink=0: as an in-flow overlay in Layout's fixed-height column this
   // dialog must never be flex-squeezed (rows would collapse onto each other);
   // the chat panel (overflow="hidden") absorbs the shrinkage instead.
@@ -83,13 +95,19 @@ export function PermissionDialog({ request, onClose }: PermissionDialogProps) {
         <Text>Tool: </Text>
         <Text bold>{request.toolName}</Text>
       </Box>
-      {request.inputSummary ? (
+      {shownDetail.length > 0 ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color={colors.muted} bold>Operation details</Text>
+          {shownDetail.map((line, i) => (
+            <Text key={`detail-${i}`} wrap="truncate-end">{line === '' ? ' ' : line}</Text>
+          ))}
+          {detailTruncated ? (
+            <Text color={colors.muted} dimColor>… {detailLines.length - DETAIL_MAX_LINES} more line(s)</Text>
+          ) : null}
+        </Box>
+      ) : request.inputSummary ? (
         <Box>
-          <Text color={colors.muted}>
-            {request.inputSummary.length > 60
-              ? request.inputSummary.slice(0, 57) + '...'
-              : request.inputSummary}
-          </Text>
+          <Text color={colors.muted}>{request.inputSummary}</Text>
         </Box>
       ) : null}
       {hasDiffs ? (
@@ -97,13 +115,14 @@ export function PermissionDialog({ request, onClose }: PermissionDialogProps) {
           <DiffPreview diffs={fileDiffs} showActions={false} maxLines={20} />
         </Box>
       ) : null}
-      <Box marginTop={hasDiffs ? 1 : 0}>
+      <Box marginTop={1}>
         <Text color={colors.success} bold>[Y]</Text>
         <Text color={colors.muted}> {hasDiffs ? 'Accept' : 'Allow Once'}  </Text>
         <Text color={colors.primary} bold>[A]</Text>
         <Text color={colors.muted}> Allow Always  </Text>
         <Text color={colors.error} bold>[N]</Text>
-        <Text color={colors.muted}> {hasDiffs ? 'Reject' : 'Deny'}</Text>
+        <Text color={colors.muted}> {hasDiffs ? 'Reject' : 'Deny'}  </Text>
+        <Text color={colors.muted} dimColor>[Esc] Back</Text>
       </Box>
     </Box>
   );

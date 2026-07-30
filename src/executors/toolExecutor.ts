@@ -158,6 +158,69 @@ function summarizeToolInput(toolName: string, input: Record<string, unknown>): s
   }
 }
 
+/** Longest operation detail surfaced to the confirmation dialog. */
+const PERMISSION_DETAILS_MAX = 4000;
+
+/**
+ * Build the full, untruncated operation detail shown when the user expands a
+ * pending authorization to review exactly what will run. Unlike
+ * `summarizeToolInput` (a one-line, length-capped target), this surfaces the
+ * complete command / query / argument list plus any other scalar inputs, so
+ * the user can make an informed decision. File content is intentionally left
+ * to the diff preview; only operation targets/arguments appear here.
+ */
+function describeToolInputDetails(toolName: string, input: Record<string, unknown>): string | undefined {
+  const lines: string[] = [];
+  const add = (label: string, value: unknown): void => {
+    if (value === undefined || value === null) return;
+    const text = typeof value === 'string' ? value : JSON.stringify(value);
+    if (text.trim() === '') return;
+    lines.push(`${label}: ${text}`);
+  };
+
+  switch (toolName) {
+    case 'Bash':
+    case 'Run':
+      if (String(input.command ?? '').trim()) lines.push(`Command:\n${String(input.command)}`);
+      add('Working dir', input.cwd);
+      add('Timeout (ms)', input.timeout);
+      break;
+    case 'FileWrite':
+      add('File', input.path);
+      add('Append', input.append);
+      break;
+    case 'FileEdit':
+      add('File', input.file_path);
+      if (Array.isArray(input.edits)) add('Edits', input.edits.length);
+      break;
+    case 'FileRestore':
+      add('Action', input.action);
+      add('File', input.file);
+      break;
+    case 'Sql':
+      if (String(input.query ?? '').trim()) lines.push(`Query:\n${String(input.query)}`);
+      break;
+    case 'WebFetch':
+      add('URL', input.url);
+      break;
+    case 'Git':
+      add('Args', input.args);
+      break;
+    default: {
+      // Unknown tool: surface every scalar argument so nothing is hidden.
+      for (const [key, value] of Object.entries(input)) {
+        if (typeof value !== 'object' || value === null) add(key, value);
+      }
+    }
+  }
+
+  if (lines.length === 0) return undefined;
+  const text = lines.join('\n');
+  return text.length > PERMISSION_DETAILS_MAX
+    ? text.slice(0, PERMISSION_DETAILS_MAX) + '\n… (truncated)'
+    : text;
+}
+
 /**
  * Tool executor that supports both sequential and parallel tool execution
  * with timeout protection and sandbox isolation to prevent infinite hangs.
@@ -365,6 +428,10 @@ export class ToolExecutor {
             const request: UIPermissionRequest = {
               toolName: toolCall.toolName,
               inputSummary: permissionResult.message,
+              details: describeToolInputDetails(
+                toolCall.toolName,
+                effectiveInput as Record<string, unknown>,
+              ),
               diffs: await this.buildDiffPreview(toolCall.toolName, effectiveInput),
             };
             const decision = await this.permissionRequestHandler(request);

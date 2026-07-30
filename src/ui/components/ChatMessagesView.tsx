@@ -9,6 +9,7 @@ import { renderToolCallCard } from './ToolCallCard';
 import { renderMarkdown } from './MarkdownRenderer';
 import { useTheme } from '../hooks/useTheme';
 import { useTerminalSize } from '../hooks/useTerminalSize';
+import { useNowTick } from '../hooks/useNowTick';
 
 // ── Line-accurate rendering ──
 //
@@ -24,9 +25,26 @@ function wrapToWidth(text: string, width: number): string[] {
   return wrapAnsi(text, width, { hard: true, trim: false }).split('\n');
 }
 
+/** Left gutter applied to every content row so a message body lines up neatly
+ *  under its role marker (keeps thinking / prose / tool cards on one column). */
+const BODY_INDENT = '  ';
+
+/** Wrap `text` to the indented body width and push each row with the gutter,
+ *  preserving "1 array element = 1 terminal row" for the virtual scroller. */
+function pushBody(out: string[], text: string, width: number): void {
+  for (const line of wrapToWidth(text, Math.max(1, width - BODY_INDENT.length))) {
+    out.push(BODY_INDENT + line);
+  }
+}
+
 /**
  * Render one chat message into terminal rows (pure; exported for tests).
- * A trailing blank row separates consecutive messages.
+ *
+ * Every turn opens with a role marker so a user question is unmistakable and
+ * clearly set apart from the assistant's reply; the message body is then
+ * indented one gutter under that marker so thinking chains, prose and tool
+ * cards all align on a single column. A trailing blank row separates
+ * consecutive messages.
  */
 export function renderMessageLines(
   message: ChatMessage,
@@ -39,21 +57,29 @@ export function renderMessageLines(
   const lines: string[] = [];
 
   if (message.role === 'user') {
-    lines.push(...wrapToWidth(tokens['chat.user']('▸ ') + (message.content ?? ''), width));
+    // Prominent question marker: a solid left bar + "You" label in the user
+    // accent colour so submitted questions stand out from replies at a glance.
+    lines.push(tokens['chat.user']('▌ You'));
+    if (message.content) {
+      pushBody(lines, message.content, width);
+    }
   } else if (message.role === 'assistant') {
+    // Reply marker in the assistant accent colour, mirroring the user marker so
+    // the two sides of the conversation are visually distinct.
+    lines.push(tokens['chat.assistant']('● kc'));
     if (thinkingChain) {
-      lines.push(...wrapToWidth(renderThinkingChain(thinkingChain, tokens, { expanded: toolOutputExpanded }), width));
+      pushBody(lines, renderThinkingChain(thinkingChain, tokens, { expanded: toolOutputExpanded }), width);
     }
     if (message.content) {
-      for (const line of renderMarkdown(message.content, undefined, width)) {
-        lines.push(...wrapToWidth(line, width));
+      for (const line of renderMarkdown(message.content, undefined, Math.max(1, width - BODY_INDENT.length))) {
+        pushBody(lines, line, width);
       }
     }
     for (const tc of message.toolCalls ?? []) {
-      lines.push(...wrapToWidth(renderToolCallCard(tc, undefined, { expanded: toolOutputExpanded, now }), width));
+      pushBody(lines, renderToolCallCard(tc, undefined, { expanded: toolOutputExpanded, now }), width);
     }
   } else {
-    // system message
+    // system message: dim, no marker (informational, not part of the dialogue).
     lines.push(...wrapToWidth(chalk.gray(message.content ?? ''), width));
   }
 
@@ -76,13 +102,18 @@ interface ChatViewProps {
   scrollRef?: React.MutableRefObject<ChatScrollHandle | null>;
   /** Global tool-output expansion toggle (Ctrl+O). */
   toolOutputExpanded?: boolean;
-  /** Wall-clock tick driving live spinner/elapsed on running tool cards. */
-  now?: number;
+  /** Whether an engine turn is in flight; drives a self-scoped 1s tick for the
+   *  live spinner/elapsed on running tool cards (kept local so the clock never
+   *  re-renders the whole app tree). */
+  isStreaming?: boolean;
 }
 
-export function ChatView({ messages, thinkingChains, scrollRef, toolOutputExpanded = false, now }: ChatViewProps) {
+export function ChatView({ messages, thinkingChains, scrollRef, toolOutputExpanded = false, isStreaming = false }: ChatViewProps) {
   const { tokens } = useTheme();
   const { height: termHeight, width: termWidth } = useTerminalSize();
+  // Live wall-clock tick, scoped to this panel: only ticks while a turn is
+  // streaming, so completed transcripts stay perfectly still (no flicker).
+  const now = useNowTick(isStreaming);
 
   // Self-measure the rows/columns Yoga actually allotted (same pattern as
   // SidebarPanel): until the first measurement lands, fall back to a

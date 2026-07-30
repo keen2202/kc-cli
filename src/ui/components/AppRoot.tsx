@@ -269,14 +269,11 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
       ? (activity === 'executing' ? 'executing' : activity === 'error' ? 'error' : 'streaming')
       : mode;
 
-  // Live wall-clock tick (1s) while a query is in flight: drives the running
-  // tool spinner/elapsed in the chat area and the status-bar elapsed/ETA.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (mode !== 'streaming') return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [mode]);
+  // Live wall-clock time is no longer held here: a single high-level `now`
+  // state forced the entire app tree to re-render every second (the visible
+  // "refresh" while streaming). Each leaf that shows live time now ticks
+  // itself (ChatView via isStreaming, StatusBar via start-time props,
+  // SessionInfo via its own clock), so a running clock repaints only that leaf.
 
   // Input history (↑/↓ recall of previously submitted messages)
   const [submittedHistory, setSubmittedHistory] = useState<string[]>([]);
@@ -311,6 +308,7 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
         setPermissionRequest({
           toolName: req.toolName,
           inputSummary: req.inputSummary,
+          details: req.details,
           diffs: req.diffs,
           onDecide: (decision) => {
             resolve(decision);
@@ -1024,7 +1022,10 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
     onKey: (event) => {
       if (!permissionRequest) return true;
       if (event.ctrl && (event.name === 'o' || event.name === 'O')) {
-        if (permissionRequest.diffs && permissionRequest.diffs.length > 0) setShowDiffDetail(true);
+        // Expand the request into the full-detail dialog so the user can review
+        // the complete operation (command/args, and any diff) before deciding —
+        // available for every request, not only file-editing ones.
+        setShowDiffDetail(true);
         return true;
       }
       if (event.name === 'return') { permissionRequest.onDecide('allow'); return true; }
@@ -1089,26 +1090,20 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
     const running = (sidebarData.tools ?? []).filter((t) => t.status === 'running');
     return running.length > 0 ? running[running.length - 1]!.startTime : undefined;
   }, [sidebarData.tools]);
-  // Live elapsed for the running tool, ticked by `now` while a query runs.
-  const operationElapsedSec = mode === 'streaming' && runningToolStart !== undefined
-    ? Math.max(0, (now - runningToolStart) / 1000)
-    : undefined;
+  // Live elapsed for the running tool is ticked inside StatusBar from this
+  // start timestamp (no per-second re-render here).
+  const operationStartTime = mode === 'streaming' ? runningToolStart : undefined;
   const progressPercent = goalState?.active
     ? (goalState.iteration / Math.max(1, goalState.maxIterations)) * 100
     : (turnCount / Math.max(1, maxTurns)) * 100;
-  // Best-effort ETA matching the progress-bar semantics: average pace so far
-  // (per goal iteration, else per turn) extrapolated over what remains.
-  const etaSec = useMemo(() => {
-    if (mode !== 'streaming') return undefined;
-    const elapsedSec = (now - sessionStartTime) / 1000;
-    if (goalState?.active && goalState.iteration > 0) {
-      return (elapsedSec / goalState.iteration) * Math.max(0, goalState.maxIterations - goalState.iteration);
-    }
-    if (turnCount > 0) {
-      return (elapsedSec / turnCount) * Math.max(0, maxTurns - turnCount);
-    }
-    return undefined;
-  }, [mode, now, sessionStartTime, goalState, turnCount, maxTurns]);
+  // ETA inputs (unit-based, tick-free): StatusBar self-ticks the elapsed time
+  // and extrapolates over the remaining units, matching the progress semantics
+  // (per goal iteration while a goal runs, else per turn).
+  const queryStartTime = mode === 'streaming' ? sessionStartTime : undefined;
+  const etaCompletedUnits = goalState?.active ? goalState.iteration : turnCount;
+  const etaRemainingUnits = goalState?.active
+    ? Math.max(0, goalState.maxIterations - goalState.iteration)
+    : Math.max(0, maxTurns - turnCount);
 
   return (
     <FocusStackProvider value={focusStack}>
@@ -1134,7 +1129,7 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
             thinkingChains={thinkingChains}
             scrollRef={chatScrollRef}
             toolOutputExpanded={toolOutputExpanded}
-            now={mode === 'streaming' ? now : undefined}
+            isStreaming={mode === 'streaming'}
           />
         }
         editor={
@@ -1164,9 +1159,11 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
             maxTurns={maxTurns}
             tokensUsed={totalTokensUsed}
             currentOperation={currentOperation}
-            operationElapsedSec={operationElapsedSec}
+            operationStartTime={operationStartTime}
             progressPercent={progressPercent}
-            etaSec={etaSec}
+            queryStartTime={queryStartTime}
+            etaCompletedUnits={etaCompletedUnits}
+            etaRemainingUnits={etaRemainingUnits}
           />
         }
         overlay={
