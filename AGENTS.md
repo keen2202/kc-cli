@@ -21,7 +21,7 @@ npm run kc             # Start interactive REPL
 - **Core loop**: `src/query/QueryEngine.ts` — Facade over 4 sub-modules (State, Compaction, Memory, Error); idle→compact→stream→decide→execute state machine with steering support; protocol types in `query/protocol.ts`
 - **Tools**: `src/tools/` — 22 built-in tools using `buildTool()` factory with Zod schemas, two-phase execution (prepare/execute/finalize)
 - **API clients**: `src/api/` — 11 providers (Anthropic, OpenAI, DeepSeek, Qwen, GLM, Mimo, Kimi, Step, Gemini, OpenAI-compatible, Ollama); extend `BaseApiClient`; protocol types in `api/protocol.ts`
-- **Permissions**: `src/permissions/` — 6-step deny-first with bypass-immune protected paths + plugin-contributed rules (Step 1.5)
+- **Permissions**: `src/permissions/` — 6-step deny-first with bypass-immune protected paths + plugin-contributed rules (Step 3.5)
 - **Sandbox**: `src/services/sandbox*.ts` — Docker/Bubblewrap/seccomp backends with fallback chain
 - **Orchestrator**: `src/orchestrator/` — Multi-agent with `AsyncLocalStorage` isolation; protocol types in `orchestrator/protocol.ts`
 - **Memory**: `src/memory/` — File-based persistent memory with YAML frontmatter, 4 types (user/feedback/project/reference), relevance search, auto-extraction and consolidation
@@ -53,6 +53,15 @@ npm run kc             # Start interactive REPL
 - Config priority: defaults < user (`~/.kc-cli/settings.json`) < project (`.kc-cli/settings.json`) < env (`KC_*`) < CLI args
 - Protocol-first: each module defines public types in `protocol.ts`
 
+## Risk Boundaries
+
+What the permission system (`src/permissions/`) actually enforces on agent behavior:
+
+- **Protected paths are bypass-immune** (`protectedPaths.ts`): credential/secret files (`.env`, `.credentials`, `.secrets`, `.ssh/`, `.gnupg/`, `.aws/credentials`, `.kube/config`, `.docker/config.json`), system files (`/etc/passwd|shadow|ssh`, `/proc/`, `/sys/`), shell profiles, `.git/objects|refs`, and Windows equivalents (SAM hives, `drivers/etc/hosts`). Access always escalates to `ask` — even in bypass mode. Symlinks are resolved before matching; compound commands (`&&`, `;`, `|`) are split and each part checked.
+- **System write directories are denied** for write-capable tools (FileWrite/FileEdit/Bash/Run/NotebookEdit): `/etc/`, `/usr/`, `/bin/`, `/sbin/`, `C:\Windows\`, `C:\Program Files*\`, `C:\ProgramData\`.
+- **Destructive command categories are auto-denied** (`classifier.ts` `DESTRUCTIVE_PATTERNS`): recursive/force delete (`rm -rf`), filesystem format (`mkfs`), raw disk write (`dd of=`), partitioning (`fdisk`/`parted`), recursive `chmod`/`chown`, firewall (`iptables`), service control (`systemctl stop|disable|mask`), bootloader changes, LVM creation, shutdown/reboot.
+- **Engine order** (`engine.ts`, deny-first): deny rules → tool check → security-critical (bypass-immune) → plugin rules (Step 3.5, can tighten but never loosen) → bypass → allow rules → ask rules → mode default. Bypass mode requires explicit `KC_ALLOW_BYPASS=1` and never overrides security-critical checks. `WebFetch` to internal/private network URLs is denied (SSRF guard).
+
 ## Key Types
 
 - `ToolDefinition` — Tool interface with optional `prepare`/`finalize` methods
@@ -73,6 +82,7 @@ npm run kc             # Start interactive REPL
 - Mock ExecutionEnv: `MockFileSystem` + `MockShell` for tool testing without real I/O
 - Sandbox tests: `sandbox-e2e.test.ts` for isolation verification
 - Multi-agent tests: `multi-agent.test.ts` for orchestrator coverage
+- Reproduce a single failing test: `npx vitest run <file-path>` (add `-t "<test name>"` to narrow to one case)
 
 ### UI red lines (ui-structural-hardening, non-negotiable)
 
@@ -80,6 +90,12 @@ npm run kc             # Start interactive REPL
 - **ESC semantics**: the focus stack (`src/ui/focus-stack.ts`) is the single arbiter — never add a second `useInput` for keys, never bind `escape` in the keybinding schema; changes to ESC behavior must update `esc-matrix.test.tsx`.
 - **Layout truth**: Yoga (ink flexbox) owns all measurement; `src/ui/layout.ts` is policy-only — never reintroduce reserved-height constants or parent-computed child heights (guarded by `layout.test.ts` and `layout-anchor.test.tsx`).
 - **Data contracts** live in `src/ui/view-protocol.ts` only; never import contracts from component files (enforced by `dead-path-guard.test.ts` — its deny/exemption lists are the reviewed source of truth).
+
+## AI Debugging
+
+- **Structured logger**: `src/services/logger.ts` — JSON lines written to **stderr** (`console.error`) by default; fields: `timestamp`, `level`, `module`, `message`, optional `correlationId` and `data`. Pre-built module loggers (`logger.api`, `logger.permissions`, `logger.query`, …) stamp the `module` field for per-subsystem filtering; `devFormatter` gives human-readable output.
+- **Log level**: default `info`; override via env `LOG_LEVEL=debug|info|warn|error` (read at startup in `src/bootstrap/init-sequence.ts`).
+- **correlationId**: opt-in — set via `setCorrelationId(id)` or `configureLogger({ correlationId })`; once set, every entry carries it, so one session's logs can be isolated by filtering stderr for that id (`Select-String <id>` / `grep <id>`).
 
 ## Documentation
 
