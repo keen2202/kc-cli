@@ -45,7 +45,7 @@ Transitions are validated via `VALID_TRANSITIONS` Set with O(1) lookup. Invalid 
 
 ## Facade Delegation
 
-QueryEngine delegates to four sub-modules:
+QueryEngine delegates to seven sub-modules:
 
 ### ConversationState (QueryEngineState.ts)
 - Message storage and retrieval
@@ -71,6 +71,20 @@ QueryEngine delegates to four sub-modules:
 - Retry logic with exponential backoff
 - Circuit breaker for external services (API calls)
 - `KCError.fromApiError()` for automatic error code assignment
+
+### PlanningPhaseHandler (QueryEnginePlanning.ts)
+- Strategic planning phase with write-tools locked (investigate → hypothesize → plan)
+- Turn-budgeted; completion detection unlocks editing tools
+
+### ImportanceTagger (QueryEngineImportance.ts)
+- Heuristic auto-tagging of each turn's importance
+- Feeds smart compaction decisions (protect high-importance turns)
+
+### RuntimeControlHandler (QueryEngineRuntimeControl.ts)
+- Cross-turn behavior policies: retry discipline, exploration-loop breaking, tool-message cap
+- Interventions gated by `policy.enabled` (default off)
+
+Additionally, `completion-report.ts` assembles an evidence-based acceptance report at task completion (modified files, gate outcomes, audit entries, token usage) attached to the `agent:complete` event.
 
 ## Streaming Model
 

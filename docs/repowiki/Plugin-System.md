@@ -71,7 +71,7 @@ interface PluginHooks {
 
 ### 3. Permission Rules
 
-Custom permission rules evaluated at Step 1.5:
+Custom permission rules evaluated at Step 3.5:
 
 ```typescript
 interface PluginPermissionRule {
@@ -132,7 +132,7 @@ interface PluginMCPConfig {
 4. Registration
    ├─ getPluginTools()      → ToolRegistry.pluginTools
    ├─ getPluginHooks()      → Global hook registry
-   ├─ getPluginPermissionRules() → Permission engine Step 1.5
+   ├─ getPluginPermissionRules() → Permission engine Step 3.5
    ├─ getPluginPrompts()    → Prompt builder
    └─ getPluginMCPServers() → MCPClientManager
 

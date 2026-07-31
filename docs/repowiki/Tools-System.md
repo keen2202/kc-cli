@@ -1,6 +1,6 @@
 # Tools System
 
-21 built-in tools with two-phase execution, lazy loading, and plugin extensibility.
+23 registered tools with two-phase execution, lazy loading, and plugin extensibility.
 
 ## Tool Registry
 
@@ -8,7 +8,7 @@
 
 | Registry | Source | Loading |
 |----------|--------|---------|
-| `tools` | Built-in (21) | Eager (CRITICAL+HIGH) / Lazy (MEDIUM+LOW+DEFERRED) |
+| `tools` | Built-in (23) | Eager (CRITICAL+HIGH) / Lazy (MEDIUM+LOW+DEFERRED) |
 | `mcpTools` | MCP servers | On MCP connect |
 | `pluginTools` | Plugins | On plugin init |
 
@@ -19,7 +19,7 @@ Tools are registered in a `TOOL_MANIFEST` with priority levels:
 | Priority | Level | Tools | Loading |
 |----------|-------|-------|---------|
 | 0 | CRITICAL | Bash, FileRead | Eager |
-| 10 | HIGH | FileWrite, WebSearch, FileEdit, Grep, Glob, WebFetch, Git, Run | Eager |
+| 10 | HIGH | FileWrite, WebSearch, FileEdit, FileRestore, Grep, Glob, WebFetch, Git, Run | Eager |
 | 20 | MEDIUM | Sql, Docker, Monitor, Config | Lazy |
 | 30 | LOW | TodoWrite, TaskCreate, TaskGet, AskUser | Lazy |
 | 40 | DEFERRED | Agent, Deploy, TeamCreate, LSP | Lazy |

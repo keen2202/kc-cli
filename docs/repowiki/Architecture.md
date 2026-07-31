@@ -33,9 +33,8 @@ KC-CLI follows a layered architecture with clear module boundaries enforced by p
 ├─────────────────────────────────────────────────────┤
 │                    Foundation                        │
 │   State Store (observable, immutable)               │
-│   Error Handling (Result<T,E>, KCError)             │
+│   Error Handling (KCError, typed ErrorCode)         │
 │   ExecutionEnv (swappable FS + Shell)               │
-│   ServiceContainer (DI)                             │
 │   Configuration (5-layer)                           │
 │   Logging (structured)                              │
 └─────────────────────────────────────────────────────┘
@@ -46,14 +45,14 @@ KC-CLI follows a layered architecture with clear module boundaries enforced by p
 | Layer | Module | Path |
 |-------|--------|------|
 | Presentation | UI Components | `src/ui/components/` |
-| Presentation | Terminal Renderer | `src/ui/renderer.ts` |
+| Presentation | Terminal Renderer | `src/ui/renderer.tsx` |
 | Presentation | Layout Manager | `src/ui/layout.ts` |
 | Presentation | Theme System | `src/ui/theme.ts` |
 | Application | QueryEngine | `src/query/QueryEngine.ts` |
 | Application | Orchestrator | `src/orchestrator/agent-orchestrator.ts` |
 | Application | AGP | `src/agp/` |
 | Application | Commands | `src/commands/` |
-| Domain | Tools | `src/tools/` (20 built-in) |
+| Domain | Tools | `src/tools/` (23 registered) |
 | Domain | Permissions | `src/permissions/engine.ts` |
 | Domain | Memory | `src/memory/` |
 | Infrastructure | API Clients | `src/api/` (11 providers) |
@@ -63,7 +62,7 @@ KC-CLI follows a layered architecture with clear module boundaries enforced by p
 | Infrastructure | Cache | `src/services/cache/` |
 | Infrastructure | Budget | `src/services/budget.ts` |
 | Foundation | State Store | `src/state/store.ts` |
-| Foundation | Error Types | `src/utils/errors.ts`, `src/utils/result.ts` |
+| Foundation | Error Types | `src/utils/errors.ts` |
 | Foundation | ExecutionEnv | `src/services/execution-env.ts` |
 | Foundation | Config | `src/bootstrap/config.ts` |
 | Foundation | Logging | `src/services/logger.ts` |
@@ -129,9 +128,9 @@ main.ts
  │    ├─► adapters/             (agent, env, mem, prompt, tool adapters)
  │    └─► version-manager.ts   (Version tracking and rollback)
  └─► ui/                        (renderInkUI / REPL / JSON mode)
-      ├─► components/App.ts
-      ├─► layout.ts             (LayoutManager)
-      ├─► overlay-manager.ts
+      ├─► components/AppRoot.tsx
+      ├─► layout.ts             (breakpoint policy)
+      ├─► focus-stack.ts        (focus layers / ESC)
       └─► event-bus.ts          (UIEventBus)
 ```
 

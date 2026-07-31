@@ -10,14 +10,14 @@ Input: (toolName, toolInput, permissionMode)
 Step 1: Global deny rules (alwaysDenyRules)
   └─ MATCH → DENY (cannot be bypassed)
 
-Step 1.5: Plugin permission rules
-  └─ MATCH → DENY/ALLOW/ASK (priority-ordered)
-
 Step 2: Tool-specific check (tool.checkPermissions)
   └─ Returns PermissionResult directly
 
 Step 3: Security-critical checks (bypass-immune)
   └─ Protected path access → always ASK
+
+Step 3.5: Plugin permission rules
+  └─ MATCH → DENY/ALLOW/ASK (priority-ordered; can tighten but never loosen bypass-immune decisions)
 
 Step 4: Bypass mode check
   └─ bypassPermissions mode → ALLOW (except security-critical)
@@ -133,7 +133,7 @@ interface PluginPermissionRule {
 }
 ```
 
-These are evaluated at Step 1.5, after global deny rules but before tool-specific checks.
+These are evaluated at Step 3.5, after security-critical checks but before the bypass mode check — plugin rules can tighten security (ask→deny) but never loosen bypass-immune decisions.
 
 ## Permission Cascading (Multi-Agent)
 

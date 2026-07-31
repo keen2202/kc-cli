@@ -184,7 +184,7 @@ Phase 3 (Major):
   - [x] Add `PluginPermissionRule` and `PluginPrompt` interfaces to `src/plugins/types.ts`
   - [x] Add `permissionRules`, `prompts`, `mcpServers` fields to `Plugin` interface
   - [x] Implement `getPluginPermissionRules()` in `src/plugins/plugin-manager.ts`
-  - [x] Add Step 1.5 in `src/permissions/engine.ts` for plugin-contributed rules
+  - [x] Add Step 1.5 in `src/permissions/engine.ts` for plugin-contributed rules **（偏差：后续安全验证硬化中已重编号为 Step 3.5，现位于 security-critical 之后、bypass 之前；插件规则只能收紧不能放松 bypass-immune 决策）**
   - [x] Add validation for new contribution types in `src/plugins/plugin-loader.ts`
   - [x] Create `test/plugins/contributions.test.ts`
   - [x] `npm run typecheck` passes

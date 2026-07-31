@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 📦 Dependencies
 
-- **Deferred**: `uuid@^9` → `uuid@^11` — typecheck passed, deferral not strictly needed but kept aligned with zod deferral
+- **Upgraded**: `uuid@^9` → `uuid@^11.1.1` — typecheck passed (`@types/uuid` remains for legacy typings)
 - **Deferred**: `zod@^3` → `zod@^4` — blocked by breaking changes in internal type structure used in `zodToJsonSchema.ts` (`ZodEffects`/`ZodNativeEnum` exports removed, `typeName` property removed from defs, `ZodDefault` signature changed). Requires migration of `src/utils/zodToJsonSchema.ts` and other zod-v3-dependent code.
 
 ## [3.2.0] - 2026-06-05

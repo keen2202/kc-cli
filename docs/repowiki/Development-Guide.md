@@ -59,8 +59,7 @@ npm test
 
 ### Error Handling
 
-- Use `Result<T, E>` for explicit error handling
-- Use `KCError` with typed error codes
+- Use `KCError` with a stable `ErrorCode` for explicit error handling
 - Never swallow errors silently
 - Wrap external errors in `KCError.fromApiError()`
 
@@ -132,30 +131,16 @@ src/api/protocol.ts       -- LLM stream events
 src/permissions/protocol.ts -- Permission types
 ```
 
-### Result<T, E>
+### Typed Errors (KCError)
 
 ```typescript
-import { ok, err, mapResult } from '@/utils/result';
+import { KCError } from '@/utils/errors';
+import { withToolErrorHandling } from '@/utils/errorHandling';
 
-const result = await riskyOperation();
-if (result.ok) {
-  // result.value is typed
-} else {
-  // result.error is typed
-}
-```
+throw new KCError('tool_timeout', 'Tool execution timed out', { toolName });
 
-### ServiceContainer
-
-Dependency injection with singleton/transient lifecycles:
-
-```typescript
-const container = new ServiceContainer();
-container.registerSingleton('logger', () => new Logger());
-container.registerTransient('toolExecutor', () => new ToolExecutor());
-
-const logger = container.resolve('logger'); // Same instance
-const executor = container.resolve('toolExecutor'); // New instance each time
+// Unified wrapper for tool operations (fallback / rethrow / logging)
+const output = await withToolErrorHandling('Bash', () => runCommand(cmd), { fallback: '' });
 ```
 
 ### ExecutionEnv Abstraction

@@ -21,7 +21,7 @@ KC-CLI is a modular CLI agent that orchestrates LLM providers, 21 built-in tools
 - [[Orchestrator]] -- Multi-agent lifecycle, EventBus, permission cascading
 - [[Memory-System]] -- File-based persistent memory, relevance search, consolidation
 - [[Plugin-System]] -- Contribution-based plugins, hooks, permission rules
-- [[UI-System]] -- Terminal UI, layout system, overlays, theme, mouse support
+- [[UI-System]] -- Terminal UI (ink/React), layout system, focus-stack dialogs, theme system
 - [[Configuration]] -- 5-layer config, env vars, Zod validation
 - AGP (Autogenesis Protocol) -- Self-evolving multi-agent system with SEPL pipeline
 
@@ -111,7 +111,7 @@ npm test
 ## Key Design Decisions
 
 1. **Protocol-first**: Each module exports types in `protocol.ts`, avoiding circular deps
-2. **Result<T,E>**: Rust-style error handling instead of try/catch
+2. **Typed errors**: `KCError` with stable `ErrorCode` for classification and retry decisions
 3. **Deny-first permissions**: Security by default, explicit allow
 4. **HMAC sandbox markers**: Prevent forgery of sandbox-wrapped commands
 5. **Tiered compaction**: 4 engines from cheap to expensive, circuit-breaker protected
