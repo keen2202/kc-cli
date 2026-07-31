@@ -172,3 +172,71 @@ export interface RuntimeControlIntervention {
   detail: string;
   timestamp: number;
 }
+
+// ─── Engine Configuration ─────────────────────────────────────────────
+
+/** QueryEngine construction options (moved here from QueryEngine.ts, 4e). */
+export interface QueryEngineConfig {
+  model: string;
+  provider: import('../api').LLMProvider;
+  apiKey?: string;
+  apiBaseUrl?: string;
+  maxTurns: number;
+  maxBudgetUsd: number | null;
+  systemPrompt?: string;
+  contextWindow?: number;
+  maxMessages?: number;
+  memory?: import('../memory/integration').MemoryIntegrationConfig;
+  permissionRules?: {
+    deny?: string[];
+    ask?: string[];
+    allow?: string[];
+  };
+  /** AGP Evolution hook — called after query completion if evolution is enabled */
+  evolution?: {
+    enabled: boolean;
+    onEvolve?: (sessionId: string) => Promise<void>;
+  };
+  /** Auto-extend turn budget when active progress is detected */
+  autoExtendTurns?: boolean;
+  /** Hard ceiling for auto-extended turns; 0 or negative = unbounded (engine-local default 100) */
+  maxTurnsCeiling?: number;
+  /** Minimum turns before agent is allowed to exit (prevents early abandonment) */
+  minTurns?: number;
+  /** Auto-commit interval in turns (0 = disabled; engine-local default 0, production default flows from config) */
+  autoCommitInterval?: number;
+
+  /** Context window efficiency configuration (Area 3) */
+  contextEfficiency?: ContextEfficiencyConfig;
+
+  /** Strategic planning phase configuration (Area 1) */
+  planningPhase?: PlanningPhaseConfig;
+
+  /** Patch guarantee configuration (Area 2) */
+  patchGuarantee?: PatchGuaranteeConfig;
+
+  /** Sandbox failIfNoSandbox — passed through to SandboxManager */
+  sandboxFailIfNoSandbox?: boolean;
+
+  /**
+   * T1 (H1): Fail-safe policy for 'ask' permission decisions in non-interactive
+   * contexts (no UI approval handler). Default 'deny'. 'allow'/'proceed' require
+   * explicit opt-in (config or CLI --dangerously-skip-permissions).
+   */
+  noninteractiveAskPolicy?: 'deny' | 'allow' | 'proceed';
+
+  /**
+   * harness-evolution T1 (H1): conditional instruction-surface injection.
+   * When enabled, bootstrap/failure-recovery surfaces are appended as the
+   * final system segment based on runtime predicates. Default off.
+   */
+    promptSurfaces?: {
+    conditionalInjection?: boolean;
+  };
+
+  /**
+   * harness-evolution T2 (H2): cross-turn runtime control policy (retry
+   * discipline, exploration-loop breaking, tool-message cap). Default off.
+   */
+    runtimeControl?: Partial<RuntimeControlPolicy>;
+}

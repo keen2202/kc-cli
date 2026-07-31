@@ -61,7 +61,7 @@ export class FileMemoryService implements MemoryService {
     const projectPath = getProjectMemoryPath(projectHash);
     const isValid = await validateMemoryPath(filePath, projectPath);
     if (!isValid) {
-      throw new Error(`Invalid memory path: ${filePath}`);
+      throw new KCError('tool_permission_denied', `Invalid memory path: ${filePath}`, { filePath });
     }
 
     // Compose and write the file
@@ -120,7 +120,7 @@ export class FileMemoryService implements MemoryService {
     // Validate path security
     const isValid = await validateMemoryPath(filePath, projectPath);
     if (!isValid) {
-      throw new Error(`Invalid memory path: ${filePath}`);
+      throw new KCError('tool_permission_denied', `Invalid memory path: ${filePath}`, { filePath });
     }
 
     try {
@@ -173,7 +173,7 @@ export class FileMemoryService implements MemoryService {
     // Validate path security
     const isValid = await validateMemoryPath(filePath, projectPath);
     if (!isValid) {
-      throw new Error(`Invalid memory path: ${filePath}`);
+      throw new KCError('tool_permission_denied', `Invalid memory path: ${filePath}`, { filePath });
     }
 
     try {

@@ -3,6 +3,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import { isProtectedPath, SYSTEM_WRITE_DIRECTORIES } from '../permissions/protectedPaths';
+import { KCError } from './errors';
 
 /**
  * Resolve path safely, handling symlinks before validation
@@ -76,8 +77,10 @@ export function assertPathWithinWorkspace(filePath: string, cwd: string): void {
 
   // Check for path traversal: resolved path must stay within the access root
   if (resolved !== accessRoot && !resolved.startsWith(normalizedRoot)) {
-    throw new Error(
-      `Path traversal denied: "${filePath}" resolves to "${resolved}" which is outside the workspace scope "${accessRoot}"`
+    throw new KCError(
+      'tool_permission_denied',
+      `Path traversal denied: "${filePath}" resolves to "${resolved}" which is outside the workspace scope "${accessRoot}"`,
+      { filePath, resolved, accessRoot }
     );
   }
 
@@ -91,8 +94,11 @@ export function assertPathWithinWorkspace(filePath: string, cwd: string): void {
       // File doesn't exist yet — resolve parent directory and verify
       realPath = resolveParentForNewFile(resolved, normalizedRoot);
     } else if ((err as NodeJS.ErrnoException).code === 'ELOOP') {
-      throw new Error(
-        `Symlink loop detected: "${filePath}" contains a circular symlink reference`
+      throw new KCError(
+        'tool_permission_denied',
+        `Symlink loop detected: "${filePath}" contains a circular symlink reference`,
+        { filePath },
+        err as Error
       );
     } else {
       throw err;
@@ -101,8 +107,10 @@ export function assertPathWithinWorkspace(filePath: string, cwd: string): void {
 
   // Check that the real (symlink-resolved) path is still within the scope
   if (realPath !== accessRoot && !realPath.startsWith(normalizedRoot)) {
-    throw new Error(
-      `Symlink escape denied: "${filePath}" resolves to "${realPath}" which is outside the workspace scope "${accessRoot}"`
+    throw new KCError(
+      'tool_permission_denied',
+      `Symlink escape denied: "${filePath}" resolves to "${realPath}" which is outside the workspace scope "${accessRoot}"`,
+      { filePath, realPath, accessRoot }
     );
   }
 }
@@ -114,8 +122,10 @@ function resolveParentForNewFile(filePath: string, normalizedRoot: string): stri
     try {
       const realDir = fs.realpathSync.native(dir);
       if (realDir !== normalizedRoot.slice(0, -1) && !realDir.startsWith(normalizedRoot)) {
-        throw new Error(
-          `Symlink escape denied: parent directory "${dir}" resolves to "${realDir}" outside the workspace scope`
+        throw new KCError(
+          'tool_permission_denied',
+          `Symlink escape denied: parent directory "${dir}" resolves to "${realDir}" outside the workspace scope`,
+          { dir, realDir }
         );
       }
       const relative = path.relative(dir, filePath);
@@ -126,14 +136,21 @@ function resolveParentForNewFile(filePath: string, normalizedRoot: string): stri
         continue;
       }
       if ((err as NodeJS.ErrnoException).code === 'ELOOP') {
-        throw new Error('Symlink loop detected in parent directory path');
+        throw new KCError(
+          'tool_permission_denied',
+          'Symlink loop detected in parent directory path',
+          { dir },
+          err as Error
+        );
       }
       throw err;
     }
   }
 
-  throw new Error(
-    `Cannot resolve path for new file: "${filePath}" — no existing parent found`
+  throw new KCError(
+    'tool_execution_failed',
+    `Cannot resolve path for new file: "${filePath}" — no existing parent found`,
+    { filePath }
   );
 }
 

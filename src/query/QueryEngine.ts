@@ -2,9 +2,10 @@ import { logger } from '../services/logger';
 // Query Engine - Refactored with state machine pattern
 // Inspired by OpenHarness's query loop architecture
 // Sub-modules (State, Compaction, Memory, Error, Planning, Importance,
-// RuntimeControl) handle specific phases to keep QueryEngine as a facade.
+// RuntimeControl, Decision, TurnControl, Streaming, Execution) handle
+// specific phases to keep QueryEngine as a facade.
 
-import type { ChatMessage, StreamEvent, AssistantMessage, ToolCall, ToolResult } from '../query/protocol';
+import type { ChatMessage, StreamEvent, AssistantMessage, QueryEngineConfig } from '../query/protocol';
 import type { SessionSnapshot } from '../memory/protocol';
 import type { ToolDefinition, ToolUseContext } from '../tools/protocol';
 import { AgentStateMachine } from '../state/machine';
@@ -12,17 +13,16 @@ import { ObservableStateStore, createInitialState } from '../state/store';
 import { ToolExecutor } from '../executors/toolExecutor';
 import { FileOperationJournal } from '../state/file-operation-journal';
 import type { AgentEvent } from '../state/types';
-import { hasPermissionsToUseTool, buildPermissionContext } from '../permissions/engine';
+import { buildPermissionContext } from '../permissions/engine';
 import { getState } from '../bootstrap/state';
 import { executePostTurnHooks } from '../hooks/postTurnHooks';
-import { createAPIClient, LLMProvider } from '../api';
-import type { BaseApiClient, LLMStreamEvent as APIStreamEvent, LLMRequestConfig } from '../api';
+import { createAPIClient } from '../api';
+import type { BaseApiClient, LLMRequestConfig } from '../api';
 import { UserProfileService } from '../services/userProfile';
 import { getSystemPromptAdaptation } from '../services/behavioralAdapter';
 import { PromptCacheMetrics } from '../services/promptCacheMetrics';
 import { CachePrefixService, buildCacheStrategy } from '../services/cachePrefix';
 import { estimateTaskComplexity, isConversationalMessage } from '../api/prompts/task-prompts';
-import { autoStageFile, autoCommitAll } from '../utils/git';
 import { KCError } from '../utils/errors';
 import { validateApiKey } from '../utils/api-key';
 import { BudgetEnforcer, DEFAULT_BUDGET_CONFIG, type BudgetConfig } from '../services/budget';
@@ -31,7 +31,6 @@ import {
   buildAcceptanceReport,
   writeAcceptanceReport,
   skippedGate,
-  type VerificationGateReport,
 } from './completion-report';
 
 // Sub-modules
@@ -39,7 +38,11 @@ import { ConversationState } from './QueryEngineState';
 import { CompactionHandler } from './QueryEngineCompaction';
 import { MemoryHandler } from './QueryEngineMemory';
 import { ErrorHandler } from './QueryEngineError';
-import { estimateMessageTokensArray } from '../utils/tokenEstimation';
+import { DecisionGates } from './QueryEngineDecision';
+import { afterStreamingTurn, type ProgressTracker } from './QueryEngineTurnControl';
+import { executeToolCalls } from './QueryEngineExecution';
+import { streamLLMTurn, buildApiMessages } from './QueryEngineStreaming';
+import { textDeltaEvent } from './QueryEngineEvents';
 
 import { PlanningPhaseHandler } from './QueryEnginePlanning';
 
@@ -47,81 +50,11 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { FileContentCache } from '../services/cache/FileContentCache';
 import { ImportanceTagger } from './QueryEngineImportance';
-import type { TurnTag, ContextEfficiencyConfig, PlanningPhaseConfig, PatchGuaranteeConfig, RuntimeControlPolicy } from './protocol';
 import { RuntimeControlHandler } from './QueryEngineRuntimeControl';
-import {
-  verifyBeforeExit,
-  verifyTypeCheckBeforeExit,
-  extractFailToPassTests,
-  toTypeCheckGateReport,
-  toTestGateReport,
-} from './QueryEngineVerification';
 import { computeSurfaceRuntime, buildConditionalInjection } from '../api/prompts/instruction-surfaces';
 
-export interface QueryEngineConfig {
-  model: string;
-  provider: LLMProvider;
-  apiKey?: string;
-  apiBaseUrl?: string;
-  maxTurns: number;
-  maxBudgetUsd: number | null;
-  systemPrompt?: string;
-  contextWindow?: number;
-  maxMessages?: number;
-  memory?: import('../memory/integration').MemoryIntegrationConfig;
-  permissionRules?: {
-    deny?: string[];
-    ask?: string[];
-    allow?: string[];
-  };
-  /** AGP Evolution hook — called after query completion if evolution is enabled */
-  evolution?: {
-    enabled: boolean;
-    onEvolve?: (sessionId: string) => Promise<void>;
-  };
-  /** Auto-extend turn budget when active progress is detected */
-  autoExtendTurns?: boolean;
-  /** Hard ceiling for auto-extended turns; 0 or negative = unbounded (engine-local default 100) */
-  maxTurnsCeiling?: number;
-  /** Minimum turns before agent is allowed to exit (prevents early abandonment) */
-  minTurns?: number;
-  /** Auto-commit interval in turns (0 = disabled; engine-local default 0, production default flows from config) */
-  autoCommitInterval?: number;
-
-  /** Context window efficiency configuration (Area 3) */
-  contextEfficiency?: ContextEfficiencyConfig;
-
-  /** Strategic planning phase configuration (Area 1) */
-  planningPhase?: PlanningPhaseConfig;
-
-  /** Patch guarantee configuration (Area 2) */
-  patchGuarantee?: PatchGuaranteeConfig;
-
-  /** Sandbox failIfNoSandbox — passed through to SandboxManager */
-  sandboxFailIfNoSandbox?: boolean;
-
-  /**
-   * T1 (H1): Fail-safe policy for 'ask' permission decisions in non-interactive
-   * contexts (no UI approval handler). Default 'deny'. 'allow'/'proceed' require
-   * explicit opt-in (config or CLI --dangerously-skip-permissions).
-   */
-  noninteractiveAskPolicy?: 'deny' | 'allow' | 'proceed';
-
-  /**
-   * harness-evolution T1 (H1): conditional instruction-surface injection.
-   * When enabled, bootstrap/failure-recovery surfaces are appended as the
-   * final system segment based on runtime predicates. Default off.
-   */
-    promptSurfaces?: {
-    conditionalInjection?: boolean;
-  };
-
-  /**
-   * harness-evolution T2 (H2): cross-turn runtime control policy (retry
-   * discipline, exploration-loop breaking, tool-message cap). Default off.
-   */
-    runtimeControl?: Partial<RuntimeControlPolicy>;
-}
+// QueryEngineConfig moved to protocol.ts (4e); re-exported for API stability.
+export type { QueryEngineConfig } from './protocol';
 
 /**
  * Query Engine with explicit state machine pattern.
@@ -167,13 +100,9 @@ export class QueryEngine {
 
   // File modification tracking (for incremental memory and patch guarantee)
   private modifiedFiles: Set<string> = new Set();
-  private lastModifiedTurn: number = 0;
-  /**
-   * Last turn that made non-file progress (i.e. issued tool calls). Enables
-   * turn auto-extension for read/research-heavy long tasks that make genuine
-   * progress without editing files. Reset alongside lastModifiedTurn.
-   */
-  private lastProgressTurn: number = 0;
+  // Progress signals for turn auto-extension (file edits vs. tool activity);
+  // mutated by the execution / turn-control sub-modules via this shared tracker.
+  private progress: ProgressTracker = { lastModifiedTurn: 0, lastProgressTurn: 0 };
   // T3 (H3): session-scoped undo journal, consumed by the FileRestore tool.
   private fileJournal: FileOperationJournal = new FileOperationJournal();
 
@@ -186,20 +115,15 @@ export class QueryEngine {
   // Area 1: Planning phase handler
   private planningHandler: PlanningPhaseHandler;
 
-  // Area 2: Patch Guarantee — zero-patch detection
-  private zeroPatchRetries = 0;
-  private verificationRetries = 0;
-  private typeCheckRetries = 0;
+  // Area 2: Patch Guarantee — exit gates (zero-patch / verification /
+  // type-check retry budgets + T7/M2 gate reports) live in the DecisionGates
+  // sub-module (QueryEngineDecision.ts).
+  private decision = new DecisionGates();
 
   // Conversational-query exemption: greetings/small talk skip the SWE-bench
   // machinery (phase steers, anti-abandonment, patch guarantee) so a plain
   // answer with zero tool calls completes normally. Set per submitMessage().
   private activeQueryConversational = false;
-
-  // T7 (M2): last pre-exit verification gate outcomes, captured so the
-  // completion report reflects the final type-check / test result at exit.
-  private lastTypeCheckGate: VerificationGateReport | null = null;
-  private lastTestGate: VerificationGateReport | null = null;
 
   // T3: Budget enforcement
   private budgetEnforcer: BudgetEnforcer;
@@ -380,11 +304,7 @@ export class QueryEngine {
     // verification retry counters accumulate across queries and a few plain
     // Q&A turns (classified as task-like, modifying no files) exhaust the
     // budget and poison every subsequent query with model_no_patch.
-    this.zeroPatchRetries = 0;
-    this.verificationRetries = 0;
-    this.typeCheckRetries = 0;
-    this.lastTypeCheckGate = null;
-    this.lastTestGate = null;
+    this.decision.reset();
   }
 
   /**
@@ -566,141 +486,30 @@ export class QueryEngine {
             if (this.stateMachine.isTerminal()) break;
             turnCount++;
 
-            // Long-task progress signal for turn auto-extension: a turn that
-            // issued tool calls counts as progress even when it modifies no
-            // files (e.g. read/research-heavy tasks). File edits update
-            // lastModifiedTurn separately (see recordModifiedFile).
-            const lastStreamedMsg = this.conversation.getLastMessage();
-            if (
-              lastStreamedMsg?.role === 'assistant' &&
-              ((lastStreamedMsg as AssistantMessage).toolCalls?.length ?? 0) > 0
-            ) {
-              this.lastProgressTurn = turnCount;
-            }
-
-            // Area 3: Context Efficiency — tag each turn for smart compaction
-            if (this.config.contextEfficiency?.importanceTagging ?? true) {
-              this.fileContentCache.setTurn(turnCount);
-              const allMsgs = this.conversation.getMessages();
-              let lastAssistantMsg: AssistantMessage | undefined;
-              for (let i = allMsgs.length - 1; i >= 0; i--) {
-                if (allMsgs[i].role === 'assistant') {
-                  lastAssistantMsg = allMsgs[i] as AssistantMessage;
-                  break;
-                }
-              }
-              if (lastAssistantMsg) {
-                // Collect tool names and outputs from this turn
-                const toolNames = (lastAssistantMsg.toolCalls || []).map(tc => tc.toolName);
-                const toolOutputs: string[] = [];
-                // Scan recent tool messages for outputs
-                for (let i = allMsgs.length - 1; i >= 0; i--) {
-                  const m = allMsgs[i];
-                  if (m.role === 'tool' && m.toolResults) {
-                    for (const tr of m.toolResults) {
-                      if (tr.output) toolOutputs.push(typeof tr.output === 'string' ? tr.output : String(tr.output));
-                    }
-                  }
-                }
-
-                const tag = this.importanceTagger.tagTurn(
-                  lastAssistantMsg,
-                  toolNames,
-                  toolOutputs,
-                  turnCount,
-                  Array.from(this.modifiedFiles)
-                );
-                this.conversation.tagMessage(lastAssistantMsg.id, tag);
-
-                // Track file read/edit history for duplicate detection
-                for (const fp of tag.filePaths) {
-                  if (toolNames.includes('write') || toolNames.includes('edit')) {
-                    this.editHistory.set(fp, turnCount);
-                    this.fileContentCache.invalidate(fp);
-                  } else {
-                    this.readHistory.set(fp, turnCount);
-                  }
-                }
-              }
-            }
-
-            // Phase 1 reminder (first turn) — not for conversational queries,
-            // which must answer directly without touring the codebase.
-            if (turnCount === 1 && maxTurns > 10 && !this.activeQueryConversational) {
-              this.steer(`[Phase 1 - Planning] You are in the planning phase. Focus on reading files and understanding the codebase. Do not make changes yet. Formulate a concrete plan before proceeding to implementation.`);
-            }
-
-            // Phase 3 reminder (5 turns before budget exhaustion)
-            if (turnCount === maxTurns - 5 && maxTurns > 10 && !this.activeQueryConversational) {
-              this.steer(`[Phase 3 - Verification] You are entering the verification phase. Stop making new changes. Run tests to verify your modifications, review all changed files, and fix any remaining issues.`);
-            }
-
-            // Periodic progress summary (every 10 turns)
-            if (turnCount % 10 === 0 && turnCount > 0 && this.modifiedFiles.size > 0) {
-              const fileList = Array.from(this.modifiedFiles).map(f => `- ${f}`).join('\n');
-              const remaining = maxTurns - turnCount;
-              this.conversation.addMessage({
-                id: `checkpoint_${turnCount}_${Date.now()}`,
-                role: 'user',
-                content: `[Progress Checkpoint - Turn ${turnCount}/${maxTurns}]\nModified files so far:\n${fileList}\n\nRemember these modifications as you continue working. You have ${remaining} turns remaining.`,
-                timestamp: Date.now(),
-              });
-            }
-
-            // P0: Periodic auto-commit (every N turns when there are uncommitted changes)
-            const autoCommitInterval = this.config.autoCommitInterval || 0;
-            if (autoCommitInterval > 0 && turnCount > 0 && turnCount % autoCommitInterval === 0) {
-              try {
-                const committed = await autoCommitAll(getState().cwd, `kc-cli auto-commit: checkpoint at turn ${turnCount}`);
-                if (committed) {
-                  logger.query.info(`[QueryEngine] Periodic auto-commit at turn ${turnCount}`);
-                  yield this.createTextDeltaEvent(`[Auto-commit checkpoint at turn ${turnCount}]\n`);
-                }
-              } catch {
-                // Non-fatal
-              }
-            }
-
-            // P1: Anti-abandonment — inject encouragement when agent tries to exit too early
-            const minTurns = this.config.minTurns || 0;
-            if (minTurns > 0 && turnCount < minTurns && !this.activeQueryConversational) {
-              // Check if agent is about to exit (no tool calls in last message)
-              const lastMsg = this.conversation.getLastMessage();
-              if (lastMsg && lastMsg.role === 'assistant' && (!(lastMsg as any).toolCalls || (lastMsg as any).toolCalls.length === 0)) {
-                const remaining = minTurns - turnCount;
-                this.steer(`[Anti-Abandonment] You have only completed ${turnCount} turns. You must continue working for at least ${remaining} more turns before you can stop. Keep exploring the codebase and making progress.`);
-              }
-            }
-
-            if (turnCount >= maxTurns) {
-              // Dynamic turn extension: extend when auto-extend is enabled and
-              // the agent is actively making progress — either editing files or
-              // (for read/research-heavy long tasks) still issuing tool calls.
-              const madeRecentFileProgress =
-                this.modifiedFiles.size > 0 && (turnCount - this.lastModifiedTurn) < 5;
-              const madeRecentToolProgress =
-                this.lastProgressTurn > 0 && (turnCount - this.lastProgressTurn) < 5;
-              if (autoExtend && maxTurns < maxTurnsCeiling && (madeRecentFileProgress || madeRecentToolProgress)) {
-                maxTurns += 20;
-                maxTurns = Math.min(maxTurns, maxTurnsCeiling);
-                logger.query.info(`[QueryEngine] Extended turn budget to ${maxTurns} — active progress detected`);
-                yield this.createTextDeltaEvent(`\n[Extended turn budget to ${maxTurns} — active progress detected]\n`);
-              } else {
-                logger.query.warn(`[QueryEngine] Max turns (${maxTurns}) reached, forcing completion`);
-                yield this.createTextDeltaEvent(`\n[Reached maximum turn limit (${maxTurns}) — stopping]\n`);
-
-                // Auto-commit on turn budget exhaustion (Phase 5.3)
-                try {
-                  const committed = await autoCommitAll(getState().cwd);
-                  if (committed) {
-                    logger.query.info('[QueryEngine] Auto-committed changes on turn limit');
-                    yield this.createTextDeltaEvent(`[Auto-committed ${this.modifiedFiles.size} modified file(s)]\n`);
-                  }
-                } catch {
-                  // Non-fatal
-                }
-              }
-            }
+            // Post-streaming turn orchestration (QueryEngineTurnControl):
+            // progress tracking, importance tagging, phase steers, periodic
+            // auto-commit, anti-abandonment and turn-budget extension.
+            const budget = { maxTurns, maxTurnsCeiling, autoExtend };
+            yield* afterStreamingTurn(
+              {
+                conversation: this.conversation,
+                fileContentCache: this.fileContentCache,
+                importanceTagger: this.importanceTagger,
+                readHistory: this.readHistory,
+                editHistory: this.editHistory,
+                modifiedFiles: this.modifiedFiles,
+                progress: this.progress,
+                conversational: this.activeQueryConversational,
+                importanceTagging: this.config.contextEfficiency?.importanceTagging ?? true,
+                autoCommitInterval: this.config.autoCommitInterval || 0,
+                minTurns: this.config.minTurns || 0,
+                cwd: getState().cwd,
+                steer: (m) => this.steer(m),
+              },
+              turnCount,
+              budget,
+            );
+            maxTurns = budget.maxTurns;
             this.stateMachine.transitionTo('deciding');
             break;
 
@@ -725,14 +534,14 @@ export class QueryEngine {
             // default the query completes normally with the model's text
             // answer; SWE-bench runs opt into the hard failure via
             // patchGuarantee.failOnZeroPatch.
-            if (!hasTools && this.zeroPatchRetries > 0 && this.modifiedFiles.size === 0) {
+            if (!hasTools && this.decision.zeroPatchRetries > 0 && this.modifiedFiles.size === 0) {
               const maxRetries = this.config.patchGuarantee?.maxZeroPatchRetries ?? 3;
-              if (this.zeroPatchRetries >= maxRetries) {
+              if (this.decision.zeroPatchRetries >= maxRetries) {
                 if (this.config.patchGuarantee?.failOnZeroPatch) {
                   const err = new KCError(
                     'model_no_patch',
                     'Agent exited without modifying any files after exhausting zero-patch retries',
-                    { zeroPatchRetries: this.zeroPatchRetries }
+                    { zeroPatchRetries: this.decision.zeroPatchRetries }
                   );
                   yield {
                     type: 'agent:error',
@@ -742,7 +551,7 @@ export class QueryEngine {
                   } as AgentEvent;
                 } else {
                   logger.query.warn(
-                    `[QueryEngine] Zero-patch retries exhausted (${this.zeroPatchRetries}) — completing without patch (failOnZeroPatch disabled)`
+                    `[QueryEngine] Zero-patch retries exhausted (${this.decision.zeroPatchRetries}) — completing without patch (failOnZeroPatch disabled)`
                   );
                 }
               }
@@ -939,7 +748,7 @@ export class QueryEngine {
       if (this._aborted) {
         throw new Error('Query aborted during streaming');
       }
-      const apiMessages = this.buildApiMessages();
+      const apiMessages = buildApiMessages(this.conversation.getMessagesCopy());
 
       const requestConfig: LLMRequestConfig = {
         model: this.config.model,
@@ -951,7 +760,15 @@ export class QueryEngine {
       };
 
       try {
-        yield* this.streamLLMResponse(requestConfig, toolsDef);
+        yield* streamLLMTurn(
+          {
+            apiClient: this.apiClient,
+            isAborted: () => this._aborted,
+            abort: (reason) => this.abort(reason),
+            addMessage: (m) => this.conversation.addMessage(m),
+          },
+          requestConfig,
+        );
         this.errorHandler.recordApiSuccess();
         this.budgetEnforcer.recordUsage(estimatedTokens);
         return;
@@ -971,7 +788,7 @@ export class QueryEngine {
         if (this.errorHandler.isDegradedError(err)) {
           logger.query.warn(`Degraded error in streaming: ${err.message}`);
           yield { type: 'agent:error', error: err, recoverable: true, timestamp: Date.now() };
-          yield this.createTextDeltaEvent('\n[Response degraded — continuing with partial result]\n');
+          yield textDeltaEvent('\n[Response degraded — continuing with partial result]\n');
           return;
         }
 
@@ -989,7 +806,7 @@ export class QueryEngine {
             err,
           );
           yield { type: 'agent:error', error: cbError, recoverable: false, timestamp: Date.now() };
-          yield this.createTextDeltaEvent('\n[API temporarily unavailable — please retry later]\n');
+          yield textDeltaEvent('\n[API temporarily unavailable — please retry later]\n');
           return;
         }
 
@@ -998,378 +815,49 @@ export class QueryEngine {
     }
   }
 
-  private async *streamLLMResponse(
-    requestConfig: LLMRequestConfig,
-    _toolsDef: ToolDefinition[]
-  ): AsyncGenerator<StreamEvent | AgentEvent> {
-    let currentContent = '';
-    let currentToolCalls: ToolCall[] = [];
-    // Real usage reported by the provider's stop event (Anthropic/Ollama always,
-    // OpenAI-compatible when stream_options.include_usage is honored).
-    let turnUsage: { inputTokens: number; outputTokens: number; totalTokens: number } | undefined;
+  // streamLLMResponse moved to QueryEngineStreaming.ts (streamLLMTurn, 4e).
 
-    // Global timeout for LLM streaming to prevent infinite hangs.
-    // Default 5 minutes; can be overridden via environment variable.
-    const STREAM_TIMEOUT_MS = parseInt(process.env.KC_STREAM_TIMEOUT_MS || '300000', 10);
-    const streamTimeoutMs = Number.isFinite(STREAM_TIMEOUT_MS) && STREAM_TIMEOUT_MS > 0
-      ? STREAM_TIMEOUT_MS
-      : 300000;
-
-    const timeoutId = setTimeout(() => {
-      this.abort('LLM stream timeout');
-    }, streamTimeoutMs);
-    timeoutId.unref?.();
-
-    try {
-      for await (const event of this.apiClient.streamChat(requestConfig)) {
-        if (this._aborted) break;
-        switch (event.type) {
-          case 'text_delta':
-            if (event.text) {
-              currentContent += event.text;
-              yield this.createTextDeltaEvent(event.text);
-            }
-            break;
-          case 'thinking_delta':
-            if (event.thinking) {
-              yield this.createThinkingDeltaEvent(event.thinking);
-            }
-            break;
-          case 'tool_use':
-            if (event.toolCall) {
-              currentToolCalls.push(event.toolCall);
-            }
-            break;
-          case 'error':
-            if (event.error) throw event.error;
-            break;
-          case 'stop':
-            if (event.usage) {
-              turnUsage = {
-                inputTokens: event.usage.inputTokens || 0,
-                outputTokens: event.usage.outputTokens || 0,
-                totalTokens: event.usage.totalTokens
-                  || (event.usage.inputTokens || 0) + (event.usage.outputTokens || 0),
-              };
-            }
-            break;
-        }
-      }
-    } catch (error) {
-      if (this._aborted) {
-        // Preserve the underlying cause instead of replacing it with a generic
-        // message — the original reason must reach the user, not just debug logs.
-        const cause = error instanceof Error ? error : new Error(String(error));
-        logger.query.warn(
-          `[QueryEngine] LLM stream aborted (timeout ${streamTimeoutMs / 1000}s): ${cause.message}`
-        );
-        throw new Error(`LLM stream aborted: ${cause.message}`, { cause });
-      } else {
-        throw error;
-      }
-    } finally {
-      clearTimeout(timeoutId);
-    }
-
-    // Build assistant message (with whatever content we have)
-    const assistantMsg: AssistantMessage = {
-      id: uuidv4(),
-      role: 'assistant',
-      content: currentContent || '[stream interrupted]',
-      toolCalls: currentToolCalls.length > 0 ? currentToolCalls : undefined,
-      timestamp: Date.now(),
-    };
-
-    this.conversation.addMessage(assistantMsg);
-    yield this.createTurnCompleteEvent(assistantMsg, turnUsage);
-  }
-
-  private async decidingPhase(turnCount: number = 0, minTurns: number = 0): Promise<boolean> {
-    const lastMsg = this.conversation.getLastMessage();
-    if (!lastMsg || lastMsg.role !== 'assistant') {
-      // P1: If below minTurns, force continuation (task queries only)
-      if (turnCount < minTurns && !this.activeQueryConversational) {
-        return true; // Force agent to continue
-      }
-      return false;
-    }
-
-    const assistantMsg = lastMsg as AssistantMessage;
-    const hasToolCalls = !!(assistantMsg.toolCalls && assistantMsg.toolCalls.length > 0);
-
-    // Conversational queries complete as soon as the model answers without
-    // tools: no anti-abandonment, no zero-patch steer, no exit verification.
-    if (this.activeQueryConversational && !hasToolCalls) {
-      return false;
-    }
-
-    // P1: Anti-abandonment — if below minTurns and agent has no tool calls, force continuation
-    if (!hasToolCalls && turnCount < minTurns) {
-      logger.query.info(`[QueryEngine] Anti-abandonment: turn ${turnCount} < minTurns ${minTurns}, forcing continuation`);
-      return true; // Force agent to continue
-    }
-
-    // P0: Forced commit on exit — if agent wants to exit with uncommitted changes, force a commit
-    if (!hasToolCalls && this.modifiedFiles.size > 0) {
-      try {
-        const committed = await autoCommitAll(getState().cwd);
-        if (committed) {
-          logger.query.info(`[QueryEngine] Forced commit on exit: ${this.modifiedFiles.size} files`);
-        }
-      } catch {
-        // Non-fatal
-      }
-    }
-
-    // Area 2: Patch Guarantee — zero-patch detection (B1)
-    if (!hasToolCalls) {
-      const pgConfig: PatchGuaranteeConfig = {
-        enabled: this.config.patchGuarantee?.enabled ?? true,
-        maxZeroPatchRetries: this.config.patchGuarantee?.maxZeroPatchRetries ?? 3,
-        maxVerificationRetries: this.config.patchGuarantee?.maxVerificationRetries ?? 2,
-        verificationTimeout: this.config.patchGuarantee?.verificationTimeout ?? 60,
-        testCommand: this.config.patchGuarantee?.testCommand ?? 'pytest {test_names} -x',
-        typeCheck: this.config.patchGuarantee?.typeCheck ?? true,
-        typeCheckCommand: this.config.patchGuarantee?.typeCheckCommand ?? '',
-        maxTypeCheckRetries: this.config.patchGuarantee?.maxTypeCheckRetries ?? 2,
-      };
-
-      if (!pgConfig.enabled) return hasToolCalls;
-
-      // B1: Zero-patch detection
-      if (this.modifiedFiles.size === 0) {
-        if (this.zeroPatchRetries < pgConfig.maxZeroPatchRetries) {
-          this.zeroPatchRetries++;
-          const remaining = pgConfig.maxZeroPatchRetries - this.zeroPatchRetries;
-          const steerMsg = [
-            '## PATCH REQUIRED',
-            '',
-            `You are about to exit but have modified ZERO files. Retry ${this.zeroPatchRetries}/${pgConfig.maxZeroPatchRetries}.`,
-            '',
-            'Before giving up, verify:',
-            '1. Did you run the FAIL_TO_PASS tests? What exact error do they show?',
-            '2. Did you read the source files related to those errors?',
-            '3. Form a specific hypothesis and make at least one edit.',
-            '',
-            `You have ${remaining} more retry attempt(s) before this session is marked as failed.`,
-          ].join('\n');
-
-          logger.query.warn(`[QueryEngine] Zero-patch detection: retry ${this.zeroPatchRetries}/${pgConfig.maxZeroPatchRetries}`);
-          this.steer(steerMsg);
-
-          return true; // Force continuation
-        }
-
-        // Retries exhausted — emit structured error
-        logger.query.error('[QueryEngine] Zero-patch retries exhausted — model_no_patch');
-        return false; // Let the state machine handle the error
-      }
-    }
-
-    // B2/B3: Pre-exit verification (type-check + tests)
-    // Runs whenever the agent modified files and is about to exit.
-    if (this.modifiedFiles.size > 0) {
-      const pgConfig: PatchGuaranteeConfig = {
-        enabled: this.config.patchGuarantee?.enabled ?? true,
-        maxZeroPatchRetries: this.config.patchGuarantee?.maxZeroPatchRetries ?? 3,
-        maxVerificationRetries: this.config.patchGuarantee?.maxVerificationRetries ?? 2,
-        verificationTimeout: this.config.patchGuarantee?.verificationTimeout ?? 60,
-        testCommand: this.config.patchGuarantee?.testCommand ?? 'pytest {test_names} -x',
-        typeCheck: this.config.patchGuarantee?.typeCheck ?? true,
-        typeCheckCommand: this.config.patchGuarantee?.typeCheckCommand ?? '',
-        maxTypeCheckRetries: this.config.patchGuarantee?.maxTypeCheckRetries ?? 2,
-        typeCheckStrict: this.config.patchGuarantee?.typeCheckStrict ?? false,
-      };
-
-      // B3: Pre-exit type-check verification. Gated on exit intent (no pending
-      // tool calls) so `tsc`/`mypy` don't run on every mid-task turn. Unlike
-      // test verification, this does not require FAIL_TO_PASS test names.
-      if (!hasToolCalls && pgConfig.enabled && pgConfig.typeCheck
-          && this.typeCheckRetries < pgConfig.maxTypeCheckRetries) {
-        const tcResult = await verifyTypeCheckBeforeExit(pgConfig);
-        // T7 (M2): capture the gate outcome for the completion report.
-        this.lastTypeCheckGate = toTypeCheckGateReport(tcResult, pgConfig);
-
-        if (!tcResult.canExit &&
-            (tcResult.reason === 'typecheck_fail' || tcResult.reason === 'typecheck_infra_error')) {
-          this.typeCheckRetries++;
-          const isInfra = tcResult.reason === 'typecheck_infra_error';
-          const steerMsg = [
-            `## ${isInfra ? 'TYPE-CHECK COULD NOT RUN' : 'TYPE-CHECK FAILED'} (${this.typeCheckRetries}/${pgConfig.maxTypeCheckRetries})`,
-            '',
-            isInfra
-              ? 'The type-check command could not be executed:'
-              : 'Your changes do not pass type/compile checking:',
-            '```',
-            tcResult.failures || '(no output captured)',
-            '```',
-            isInfra
-              ? 'Ensure the type-check toolchain is available before exiting.'
-              : 'Please fix these type errors before exiting.',
-          ].join('\n');
-
-          this.steer(steerMsg);
-          this.conversation.addMessage({
-            id: `typecheck_failed_${Date.now()}`,
-            role: 'user',
-            content: steerMsg,
-            timestamp: Date.now(),
-          });
-
-          return true; // Force continuation
-        } else if (tcResult.canExit && tcResult.reason === 'typecheck_pass') {
-          logger.query.info('[QueryEngine] Pre-exit type-check: passed');
-        }
-      }
-
-      // B2: Pre-exit test verification
-      const testNames = extractFailToPassTests(this.conversation.getMessages());
-      if (pgConfig.enabled && testNames.length > 0 && this.verificationRetries < pgConfig.maxVerificationRetries) {
-        const result = await verifyBeforeExit(testNames, pgConfig);
-        // T7 (M2): capture the gate outcome for the completion report.
-        this.lastTestGate = toTestGateReport(result, pgConfig);
-
-        if (!result.canExit && result.reason === 'tests_fail') {
-          this.verificationRetries++;
-          const failures = (result.failures || []).join('\n\n');
-          const steerMsg = [
-            `## VERIFICATION FAILED (${this.verificationRetries}/${pgConfig.maxVerificationRetries})`,
-            '',
-            'The following tests still do not pass:',
-            '```',
-            failures,
-            '```',
-            'Please fix these issues before exiting.',
-          ].join('\n');
-
-          this.steer(steerMsg);
-          this.conversation.addMessage({
-            id: `verification_failed_${Date.now()}`,
-            role: 'user',
-            content: steerMsg,
-            timestamp: Date.now(),
-          });
-
-          return true; // Force continuation
-        } else if (result.canExit && result.reason === 'tests_pass') {
-          logger.query.info('[QueryEngine] Pre-exit verification: all tests pass');
-        }
-      }
-    }
-
-    return hasToolCalls;
-  }
-
-  private async *executingPhase(): AsyncGenerator<StreamEvent | AgentEvent> {
-    const lastMsg = this.conversation.getLastMessage();
-    if (!lastMsg || lastMsg.role !== 'assistant') return;
-
-    const assistantMsg = lastMsg as AssistantMessage;
-    const toolCalls = assistantMsg.toolCalls || [];
-
-    for (const tc of toolCalls) {
-      yield this.createToolStartedEvent(tc);
-    }
-
-    // harness-evolution T2 (H2): hard-mode retry-discipline gate — identical
-    // calls that already exhausted their failure budget are rejected without
-    // executing (synthetic error result). No-op unless the policy enables it.
-    const rejectedResults = new Map<string, ToolResult>();
-    const executableCalls = toolCalls.filter(tc => {
-      const rejection = this.runtimeControl.checkHardReject(tc.toolName, tc.input);
-      if (rejection) {
-        rejectedResults.set(tc.id, { toolCallId: tc.id, output: rejection, isError: true });
-        return false;
-      }
-      return true;
+  /**
+   * Phase 3: Exit-gate decisions — delegates to the DecisionGates sub-module
+   * (anti-abandonment, forced commit on exit, zero-patch detection B1,
+   * pre-exit type-check/test verification B2/B3).
+   */
+  private decidingPhase(turnCount: number = 0, minTurns: number = 0): Promise<boolean> {
+    return this.decision.decide({
+      turnCount,
+      minTurns,
+      conversational: this.activeQueryConversational,
+      cwd: getState().cwd,
+      modifiedFilesCount: this.modifiedFiles.size,
+      patchGuarantee: this.config.patchGuarantee,
+      getLastMessage: () => this.conversation.getLastMessage(),
+      getMessages: () => this.conversation.getMessages(),
+      steer: (m) => this.steer(m),
+      addMessage: (m) => this.conversation.addMessage(m),
     });
+  }
 
-    const results = await this.toolExecutor.executeParallel(
-      executableCalls,
-      this.createToolContext()
-    );
-    for (const [id, rejected] of rejectedResults) {
-      results.set(id, rejected);
-    }
-
-    for (const [toolCallId, result] of results) {
-      const toolCall = toolCalls.find(tc => tc.id === toolCallId);
-      if (!toolCall) continue;
-
-      // Track file modifications for incremental memory and patch guarantee
-      if (!(result instanceof Error) && !result.isError) {
-        const toolName = toolCall.toolName;
-        if (toolName === 'FileWrite' || toolName === 'FileEdit') {
-          const metadata = (result as ToolResult).metadata as Record<string, unknown> | undefined;
-          const filePath = (metadata?.path || metadata?.file_path) as string | undefined;
-          if (filePath) {
-            this.modifiedFiles.add(filePath);
-            this.lastModifiedTurn = this.stateStore.get().turnCount;
-            // T3 (H3): record the mutation in the session undo journal so the
-            // FileRestore tool can revert it. old/new content + backupPath are
-            // supplied by the T2 atomic-write metadata.
-            this.fileJournal.record({
-              filePath,
-              operation: toolName === 'FileWrite' ? 'write' : 'edit',
-              oldContent: (metadata?.oldContent ?? null) as string | null,
-              newContent: (metadata?.newContent ?? null) as string | null,
-              backupPath: (metadata?.backupPath ?? null) as string | null,
-              turn: this.stateStore.get().turnCount,
-            });
-            // Auto-stage file (fire-and-forget git add). T4 (H4): skip when the
-            // workspace is known to be non-Git so we don't spawn a doomed
-            // `git add` (Bootstrap already surfaced the safety-net warning once).
-            if (getState().isGitRepo !== false) {
-              autoStageFile(filePath, getState().cwd);
-            }
-          }
-        }
-      }
-
-      if (result instanceof Error) {
-        yield this.createToolFailedEvent(toolCall, result);
-      } else if (result.isError) {
-        yield this.createToolFailedEvent(toolCall, new Error(result.output));
-      } else {
-        yield this.createToolCompletedEvent(toolCall, result as ToolResult);
-      }
-
-      // harness-evolution T2 (H2): repeated-failure context is appended to the
-      // error output text (active regardless of the policy switch), then the
-      // outcome is recorded for retry-discipline / cap tracking.
-      const isErrorResult = result instanceof Error || result.isError === true;
-      const repeatContext = isErrorResult
-        ? this.runtimeControl.getRepeatedFailureContext(toolCall.toolName, toolCall.input)
-        : null;
-      this.runtimeControl.recordToolResult(toolCall.toolName, toolCall.input, isErrorResult);
-      const errorSuffix = repeatContext ? `\n\n${repeatContext}` : '';
-
-      // Add tool result as message. Always preserve toolCallId so the tool
-      // message can be paired with the originating assistant tool_call — an
-      // Error result would otherwise drop it and break the OpenAI contract.
-      const toolResultMsg: ChatMessage = {
-        id: uuidv4(),
-        role: 'tool',
-        content: (result instanceof Error ? result.message : (result as ToolResult).output) + errorSuffix,
-        toolResults: [
-          result instanceof Error
-            ? { toolCallId, output: result.message + errorSuffix, isError: true }
-            : errorSuffix
-              ? { ...(result as ToolResult), output: (result as ToolResult).output + errorSuffix }
-              : (result as ToolResult),
-        ],
-        timestamp: Date.now(),
-      };
-      this.conversation.addMessage(toolResultMsg);
-    }
-
-    // harness-evolution T2 (H2): turn composition feeds the exploration-loop breaker.
-    this.runtimeControl.recordTurn(toolCalls.map(tc => tc.toolName));
+  /**
+   * Phase 4: Tool execution — delegates to the execution sub-module
+   * (parallel execution, journal/auto-stage tracking, runtime control).
+   */
+  private executingPhase(): AsyncGenerator<StreamEvent | AgentEvent> {
+    return executeToolCalls({
+      conversation: this.conversation,
+      toolExecutor: this.toolExecutor,
+      runtimeControl: this.runtimeControl,
+      fileJournal: this.fileJournal,
+      modifiedFiles: this.modifiedFiles,
+      progress: this.progress,
+      getTurnCount: () => this.stateStore.get().turnCount,
+      toolContext: this.createToolContext(),
+    });
   }
 
   // ── Pre-Exit Verification ──
   // Extracted to QueryEngineVerification.ts (verifyBeforeExit,
   // verifyTypeCheckBeforeExit, safety validators, gate-report mappers).
+  // Tool execution moved to QueryEngineExecution.ts (executeToolCalls, 4e).
 
   /**
    * Check if a file read would be redundant (content unchanged since last read).
@@ -1383,53 +871,7 @@ export class QueryEngine {
     return null;
   }
 
-  private buildApiMessages(): ChatMessage[] {
-    const messages = this.conversation.getMessagesCopy();
-    const systemMsg = messages.find(m => m.role === 'system');
-    const nonSystem = messages.filter(m => m.role !== 'system');
-
-    // Defensive pairing: the OpenAI contract requires every assistant
-    // tool_call id to be answered by a following tool message with the same
-    // tool_call_id. If any id is unanswered (e.g. a tool crashed before
-    // producing a result), synthesize a placeholder tool message so the API
-    // does not reject the request with HTTP 400.
-    const repaired: ChatMessage[] = [];
-    for (let i = 0; i < nonSystem.length; i++) {
-      const msg = nonSystem[i];
-      repaired.push(msg);
-
-      if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
-        // Consume the immediately-following tool messages and record which
-        // tool_call ids they answer.
-        const answered = new Set<string>();
-        let j = i + 1;
-        while (j < nonSystem.length && nonSystem[j].role === 'tool') {
-          for (const tr of nonSystem[j].toolResults || []) {
-            if (tr.toolCallId) answered.add(tr.toolCallId);
-          }
-          repaired.push(nonSystem[j]);
-          j++;
-        }
-
-        // Synthesize placeholders for any unanswered tool_call ids.
-        for (const tc of msg.toolCalls) {
-          if (!answered.has(tc.id)) {
-            repaired.push({
-              id: uuidv4(),
-              role: 'tool',
-              content: 'Tool execution did not produce a result.',
-              toolResults: [{ toolCallId: tc.id, output: 'Tool execution did not produce a result.', isError: true }],
-              timestamp: Date.now(),
-            } as ChatMessage);
-          }
-        }
-
-        i = j - 1; // Skip the tool messages already appended above.
-      }
-    }
-
-    return systemMsg ? [systemMsg, ...repaired] : repaired;
-  }
+  // buildApiMessages moved to QueryEngineStreaming.ts (4e).
 
   private createToolContext(): ToolUseContext {
     return {
@@ -1442,38 +884,7 @@ export class QueryEngine {
     };
   }
 
-  // Event factory methods
-  private createTextDeltaEvent(text: string): AgentEvent {
-    return { type: 'agent:text_delta', text, timestamp: Date.now() };
-  }
-
-  private createThinkingDeltaEvent(thinking: string): AgentEvent {
-    return { type: 'agent:thinking_delta', thinking, timestamp: Date.now() };
-  }
-
-  private createTurnCompleteEvent(
-    message: AssistantMessage,
-    usage?: { inputTokens: number; outputTokens: number; totalTokens: number },
-  ): AgentEvent {
-    return {
-      type: 'agent:turn_complete',
-      message,
-      usage: usage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-      timestamp: Date.now(),
-    };
-  }
-
-  private createToolStartedEvent(toolCall: ToolCall): AgentEvent {
-    return { type: 'agent:tool_started', toolCall, timestamp: Date.now() };
-  }
-
-  private createToolCompletedEvent(toolCall: ToolCall, result: ToolResult): AgentEvent {
-    return { type: 'agent:tool_completed', toolCall, result, timestamp: Date.now() };
-  }
-
-  private createToolFailedEvent(toolCall: ToolCall, error: Error): AgentEvent {
-    return { type: 'agent:tool_failed', toolCall, error, timestamp: Date.now() };
-  }
+  // Event factories moved to QueryEngineEvents.ts (4e).
 
   /**
    * T7 (M2): build the task-completion acceptance report from already-tracked
@@ -1490,8 +901,8 @@ export class QueryEngine {
         turnCount,
         modifiedFiles: Array.from(this.modifiedFiles),
         journalEntries: this.fileJournal.list(),
-        typeCheck: this.lastTypeCheckGate ?? skippedGate(),
-        tests: this.lastTestGate ?? skippedGate(),
+        typeCheck: this.decision.lastTypeCheckGate ?? skippedGate(),
+        tests: this.decision.lastTestGate ?? skippedGate(),
         auditEntries: queryOperationAudit({ sessionId }),
         tokens: { inputTokens: 0, outputTokens: 0, totalTokens: usage.tokens },
       });
@@ -1534,13 +945,9 @@ export class QueryEngine {
     this.steerQueue = [];
     this.followUpQueue = [];
     this.modifiedFiles.clear();
-    this.lastModifiedTurn = 0;
-    this.lastProgressTurn = 0;
-    this.zeroPatchRetries = 0;
-    this.verificationRetries = 0;
-    this.typeCheckRetries = 0;
-    this.lastTypeCheckGate = null;
-    this.lastTestGate = null;
+    this.progress.lastModifiedTurn = 0;
+    this.progress.lastProgressTurn = 0;
+    this.decision.reset();
     this.planningHandler.reset();
     this.fileContentCache.invalidateAll();
     this.readHistory.clear();
@@ -1582,13 +989,9 @@ export class QueryEngine {
     this.steerQueue = [];
     this.followUpQueue = [];
     this.modifiedFiles.clear();
-    this.lastModifiedTurn = 0;
-    this.lastProgressTurn = 0;
-    this.zeroPatchRetries = 0;
-    this.verificationRetries = 0;
-    this.typeCheckRetries = 0;
-    this.lastTypeCheckGate = null;
-    this.lastTestGate = null;
+    this.progress.lastModifiedTurn = 0;
+    this.progress.lastProgressTurn = 0;
+    this.decision.reset();
     this.planningHandler.reset();
     this.fileContentCache.invalidateAll();
     this.readHistory.clear();

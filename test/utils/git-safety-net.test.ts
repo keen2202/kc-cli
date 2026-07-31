@@ -28,15 +28,6 @@ function gitInit(dir: string): Promise<boolean> {
   });
 }
 
-/** Poll until `predicate()` is true or the timeout elapses. */
-async function waitFor(predicate: () => boolean, timeoutMs = 3000): Promise<void> {
-  const start = Date.now();
-  while (!predicate()) {
-    if (Date.now() - start > timeoutMs) return;
-    await new Promise((r) => setTimeout(r, 20));
-  }
-}
-
 describe('Git rollback safety net (T4)', () => {
   let tmpDir: string;
   let warnEntries: LogEntry[];
@@ -91,17 +82,17 @@ describe('Git rollback safety net (T4)', () => {
 
   it('autoStageFile surfaces a debounced warning when git add fails', async () => {
     await fs.promises.writeFile(path.join(tmpDir, 'f.txt'), 'x', 'utf-8');
-    // Non-Git dir → `git add` exits non-zero → single debounced warn.
-    autoStageFile(path.join(tmpDir, 'f.txt'), tmpDir);
-    autoStageFile(path.join(tmpDir, 'f.txt'), tmpDir);
+    // Non-Git dir → `git add` exits non-zero → single debounced warn. Awaiting
+    // the settle promises pins BOTH spawns' close events inside this test while
+    // the debounce is still active (so the 2nd close is suppressed and no late
+    // warn can leak into a sibling test after `resetGitWarnDebounce()`).
+    await Promise.all([
+      autoStageFile(path.join(tmpDir, 'f.txt'), tmpDir),
+      autoStageFile(path.join(tmpDir, 'f.txt'), tmpDir),
+    ]);
 
-    await waitFor(() => warnEntries.length >= 1);
     expect(warnEntries).toHaveLength(1);
     expect(warnEntries[0].message).toContain('auto-stage failed');
-    // Settle both fire-and-forget spawns WITHIN this test while the debounce is
-    // still active (so the 2nd close is suppressed), preventing a late warn from
-    // leaking into the next test after `resetGitWarnDebounce()`.
-    await new Promise((r) => setTimeout(r, 500));
   });
 
   it('does not warn on auto-commit inside a real Git repo', async () => {

@@ -161,22 +161,32 @@ export function resetGitWarnDebounce(): void {
  * T4 (H4): the FIRST failure (spawn error or non-zero exit) is surfaced via a
  * debounced logger.warn so a broken Git safety net is observable rather than
  * silently swallowed. Subsequent failures stay quiet to avoid log spam.
+ *
+ * Returns a promise that settles (always resolves, never rejects) when the git
+ * process exits, so tests can await the spawn deterministically; production
+ * callers may simply ignore it.
  */
-export function autoStageFile(filePath: string, cwd: string): void {
-  const child = spawn('git', ['add', filePath], {
-    cwd,
-    stdio: 'ignore',
-    windowsHide: true,
-    timeout: 10000,
-  });
-  const warnOnce = (reason: string): void => {
-    if (autoStageWarned) return;
-    autoStageWarned = true;
-    gitLogger.warn('auto-stage failed; Git rollback safety net may be unavailable', { reason });
-  };
-  child.on('error', (err) => warnOnce(err instanceof Error ? err.message : String(err)));
-  child.on('close', (code) => {
-    if (code !== 0) warnOnce(`git add exited with code ${code}`);
+export function autoStageFile(filePath: string, cwd: string): Promise<void> {
+  return new Promise((resolve) => {
+    const child = spawn('git', ['add', filePath], {
+      cwd,
+      stdio: 'ignore',
+      windowsHide: true,
+      timeout: 10000,
+    });
+    const warnOnce = (reason: string): void => {
+      if (autoStageWarned) return;
+      autoStageWarned = true;
+      gitLogger.warn('auto-stage failed; Git rollback safety net may be unavailable', { reason });
+    };
+    child.on('error', (err) => {
+      warnOnce(err instanceof Error ? err.message : String(err));
+      resolve();
+    });
+    child.on('close', (code) => {
+      if (code !== 0) warnOnce(`git add exited with code ${code}`);
+      resolve();
+    });
   });
 }
 

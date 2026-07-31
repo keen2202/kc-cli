@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
+import { KCError } from '../../utils/errors';
 import type { PermissionResult } from '../../permissions/protocol';
 import { getState } from '../../bootstrap/state';
 import { wrapIfUntrustedSource } from '../../utils/toolResultBoundary';
@@ -72,13 +73,13 @@ async function searchTavily(
   });
 
   if (response.status === 429) {
-    throw new Error('Rate limited by Tavily API. Please wait before searching again.');
+    throw new KCError('api_rate_limit', 'Rate limited by Tavily API. Please wait before searching again.', { provider: 'tavily', status: 429 });
   }
   if (response.status === 401) {
-    throw new Error('Invalid Tavily API key. Check your searchApiKey configuration.');
+    throw new KCError('api_auth_failed', 'Invalid Tavily API key. Check your searchApiKey configuration.', { provider: 'tavily', status: 401 });
   }
   if (!response.ok) {
-    throw new Error(`Tavily API error: ${response.status} ${response.statusText}`);
+    throw new KCError('tool_execution_failed', `Tavily API error: ${response.status} ${response.statusText}`, { provider: 'tavily', status: response.status });
   }
 
   const data = await response.json() as { results?: Array<{ title: string; url: string; content: string; score: number }> };
@@ -110,13 +111,13 @@ async function searchBrave(
   });
 
   if (response.status === 429) {
-    throw new Error('Rate limited by Brave Search API. Please wait before searching again.');
+    throw new KCError('api_rate_limit', 'Rate limited by Brave Search API. Please wait before searching again.', { provider: 'brave', status: 429 });
   }
   if (response.status === 401 || response.status === 403) {
-    throw new Error('Invalid Brave Search API key. Check your searchApiKey configuration.');
+    throw new KCError('api_auth_failed', 'Invalid Brave Search API key. Check your searchApiKey configuration.', { provider: 'brave', status: response.status });
   }
   if (!response.ok) {
-    throw new Error(`Brave Search API error: ${response.status} ${response.statusText}`);
+    throw new KCError('tool_execution_failed', `Brave Search API error: ${response.status} ${response.statusText}`, { provider: 'brave', status: response.status });
   }
 
   const data = await response.json() as { web?: { results?: Array<{ title: string; url: string; description: string }> } };

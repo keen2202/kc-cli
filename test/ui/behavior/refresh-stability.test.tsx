@@ -9,12 +9,13 @@
  * SessionInfo (self-ticking) instead of re-rendering the whole app tree.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { renderApp, FakeQueryEngine, KEYS, type Harness } from './harness';
 
 let h: Harness | null = null;
 
 afterEach(() => {
+  vi.useRealTimers();
   h?.unmount();
   h = null;
 });
@@ -53,6 +54,9 @@ describe('refresh stability (behavior)', () => {
       { type: 'tool_started', toolCall: { toolName: 'Bash', input: { command: 'sleep 1' } } },
     ]);
     engine.holdNextTurn();
+    // Fake ONLY the interval APIs before mount so the useNowTick clock becomes
+    // controllable; setTimeout and Date stay real for the harness poll loops.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     h = await renderApp({ width: 100, height: 30, engine });
 
     await h.type('go');
@@ -60,9 +64,11 @@ describe('refresh stability (behavior)', () => {
     await h.waitForText('Bash', 5000);
     expect(h.lines().length).toBeLessThanOrEqual(30 - 1);
 
-    // Wait past a 1s tick, then re-check: the running clock must not have grown
-    // the frame to full height.
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+    // Advance past a 1s tick, then re-check: the running clock must not have
+    // grown the frame to full height. A short REAL delay lets React/ink flush
+    // the re-render triggered by the (fake) interval callback.
+    vi.advanceTimersByTime(1100);
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(h.lines().length).toBeLessThanOrEqual(30 - 1);
     expect(h.plainFrame()).toContain('running');
 
