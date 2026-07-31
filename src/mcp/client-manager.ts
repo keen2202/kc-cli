@@ -11,6 +11,7 @@ import type {
 import { StdioTransport } from './transports/stdio';
 import { HttpTransport } from './transports/http';
 import { VERSION } from '../bootstrap/cli-config';
+import { KCError } from '../utils/errors';
 
 interface ServerConnection {
   config: MCPServerConfig;
@@ -58,7 +59,7 @@ export class MCPClientManager {
   private async establishConnection(serverId: string, conn: ServerConnection): Promise<void> {
     if (conn.config.type === 'stdio') {
       if (!conn.config.command) {
-        throw new Error('stdio transport requires "command" field');
+        throw new KCError('tool_execution_failed', 'stdio transport requires "command" field');
       }
       await (conn.transport as StdioTransport).connect(
         conn.config.command,
@@ -67,7 +68,7 @@ export class MCPClientManager {
       );
     } else {
       if (!conn.config.url) {
-        throw new Error('http transport requires "url" field');
+        throw new KCError('tool_execution_failed', 'http transport requires "url" field');
       }
       await (conn.transport as HttpTransport).connect(conn.config.url);
     }
@@ -137,7 +138,7 @@ export class MCPClientManager {
   async callTool(serverId: string, toolName: string, args: Record<string, unknown>): Promise<MCPToolResult> {
     const conn = this.connections.get(serverId);
     if (!conn || conn.status !== 'connected') {
-      throw new Error(`MCP server ${serverId} is not connected`);
+      throw new KCError('tool_execution_failed', `MCP server ${serverId} is not connected`, { serverId });
     }
 
     try {
@@ -155,15 +156,15 @@ export class MCPClientManager {
         throw error;
       }
       if (TIMED_OUT_REGEX.test(msg)) {
-        throw new Error(`MCP tool "${toolName}" timed out on server ${serverId}`);
+        throw new KCError('tool_timeout', `MCP tool "${toolName}" timed out on server ${serverId}`, { serverId, toolName });
       }
       if (DISCONNECTED_REGEX.test(msg)) {
         // Server crashed, attempt reconnect
         await this.attemptReconnect(serverId);
-        throw new Error(`MCP server ${serverId} disconnected during tool call "${toolName}"`);
+        throw new KCError('tool_execution_failed', `MCP server ${serverId} disconnected during tool call "${toolName}"`, { serverId, toolName });
       }
 
-      throw new Error(`MCP tool error on ${serverId}/${toolName}: ${msg}`);
+      throw new KCError('tool_execution_failed', `MCP tool error on ${serverId}/${toolName}: ${msg}`, { serverId, toolName });
     }
   }
 
@@ -190,7 +191,7 @@ export class MCPClientManager {
 
   private async initialize(serverId: string): Promise<MCPInitializeResult> {
     const conn = this.connections.get(serverId);
-    if (!conn) throw new Error(`No connection for ${serverId}`);
+    if (!conn) throw new KCError('tool_execution_failed', `No connection for ${serverId}`, { serverId });
 
     const result = await conn.transport.sendRequest('initialize', {
       protocolVersion: '2024-11-05',
@@ -213,7 +214,7 @@ export class MCPClientManager {
 
   private async listTools(serverId: string): Promise<MCPTool[]> {
     const conn = this.connections.get(serverId);
-    if (!conn) throw new Error(`No connection for ${serverId}`);
+    if (!conn) throw new KCError('tool_execution_failed', `No connection for ${serverId}`, { serverId });
 
     try {
       const result = await conn.transport.sendRequest('tools/list') as MCPListToolsResult;

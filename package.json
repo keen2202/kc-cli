@@ -2,7 +2,13 @@
   "name": "kc-cli",
   "version": "3.2.0",
   "description": "Intelligent CLI Agent System - Server-side AI-powered development assistant",
-  "main": "src/main.ts",
+  "main": "dist/main.js",
+  "bin": {
+    "kc": "dist/main.js"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -16,7 +22,10 @@
     "test:vitest": "npx vitest run",
     "test:watch": "npx vitest",
     "test:coverage": "npx vitest run --coverage",
-    "test:ci": "npx vitest run --coverage --reporter=verbose"
+    "test:ci": "npx vitest run --coverage --reporter=verbose",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "format": "eslint src --fix"
   },
   "keywords": [
     "cli",
@@ -29,7 +38,6 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@types/react": "^19.2.17",
     "better-sqlite3": "^12.9.0",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
@@ -42,12 +50,15 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/diff": "^7.0.2",
     "@types/node": "^25.5.2",
-    "@types/uuid": "^9.0.0",
+    "@types/react": "^19.2.17",
     "@vitest/coverage-v8": "^4.1.5",
+    "eslint": "^10.8.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.3",
+    "typescript-eslint": "^8.65.0",
     "vitest": "^4.1.5"
   }
 }

@@ -1,5 +1,6 @@
-// Type check script - validates TypeScript compilation
-// Run with: npx tsc --noEmit
+// Compile-time type validation fixture (NOT a runtime test).
+// Exercises public API signatures so `npx tsc --noEmit` catches breaking
+// type changes; vitest does not execute this file.
 
 import { createAPIClient, LLMProvider } from '../src/api';
 import type { ToolResult } from '../src/types/message';

@@ -330,4 +330,49 @@ export abstract class BaseApiClient {
     const message = error instanceof Error ? error.message : String(error);
     throw new ApiError(`${context}: ${message}`, statusCode, headers);
   }
+
+  /**
+   * Read a streaming HTTP body and yield complete frames split by `delimiter`
+   * ('\n' for NDJSON / line-based SSE, '\n\n' for block-based SSE).
+   * The trailing partial frame (if any) is yielded after the stream ends.
+   * Shared framing logic for all provider stream parsers — subclasses keep
+   * only their frame→event semantic mapping.
+   */
+  protected async *readStreamFrames(
+    body: ReadableStream,
+    delimiter: '\n' | '\n\n',
+  ): AsyncGenerator<string> {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          // Flush any trailing partial frame
+          if (buffer.length > 0) yield buffer;
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Emit complete frames using indexOf to avoid array allocation
+        let start = 0;
+        while (true) {
+          const idx = buffer.indexOf(delimiter, start);
+          if (idx === -1) break;
+          const frame = buffer.slice(start, idx);
+          start = idx + delimiter.length;
+          if (frame.length > 0) yield frame;
+        }
+
+        // Keep unprocessed remainder
+        buffer = start > 0 ? buffer.slice(start) : buffer;
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
 }

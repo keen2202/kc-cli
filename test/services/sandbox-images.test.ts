@@ -1,10 +1,11 @@
 // Tests for ImageManager
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { EventEmitter } from 'events';
 import { ImageManager } from '../../src/services/sandbox-images';
 
 vi.mock('child_process', () => ({
-  spawnSync: vi.fn(),
+  spawn: vi.fn(),
 }));
 
 vi.mock('fs', async () => {
@@ -19,23 +20,38 @@ vi.mock('fs', async () => {
   };
 });
 
-import { spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import * as fs from 'fs';
 
-const mockSpawnSync = vi.mocked(spawnSync);
-
-/** Helper: build a spawnSync return value that represents success/error. */
-function spawnResult(overrides: { stdout?: string; stderr?: string; status?: number }) {
-  return {
-    pid: 123,
-    output: [null, null, null] as Array<string | null>,
-    stdout: overrides.stdout ?? '',
-    stderr: overrides.stderr ?? '',
-    status: overrides.status ?? 0,
-    signal: null,
-  };
-}
+const mockSpawn = vi.mocked(spawn);
 const mockExistsSync = vi.mocked(fs.existsSync);
+
+/** Helper: build a fake ChildProcess that emits stdout/stderr then closes. */
+function fakeChild(overrides: { stdout?: string; stderr?: string; status?: number }) {
+  const child = new EventEmitter() as EventEmitter & {
+    stdout: EventEmitter;
+    stderr: EventEmitter;
+    kill: () => void;
+  };
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = vi.fn();
+  // Emit asynchronously so runDocker's listeners are attached first.
+  setImmediate(() => {
+    if (overrides.stdout) child.stdout.emit('data', overrides.stdout);
+    if (overrides.stderr) child.stderr.emit('data', overrides.stderr);
+    child.emit('close', overrides.status ?? 0);
+  });
+  return child;
+}
+
+/** Route docker invocations by args, mirroring the old spawnSync router. */
+function routeSpawn(router: (args: readonly string[]) => { stdout?: string; stderr?: string; status?: number }) {
+  mockSpawn.mockImplementation(((cmd: string, args?: readonly string[]) => {
+    if (cmd === 'docker' && args) return fakeChild(router(args)) as never;
+    return fakeChild({}) as never;
+  }) as never);
+}
 
 describe('ImageManager', () => {
   let manager: ImageManager;
@@ -47,7 +63,7 @@ describe('ImageManager', () => {
 
   describe('ensureImage', () => {
     it('should skip pull if image already exists locally', async () => {
-      mockSpawnSync.mockReturnValue(spawnResult({}));
+      routeSpawn(() => ({}));
 
       const progress = vi.fn();
       await manager.ensureImage('node:22-alpine', progress);
@@ -56,7 +72,7 @@ describe('ImageManager', () => {
         expect.objectContaining({ status: 'exists' })
       );
       // Should not call docker pull
-      expect(mockSpawnSync).not.toHaveBeenCalledWith(
+      expect(mockSpawn).not.toHaveBeenCalledWith(
         'docker',
         expect.arrayContaining(['pull']),
         expect.anything()
@@ -65,17 +81,15 @@ describe('ImageManager', () => {
 
     it('should pull image if not found locally', async () => {
       let inspectCalled = false;
-      mockSpawnSync.mockImplementation((cmd: string, args?: readonly string[]) => {
-        if (cmd === 'docker' && args) {
-          if (args.includes('inspect')) {
-            inspectCalled = true;
-            return spawnResult({ status: 1 });
-          }
-          if (args.includes('pull')) {
-            return spawnResult({ stdout: 'Pulling complete' });
-          }
+      routeSpawn((args) => {
+        if (args.includes('inspect')) {
+          inspectCalled = true;
+          return { status: 1 };
         }
-        return spawnResult({});
+        if (args.includes('pull')) {
+          return { stdout: 'Pulling complete' };
+        }
+        return {};
       });
 
       const progress = vi.fn();
@@ -88,51 +102,47 @@ describe('ImageManager', () => {
     });
 
     it('should not re-check images already verified in session', async () => {
-      mockSpawnSync.mockReturnValue(spawnResult({}));
+      routeSpawn(() => ({}));
 
       await manager.ensureImage('node:22-alpine');
-      mockSpawnSync.mockClear();
+      mockSpawn.mockClear();
 
       await manager.ensureImage('node:22-alpine');
       // Should not call docker image inspect again
-      expect(mockSpawnSync).not.toHaveBeenCalled();
+      expect(mockSpawn).not.toHaveBeenCalled();
     });
   });
 
   describe('listCachedImages', () => {
-    it('should parse docker images output', () => {
-      mockSpawnSync.mockReturnValue(
-        spawnResult({ stdout: 'node:22-alpine|abc123|150MB|2024-01-01\nnode:20-alpine|def456|140MB|2024-01-02' })
-      );
+    it('should parse docker images output', async () => {
+      routeSpawn(() => ({ stdout: 'node:22-alpine|abc123|150MB|2024-01-01\nnode:20-alpine|def456|140MB|2024-01-02' }));
 
-      const images = manager.listCachedImages();
+      const images = await manager.listCachedImages();
       expect(images).toHaveLength(2);
       expect(images[0].repository).toBe('node');
       expect(images[0].tag).toBe('22-alpine');
     });
 
-    it('should return empty array on error', () => {
-      mockSpawnSync.mockReturnValue(spawnResult({ status: 1 }));
+    it('should return empty array on error', async () => {
+      routeSpawn(() => ({ status: 1 }));
 
-      const images = manager.listCachedImages();
+      const images = await manager.listCachedImages();
       expect(images).toEqual([]);
     });
   });
 
   describe('pruneUnused', () => {
-    it('should return number of pruned images', () => {
-      mockSpawnSync.mockReturnValue(
-        spawnResult({ stdout: 'Deleted Images:\nTotal reclaimed space: 500MB' })
-      );
+    it('should return number of pruned images', async () => {
+      routeSpawn(() => ({ stdout: 'Deleted Images:\nTotal reclaimed space: 500MB' }));
 
-      const count = manager.pruneUnused();
+      const count = await manager.pruneUnused();
       expect(count).toBeGreaterThanOrEqual(0);
     });
 
-    it('should return 0 on error', () => {
-      mockSpawnSync.mockReturnValue(spawnResult({ status: 1 }));
+    it('should return 0 on error', async () => {
+      routeSpawn(() => ({ status: 1 }));
 
-      expect(manager.pruneUnused()).toBe(0);
+      expect(await manager.pruneUnused()).toBe(0);
     });
   });
 
@@ -146,7 +156,7 @@ describe('ImageManager', () => {
 
     it('should return tag if custom image already built', async () => {
       mockExistsSync.mockReturnValue(true);
-      mockSpawnSync.mockReturnValue(spawnResult({})); // image inspect succeeds
+      routeSpawn(() => ({})); // image inspect succeeds
 
       const image = await manager.getProjectSandboxImage('/project');
       expect(image).toBe('kc-cli-sandbox-custom:latest');

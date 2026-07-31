@@ -13,32 +13,21 @@
  *       · typeCheckStrict        → blocks (canExit false)
  *   - no/unsafe command         → typecheck_not_found (gives way)
  *
- * The private methods are exercised via `as any` — they are internal to the
- * exit gate and have no public surface, but their behaviour is the security
- * contract under test.
+ * The verification gate lives in QueryEngineVerification.ts as exported pure
+ * functions (extracted from QueryEngine); they are the security contract under
+ * test and are imported directly here.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { QueryEngine } from '../../src/query/QueryEngine';
+import {
+  isStaticCommandSafe,
+  resolveTypeCheckCommand,
+  verifyTypeCheckBeforeExit,
+} from '../../src/query/QueryEngineVerification';
 import type { PatchGuaranteeConfig } from '../../src/query/protocol';
 import { initializeState, updateState } from '../../src/bootstrap/state';
-
-/** Build a QueryEngine that does not require a working sandbox (Windows CI). */
-function makeEngine(): any {
-  return new QueryEngine(
-    {
-      model: 'test-model',
-      provider: 'anthropic',
-      apiKey: 'test-key',
-      maxTurns: 10,
-      maxBudgetUsd: null,
-      sandboxFailIfNoSandbox: false,
-    },
-    [],
-  );
-}
 
 function makePgConfig(overrides: Partial<PatchGuaranteeConfig> = {}): PatchGuaranteeConfig {
   return {
@@ -79,60 +68,53 @@ afterEach(() => {
 
 describe('T5: isStaticCommandSafe (runner allowlist + injection guard)', () => {
   it('accepts allowlisted type-check runners', () => {
-    const engine = makeEngine();
-    expect(engine.isStaticCommandSafe('npx tsc --noEmit')).toBe(true);
-    expect(engine.isStaticCommandSafe('tsc')).toBe(true);
-    expect(engine.isStaticCommandSafe('npm run typecheck')).toBe(true);
-    expect(engine.isStaticCommandSafe('npm run type-check')).toBe(true);
-    expect(engine.isStaticCommandSafe('python -m mypy')).toBe(true);
-    expect(engine.isStaticCommandSafe('cargo check')).toBe(true);
+    expect(isStaticCommandSafe('npx tsc --noEmit')).toBe(true);
+    expect(isStaticCommandSafe('tsc')).toBe(true);
+    expect(isStaticCommandSafe('npm run typecheck')).toBe(true);
+    expect(isStaticCommandSafe('npm run type-check')).toBe(true);
+    expect(isStaticCommandSafe('python -m mypy')).toBe(true);
+    expect(isStaticCommandSafe('cargo check')).toBe(true);
   });
 
   it('rejects shell metacharacters that enable chaining/injection', () => {
-    const engine = makeEngine();
-    expect(engine.isStaticCommandSafe('npx tsc && rm -rf /')).toBe(false); // &
-    expect(engine.isStaticCommandSafe('tsc; echo pwned')).toBe(false); // ;
-    expect(engine.isStaticCommandSafe('tsc | cat')).toBe(false); // |
-    expect(engine.isStaticCommandSafe('tsc `whoami`')).toBe(false); // backtick
-    expect(engine.isStaticCommandSafe('tsc $(id)')).toBe(false); // $()
-    expect(engine.isStaticCommandSafe('tsc > out.txt')).toBe(false); // redirect
+    expect(isStaticCommandSafe('npx tsc && rm -rf /')).toBe(false); // &
+    expect(isStaticCommandSafe('tsc; echo pwned')).toBe(false); // ;
+    expect(isStaticCommandSafe('tsc | cat')).toBe(false); // |
+    expect(isStaticCommandSafe('tsc `whoami`')).toBe(false); // backtick
+    expect(isStaticCommandSafe('tsc $(id)')).toBe(false); // $()
+    expect(isStaticCommandSafe('tsc > out.txt')).toBe(false); // redirect
   });
 
   it('rejects commands whose runner is not on the allowlist', () => {
-    const engine = makeEngine();
-    expect(engine.isStaticCommandSafe('echo hacked')).toBe(false);
-    expect(engine.isStaticCommandSafe('node evil.js')).toBe(false);
-    expect(engine.isStaticCommandSafe('rm -rf build')).toBe(false);
+    expect(isStaticCommandSafe('echo hacked')).toBe(false);
+    expect(isStaticCommandSafe('node evil.js')).toBe(false);
+    expect(isStaticCommandSafe('rm -rf build')).toBe(false);
   });
 });
 
 describe('T5: resolveTypeCheckCommand', () => {
   it('prefers an explicit config command and trims whitespace', () => {
-    const engine = makeEngine();
     expect(
-      engine.resolveTypeCheckCommand(makePgConfig({ typeCheckCommand: '  npx tsc --noEmit  ' })),
+      resolveTypeCheckCommand(makePgConfig({ typeCheckCommand: '  npx tsc --noEmit  ' })),
     ).toBe('npx tsc --noEmit');
   });
 
   it('returns empty string when no command resolves (no project markers)', () => {
-    const engine = makeEngine();
     updateState({ cwd: makeTempDir() }); // empty dir → no language detected
-    expect(engine.resolveTypeCheckCommand(makePgConfig())).toBe('');
+    expect(resolveTypeCheckCommand(makePgConfig())).toBe('');
   });
 });
 
 describe('T5: verifyTypeCheckBeforeExit classification', () => {
   it('returns typecheck_not_found (gives way) when no command resolves', async () => {
-    const engine = makeEngine();
     updateState({ cwd: makeTempDir() });
-    const result = await engine.verifyTypeCheckBeforeExit(makePgConfig());
+    const result = await verifyTypeCheckBeforeExit(makePgConfig());
     expect(result.canExit).toBe(true);
     expect(result.reason).toBe('typecheck_not_found');
   });
 
   it('rejects an unsafe command as typecheck_not_found (never executed)', async () => {
-    const engine = makeEngine();
-    const result = await engine.verifyTypeCheckBeforeExit(
+    const result = await verifyTypeCheckBeforeExit(
       makePgConfig({ typeCheckCommand: 'tsc; echo pwned' }),
     );
     expect(result.canExit).toBe(true);
@@ -140,8 +122,7 @@ describe('T5: verifyTypeCheckBeforeExit classification', () => {
   });
 
   it('runs the command on this platform and passes on exit 0 (cross-platform proof)', async () => {
-    const engine = makeEngine();
-    const result = await engine.verifyTypeCheckBeforeExit(
+    const result = await verifyTypeCheckBeforeExit(
       makePgConfig({ typeCheckCommand: 'npx tsc --version' }),
     );
     expect(result.reason).toBe('typecheck_pass');
@@ -149,8 +130,7 @@ describe('T5: verifyTypeCheckBeforeExit classification', () => {
   }, 60000);
 
   it('blocks exit on non-zero exit and returns failure details', async () => {
-    const engine = makeEngine();
-    const result = await engine.verifyTypeCheckBeforeExit(
+    const result = await verifyTypeCheckBeforeExit(
       makePgConfig({ typeCheckCommand: 'npx tsc -p tsconfig.doesnotexist.json' }),
     );
     expect(result.reason).toBe('typecheck_fail');
@@ -160,8 +140,7 @@ describe('T5: verifyTypeCheckBeforeExit classification', () => {
   }, 60000);
 
   it('gives way on timeout without misreporting pass/fail', async () => {
-    const engine = makeEngine();
-    const result = await engine.verifyTypeCheckBeforeExit(
+    const result = await verifyTypeCheckBeforeExit(
       makePgConfig({ typeCheckCommand: 'npx tsc --noEmit', verificationTimeout: 0.1 }),
     );
     expect(result.reason).toBe('timeout');
@@ -169,11 +148,10 @@ describe('T5: verifyTypeCheckBeforeExit classification', () => {
   }, 60000);
 
   it('gives way on spawn/infra failure by default (typecheck_infra_error)', async () => {
-    const engine = makeEngine();
     // A non-existent cwd makes spawn emit ENOENT (an infrastructure failure),
     // distinct from a genuine type error.
     updateState({ cwd: path.join(os.tmpdir(), 'kc-nonexistent-' + Date.now()) });
-    const result = await engine.verifyTypeCheckBeforeExit(
+    const result = await verifyTypeCheckBeforeExit(
       makePgConfig({ typeCheckCommand: 'tsc' }),
     );
     expect(result.reason).toBe('typecheck_infra_error');
@@ -181,9 +159,8 @@ describe('T5: verifyTypeCheckBeforeExit classification', () => {
   });
 
   it('blocks exit on spawn/infra failure when typeCheckStrict is set', async () => {
-    const engine = makeEngine();
     updateState({ cwd: path.join(os.tmpdir(), 'kc-nonexistent-' + Date.now()) });
-    const result = await engine.verifyTypeCheckBeforeExit(
+    const result = await verifyTypeCheckBeforeExit(
       makePgConfig({ typeCheckCommand: 'tsc', typeCheckStrict: true }),
     );
     expect(result.reason).toBe('typecheck_infra_error');

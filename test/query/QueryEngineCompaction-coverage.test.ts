@@ -1,4 +1,4 @@
-// CompactionHandler Coverage Tests
+﻿// CompactionHandler Coverage Tests
 // Covers: constructor, failure tracking, shouldAttemptCompaction, compact lifecycle,
 // microcompact path, fullcompact path, force truncation, retry logic, state validation.
 
@@ -57,7 +57,7 @@ const {
 // Module mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../src/services/compaction', () => ({
+vi.mock('../../src/services/compaction/functional', () => ({
   shouldCompact: mockShouldCompact,
   microcompact: mockMicrocompact,
   fullCompact: mockFullCompact,

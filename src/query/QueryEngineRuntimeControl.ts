@@ -13,8 +13,46 @@
 
 import { createHash } from 'node:crypto';
 import type { RuntimeControlPolicy, RuntimeControlIntervention } from './protocol';
-import { getTraceManager } from '../agp/trace-manager';
 import { logger } from '../services/logger';
+
+// ── Optional AGP tracing (lazy) ──
+// The SEPL trace feed is best-effort. Loading the AGP subsystem lazily keeps
+// the core query loop free of a compile/load-time dependency on src/agp
+// (plug-in boundary): if AGP is absent or fails to load, tracing is disabled
+// silently and the query loop is unaffected.
+type TraceRecordFn = (entry: {
+  category: 'decision';
+  severity: 'warn';
+  source: string;
+  message: string;
+  data: Record<string, unknown>;
+}) => void;
+
+let traceRecordFn: TraceRecordFn | null | undefined;
+
+function feedTraceBestEffort(entry: Parameters<TraceRecordFn>[0]): void {
+  if (traceRecordFn === null) return; // previous load failed — tracing disabled
+  if (traceRecordFn) {
+    try {
+      traceRecordFn(entry);
+    } catch {
+      // Tracing is best-effort — never break the query loop.
+    }
+    return;
+  }
+  import('../agp/trace-manager')
+    .then((m) => {
+      traceRecordFn = (e) => m.getTraceManager().record(e);
+      try {
+        traceRecordFn(entry);
+      } catch {
+        // best-effort
+      }
+    })
+    .catch(() => {
+      traceRecordFn = null;
+    });
+}
 
 /** Tools considered read-only for the exploration-loop breaker. */
 const READ_ONLY_TOOLS = new Set([
@@ -246,16 +284,12 @@ export class RuntimeControlHandler {
     this.interventions.push(intervention);
     logger.query.info(`[RuntimeControl] ${intervention.kind} (${intervention.mode}): ${intervention.detail}`);
     // Feed the SEPL trace space (category 'decision') for T3 signature mining.
-    try {
-      getTraceManager().record({
-        category: 'decision',
-        severity: 'warn',
-        source: 'runtime-control',
-        message: `${intervention.kind}:${intervention.mode}`,
-        data: { ...intervention },
-      });
-    } catch {
-      // Tracing is best-effort — never break the query loop.
-    }
+    feedTraceBestEffort({
+      category: 'decision',
+      severity: 'warn',
+      source: 'runtime-control',
+      message: `${intervention.kind}:${intervention.mode}`,
+      data: { ...intervention },
+    });
   }
 }

@@ -104,14 +104,6 @@ Task-specific templates for:
 - Documentation
 - General conversation
 
-## Parameter Tuning
-
-`src/api/param-tuner.ts` -- Dynamic parameter adjustment per model:
-- `max_tokens` -- Based on model context window
-- `temperature` -- Lower for code tasks, higher for creative
-- `top_p` -- Provider-specific defaults
-- Conservative adjustments with bounds checking
-
 ## Error Handling
 
 `src/api/protocol.ts` -- `ApiError`:
@@ -125,7 +117,7 @@ interface ApiError {
 }
 ```
 
-`KCError.fromApiError()` classifies errors into 18 stable codes:
+`KCError.fromApiError()` classifies errors into 20 stable codes:
 - `api_rate_limit` -- 429 responses, checks `retry-after` header
 - `api_auth_error` -- 401/403 responses
 - `api_server_error` -- 5xx responses

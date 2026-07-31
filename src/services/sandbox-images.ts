@@ -1,7 +1,9 @@
 // Docker image management for sandbox containers
 // Handles image pulling, caching, custom Dockerfiles, and cleanup.
+// All docker invocations are async (spawn) so multi-second pulls/builds
+// never block the event loop.
 
-import { spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getErrorMessage } from '../utils/errors';
@@ -19,6 +21,44 @@ export interface ImageProgress {
   message: string;
 }
 
+interface RunResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/** Run a docker command asynchronously with a hard timeout. */
+function runDocker(args: string[], timeoutMs: number): Promise<RunResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill();
+      reject(new Error(`docker ${args[0]} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    child.stdout?.on('data', (chunk) => { stdout += String(chunk); });
+    child.stderr?.on('data', (chunk) => { stderr += String(chunk); });
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.on('close', (status) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ status, stdout, stderr });
+    });
+  });
+}
+
 export class ImageManager {
   private checkedImages = new Set<string>();
 
@@ -31,7 +71,7 @@ export class ImageManager {
     if (this.checkedImages.has(image)) return;
 
     // Check if image exists locally
-    if (this.imageExists(image)) {
+    if (await this.imageExists(image)) {
       this.checkedImages.add(image);
       onProgress?.({ status: 'exists', message: `Image ${image} already cached` });
       return;
@@ -40,13 +80,9 @@ export class ImageManager {
     // Pull the image
     onProgress?.({ status: 'pulling', message: `Pulling ${image}...` });
     try {
-      const result = spawnSync('docker', ['pull', image], {
-        encoding: 'utf-8',
-        timeout: 300000, // 5 minutes for large images
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
+      const result = await runDocker(['pull', image], 300000); // 5 minutes for large images
       if (result.status !== 0) {
-        throw new Error((result.stderr as string)?.trim() || `docker pull failed with status ${result.status}`);
+        throw new Error(result.stderr.trim() || `docker pull failed with status ${result.status}`);
       }
       this.checkedImages.add(image);
       onProgress?.({ status: 'pulling', message: `Successfully pulled ${image}` });
@@ -68,13 +104,9 @@ export class ImageManager {
       fs.mkdirSync(tempDir, { recursive: true });
       fs.writeFileSync(dockerfilePath, dockerfile);
 
-      const result = spawnSync('docker', ['build', '-t', tag, '-f', dockerfilePath, tempDir], {
-        encoding: 'utf-8',
-        timeout: 600000, // 10 minutes for builds
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
+      const result = await runDocker(['build', '-t', tag, '-f', dockerfilePath, tempDir], 600000); // 10 minutes for builds
       if (result.status !== 0) {
-        throw new Error((result.stderr as string)?.trim() || `docker build failed with status ${result.status}`);
+        throw new Error(result.stderr.trim() || `docker build failed with status ${result.status}`);
       }
 
       this.checkedImages.add(tag);
@@ -100,7 +132,7 @@ export class ImageManager {
     const dockerfile = fs.readFileSync(dockerfilePath, 'utf-8');
 
     // Check if already built
-    if (this.imageExists(tag)) {
+    if (await this.imageExists(tag)) {
       this.checkedImages.add(tag);
       return tag;
     }
@@ -113,15 +145,14 @@ export class ImageManager {
   /**
    * List all cached sandbox-related images.
    */
-  listCachedImages(): ImageInfo[] {
+  async listCachedImages(): Promise<ImageInfo[]> {
     try {
-      const result = spawnSync(
-        'docker',
+      const result = await runDocker(
         ['images', '--format', '{{.Repository}}:{{.Tag}}|{{.ID}}|{{.Size}}|{{.CreatedAt}}', '--filter', 'reference=node', '--filter', 'reference=kc-cli-*'],
-        { encoding: 'utf-8', timeout: 10000 }
+        10000
       );
       if (result.status !== 0) return [];
-      const output = (result.stdout as string).trim();
+      const output = result.stdout.trim();
 
       if (!output) return [];
 
@@ -139,15 +170,14 @@ export class ImageManager {
    * Remove unused sandbox images to free disk space.
    * Returns the number of images removed.
    */
-  pruneUnused(): number {
+  async pruneUnused(): Promise<number> {
     try {
-      const result = spawnSync(
-        'docker',
+      const result = await runDocker(
         ['image', 'prune', '-f', '--filter', 'label=kc-cli-sandbox'],
-        { encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'ignore'] }
+        30000
       );
       if (result.status !== 0) return 0;
-      const output = (result.stdout as string).trim();
+      const output = result.stdout.trim();
 
       const match = output.match(/(\d+)\s+image/);
       return match ? parseInt(match[1], 10) : 0;
@@ -159,12 +189,9 @@ export class ImageManager {
   /**
    * Check if a Docker image exists locally.
    */
-  private imageExists(image: string): boolean {
+  private async imageExists(image: string): Promise<boolean> {
     try {
-      const result = spawnSync('docker', ['image', 'inspect', image], {
-        stdio: 'ignore',
-        timeout: 5000,
-      });
+      const result = await runDocker(['image', 'inspect', image], 5000);
       return result.status === 0;
     } catch {
       return false;

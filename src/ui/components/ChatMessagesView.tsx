@@ -95,6 +95,26 @@ export interface ChatScrollHandle {
   scrollPageDown: () => void;
 }
 
+/** One pre-wrapped terminal row with a reconciliation key that is stable
+ *  across scrolling and ticking: `<message id>:<row offset within message>`. */
+interface ChatRowData {
+  key: string;
+  text: string;
+}
+
+/**
+ * Test-only probe: counts how many times the history (all messages except the
+ * last) is re-flattened. The streaming clock tick must NOT re-flatten history
+ * — guarded by test/ui/behavior/streaming-recompute.test.tsx.
+ */
+export const chatViewRenderStats = { historyFlattenCount: 0 };
+
+/** Memoized row: unchanged rows skip re-rendering while the streaming clock
+ *  ticks the panel every second. */
+const ChatRow = React.memo(function ChatRow({ text }: { text: string }) {
+  return <Text wrap="truncate-end">{text === '' ? ' ' : text}</Text>;
+});
+
 interface ChatViewProps {
   messages: ChatMessage[];
   thinkingChains?: Map<string, ThinkingChain>;
@@ -130,16 +150,40 @@ export function ChatView({ messages, thinkingChains, scrollRef, toolOutputExpand
   const rows = measured?.rows ?? Math.max(4, termHeight - 8);
   const cols = measured?.cols ?? Math.max(20, termWidth - 6);
 
-  // Flatten all messages into pre-wrapped terminal rows.
-  const lines = useMemo(() => {
-    const out: string[] = [];
-    for (const msg of messages) {
-      out.push(...renderMessageLines(msg, thinkingChains?.get(msg.id), tokens, cols, toolOutputExpanded, now));
+  // Flatten messages into pre-wrapped terminal rows. The wall-clock `now` only
+  // affects live tool-card clocks, which can only exist on the newest message —
+  // so history is flattened WITHOUT `now` and stays cached across clock ticks
+  // (previously the tick re-rendered every message line once per second).
+  const historyMessages = useMemo(
+    () => (messages.length > 1 ? messages.slice(0, -1) : []),
+    [messages],
+  );
+  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : undefined;
+
+  const historyRows = useMemo(() => {
+    chatViewRenderStats.historyFlattenCount++;
+    const out: ChatRowData[] = [];
+    for (const msg of historyMessages) {
+      const rendered = renderMessageLines(msg, thinkingChains?.get(msg.id), tokens, cols, toolOutputExpanded);
+      for (let j = 0; j < rendered.length; j++) {
+        out.push({ key: `${msg.id}:${j}`, text: rendered[j] });
+      }
     }
-    // Drop the trailing separator so the newest real row sits on the bottom edge.
-    while (out.length > 0 && out[out.length - 1] === '') out.pop();
     return out;
-  }, [messages, thinkingChains, tokens, cols, toolOutputExpanded, now]);
+  }, [historyMessages, thinkingChains, tokens, cols, toolOutputExpanded]);
+
+  const lastRows = useMemo(() => {
+    if (!lastMessage) return [] as ChatRowData[];
+    const rendered = renderMessageLines(lastMessage, thinkingChains?.get(lastMessage.id), tokens, cols, toolOutputExpanded, now);
+    return rendered.map((text, j) => ({ key: `${lastMessage.id}:${j}`, text }));
+  }, [lastMessage, thinkingChains, tokens, cols, toolOutputExpanded, now]);
+
+  const lines = useMemo(() => {
+    const out = [...historyRows, ...lastRows];
+    // Drop the trailing separator so the newest real row sits on the bottom edge.
+    while (out.length > 0 && out[out.length - 1].text === '') out.pop();
+    return out;
+  }, [historyRows, lastRows]);
 
   const total = lines.length;
 
@@ -211,10 +255,8 @@ export function ChatView({ messages, thinkingChains, scrollRef, toolOutputExpand
           ↑ {hiddenAbove} more line{hiddenAbove === 1 ? '' : 's'} — ←/PgUp to scroll up
         </Text>
       )}
-      {visible.map((line, i) => (
-        <Text key={start + i} wrap="truncate-end">
-          {line === '' ? ' ' : line}
-        </Text>
+      {visible.map((row) => (
+        <ChatRow key={row.key} text={row.text} />
       ))}
       {hiddenBelow > 0 && (
         <Text dimColor wrap="truncate-end">

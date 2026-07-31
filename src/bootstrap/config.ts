@@ -140,6 +140,21 @@ export const ConfigSchema = z.object({
     redirectInstruction: z.string().optional(),
   }).default({}),
 
+  // ── AGP (Autogenesis Protocol) — previously hardcoded in Bootstrap Phase 3d ──
+  agp: z.object({
+    /** Master switch for AGP registry initialization (skipped in bare mode regardless). */
+    enabled: z.boolean().default(true),
+    /** Enable SEPL trace recording. */
+    tracingEnabled: z.boolean().default(true),
+    evolution: z.object({
+      enabled: z.boolean().default(false),
+      /** Max evolution proposals per session. */
+      budget: z.number().int().min(0).default(3),
+      autoRollback: z.boolean().default(true),
+      persistState: z.boolean().default(true),
+    }).default({}),
+  }).default({}),
+
   // IM Platform Integration
   im: z.object({
     enabled: z.boolean().default(false),

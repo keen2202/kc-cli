@@ -56,11 +56,6 @@ export function handleCheckout(queryEngine: QueryEngine, nodeId: string): void {
  */
 export function handleHistory(queryEngine: QueryEngine): void {
   const tree = queryEngine.getTree();
-  const activeId = tree.find(n => {
-    // Find active node by checking which one has no children pointing to a "next" node
-    // Actually, we need the active node ID from the tree
-    return false;
-  });
 
   // Build parent-children map
   const childrenMap = new Map<string, typeof tree>();

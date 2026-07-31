@@ -192,55 +192,22 @@ export class OllamaClient extends BaseApiClient {
   }
 
   /**
-   * Parse streaming response using indexOf-based line parsing (avoids array allocation per chunk)
+   * Parse streaming response (NDJSON: one JSON object per line)
    */
   private async *parseStreamResponse(body: ReadableStream): AsyncGenerator<LLMStreamEvent> {
-    const reader = body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          break;
+    // Shared newline framing lives in BaseApiClient.readStreamFrames;
+    // this parser only maps NDJSON lines to LLM stream events.
+    for await (const line of this.readStreamFrames(body, '\n')) {
+      try {
+        const data = JSON.parse(line);
+        yield* this.parseStreamChunk(data);
+        if (data.done) {
+          yield { type: 'stop' };
+          return;
         }
-
-        buffer += decoder.decode(value, { stream: true });
-
-        // Process complete lines using indexOf to avoid array allocation
-        let lineStart = 0;
-        let shouldStop = false;
-
-        while (!shouldStop) {
-          const newlineIdx = buffer.indexOf('\n', lineStart);
-          if (newlineIdx === -1) break;
-
-          const line = buffer.slice(lineStart, newlineIdx);
-          lineStart = newlineIdx + 1;
-
-          if (line.length > 0) {
-            try {
-              const data = JSON.parse(line);
-              yield* this.parseStreamChunk(data);
-              if (data.done) {
-                yield { type: 'stop' };
-                shouldStop = true;
-              }
-            } catch (error) {
-              logger.api.warn('Failed to parse Ollama chunk: ' + String(error));
-            }
-          }
-        }
-
-        if (shouldStop) return;
-
-        // Keep unprocessed remainder
-        buffer = lineStart > 0 ? buffer.slice(lineStart) : buffer;
+      } catch (error) {
+        logger.api.warn('Failed to parse Ollama chunk: ' + String(error));
       }
-    } finally {
-      reader.releaseLock();
     }
   }
 

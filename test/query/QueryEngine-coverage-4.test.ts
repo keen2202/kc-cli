@@ -1,4 +1,4 @@
-// QueryEngine Comprehensive Coverage Tests - Part 4
+﻿// QueryEngine Comprehensive Coverage Tests - Part 4
 // Covers: executing phase, error recovery, streaming retry exhaustion
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -43,7 +43,7 @@ vi.mock('../../src/api', () => ({
   },
 }));
 
-vi.mock('../../src/services/compaction', () => ({
+vi.mock('../../src/services/compaction/functional', () => ({
   shouldCompact: vi.fn(() => true),
   microcompact: vi.fn((msgs: any) => ({
     wasCompacted: false,

@@ -367,43 +367,10 @@ export class OpenAICompatibleClient extends BaseApiClient {
    * Parse streaming response
    */
   private async *parseStreamResponse(body: ReadableStream): AsyncGenerator<LLMStreamEvent> {
-    const reader = body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          // Process any remaining buffer
-          if (buffer.length > 0) {
-            yield* this.processSSELine(buffer);
-          }
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-
-        // Process complete lines using indexOf to avoid array allocation
-        let lineStart = 0;
-        while (true) {
-          const newlineIdx = buffer.indexOf('\n', lineStart);
-          if (newlineIdx === -1) break;
-
-          const line = buffer.slice(lineStart, newlineIdx);
-          lineStart = newlineIdx + 1;
-
-          if (line.length > 0) {
-            yield* this.processSSELine(line);
-          }
-        }
-
-        // Keep unprocessed remainder
-        buffer = lineStart > 0 ? buffer.slice(lineStart) : buffer;
-      }
-    } finally {
-      reader.releaseLock();
+    // Shared newline framing lives in BaseApiClient.readStreamFrames;
+    // this parser only maps SSE lines to LLM stream events.
+    for await (const line of this.readStreamFrames(body, '\n')) {
+      yield* this.processSSELine(line);
     }
   }
 

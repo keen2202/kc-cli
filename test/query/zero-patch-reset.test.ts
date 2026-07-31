@@ -1,4 +1,4 @@
-// Zero-patch retry budget reset + failOnZeroPatch gating.
+﻿// Zero-patch retry budget reset + failOnZeroPatch gating.
 //
 // Problem fixed: zeroPatchRetries/verificationRetries/typeCheckRetries were
 // engine-instance fields that resetForNewQuery() never cleared, so a few
@@ -36,7 +36,7 @@ vi.mock('../../src/api', () => ({
   },
 }));
 
-vi.mock('../../src/services/compaction', () => ({
+vi.mock('../../src/services/compaction/functional', () => ({
   shouldCompact: vi.fn(() => false),
   microcompact: vi.fn((msgs: any) => ({ wasCompacted: false, messages: msgs, tokensSaved: 0 })),
   fullCompact: vi.fn(async (msgs: any) => ({ wasCompacted: false, messages: msgs, tokensSaved: 0 })),

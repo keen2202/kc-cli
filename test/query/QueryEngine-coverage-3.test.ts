@@ -1,4 +1,4 @@
-// QueryEngine Comprehensive Coverage Tests - Part 3
+﻿// QueryEngine Comprehensive Coverage Tests - Part 3
 // Covers: streaming phase (basic), deciding phase
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -33,7 +33,7 @@ vi.mock('../../src/api', () => ({
   },
 }));
 
-vi.mock('../../src/services/compaction', () => ({
+vi.mock('../../src/services/compaction/functional', () => ({
   shouldCompact: vi.fn(() => true),
   microcompact: vi.fn((msgs: any) => ({ wasCompacted: false, messages: msgs, tokensSaved: 0 })),
   fullCompact: vi.fn(async (msgs: any) => ({ wasCompacted: false, messages: msgs, tokensSaved: 0 })),

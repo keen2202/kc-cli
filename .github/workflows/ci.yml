@@ -25,18 +25,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint
+        run: npm run lint
+
       - name: Type check
         run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
 
       - name: Run tests
         run: npx vitest run
 
-      - name: Run tests with coverage
+      # Coverage thresholds in vitest.config.ts act as the gate:
+      # vitest exits non-zero when any threshold is not met.
+      - name: Coverage gate
         run: npx vitest run --coverage
         if: matrix.node-version == '22.x'
-
-      - name: Coverage gate
-        if: matrix.node-version == '22.x'
-        run: |
-          echo "Checking coverage thresholds..."
-          npx vitest run --coverage --reporter=verbose

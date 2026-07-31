@@ -347,10 +347,6 @@ export class AnthropicClient extends BaseApiClient {
    * Handles arbitrary chunk boundaries properly
    */
   private async *parseStreamResponse(body: ReadableStream): AsyncGenerator<LLMStreamEvent> {
-    const reader = body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
     // SSE state machine - context object created once, reused across all iterations
     const ctx = {
       currentEventType: null as string | null,
@@ -359,35 +355,12 @@ export class AnthropicClient extends BaseApiClient {
       isThinking: false,
     };
 
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          // Process remaining buffer
-          if (buffer.trim()) {
-            yield* this.processBufferLine(buffer.trim(), ctx);
-          }
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-
-        // Split by double newline (SSE message separator)
-        const parts = buffer.split('\n\n');
-        // Keep last incomplete part in buffer
-        buffer = parts.pop() || '';
-
-        // Process complete messages
-        for (const part of parts) {
-          const trimmed = part.trim();
-          if (!trimmed) continue;
-
-          yield* this.processBufferLine(trimmed, ctx);
-        }
-      }
-    } finally {
-      reader.releaseLock();
+    // Shared double-newline (SSE message) framing lives in
+    // BaseApiClient.readStreamFrames; this parser only maps blocks to events.
+    for await (const block of this.readStreamFrames(body, '\n\n')) {
+      const trimmed = block.trim();
+      if (!trimmed) continue;
+      yield* this.processBufferLine(trimmed, ctx);
     }
   }
 

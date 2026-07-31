@@ -1,4 +1,4 @@
-// QueryEngine Comprehensive Coverage Tests - Part 1
+﻿// QueryEngine Comprehensive Coverage Tests - Part 1
 // Covers: submitMessage full lifecycle, compacting phase, abort handling
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -43,7 +43,7 @@ vi.mock('../../src/api', () => ({
   },
 }));
 
-vi.mock('../../src/services/compaction', () => ({
+vi.mock('../../src/services/compaction/functional', () => ({
   shouldCompact: vi.fn(() => true),
   microcompact: vi.fn((msgs: any) => ({
     wasCompacted: false,
@@ -143,7 +143,7 @@ import {
   microcompact,
   fullCompact,
   MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES,
-} from '../../src/services/compaction';
+} from '../../src/services/compaction/functional';
 import { estimateMessageTokensArray } from '../../src/utils/tokenEstimation';
 
 // ── Helpers ──

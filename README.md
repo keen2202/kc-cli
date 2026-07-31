@@ -6,10 +6,10 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 
 - 🧬 **Autogenesis Protocol (AGP)**: Self-evolving multi-agent system with SEPL pipeline (reflect→select→improve→evaluate→commit), version management, and audit logging
 - 🔒 **Sandbox Security**: Shell commands run in isolated sandboxes (Docker/Bubblewrap/seccomp) with network isolation, resource limits, and escape detection. **Hard-fails by default** if no sandbox backend is available — set `KC_SANDBOX_FAIL_IF_NO_SANDBOX=false` to opt out (NOT recommended for production). macOS requires Docker Desktop; Linux needs only `apt install bubblewrap`.
-- 🎨 **Redesigned UI**: Sidebar with file tree (LSP markers), diff preview, command palette, model selector, theme system, mouse support, multi-panel layout
-- 🔌 **LSP Integration**: Code completions, diagnostics, go-to-definition, find references, rename, quick fixes for 9 languages
+- 🎨 **Redesigned UI**: ink/React terminal UI with sidebar (Tools/Files/Tasks/Memory), diff preview, command palette, focus-stack dialogs, theme system, multi-panel layout
+- 🔌 **LSP Integration**: Code completions, diagnostics, go-to-definition, find references, rename, quick fixes for 7 languages
 - 🧠 **Smart Model Adaptation**: Provider-specific prompts, dynamic parameter tuning, tiktoken-based token estimation
-- 🧪 **4207 Tests**: Comprehensive test suite across 208 files
+- 🧪 **4700+ Tests**: Comprehensive test suite across 260 files
 - 🛡️ **Runtime Monitoring**: Sandbox resource monitoring (Docker stats, /proc), image management, and probe-based isolation verification
 - 🪟 **Windows Sandbox**: Native isolation via Windows Sandbox (WSB)
 - 🌳 **Session Tree**: Non-linear conversations with branching, checkout, merge, and branch summaries
@@ -19,13 +19,13 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 - 🔌 **Contribution Plugins**: Plugin system with 5 contribution types (tools, hooks, permissionRules, prompts, mcpServers)
 - 📐 **Protocol-First Design**: Per-module protocol.ts files for clean interface boundaries
 - 🧩 **ExecutionEnv Abstraction**: Swappable FileSystem/Shell backends for testable, isolatable tools
-- ❌ **Typed Error Handling**: Result<T,E> sum type and KCError with 18 stable error codes
+- ❌ **Typed Error Handling**: KCError with 20 stable error codes and unified tool error-handling wrappers
 
 ## Features
 
-- **Modular Tools**: 22 built-in tools with two-phase execution (prepare/execute/finalize) — Bash, file I/O, search, Git, SQL, Docker, deployment, task management, sub-agent spawning, team orchestration, and LSP code intelligence
-- **Multi-LLM Support**: Anthropic Claude, OpenAI GPT, Qwen (DashScope), GLM (Zhipu AI), Google Gemini, DeepSeek, and Ollama (local); 9 stream event types including thinking_delta
-- **Permission System**: 6-step deny-first security with bypass-immune safety checks, protected paths, auto-classifier, and plugin-contributed rules (Step 1.5)
+- **Modular Tools**: 23 built-in tools with two-phase execution (prepare/execute/finalize) — Bash, file I/O, file restore, search, Git, SQL, Docker, deployment, task management, sub-agent spawning, team orchestration, and LSP code intelligence
+- **Multi-LLM Support**: Anthropic Claude, OpenAI GPT, DeepSeek, Qwen (DashScope), GLM (Zhipu AI), Mimo, Kimi, Step, Google Gemini, OpenAI-compatible, and Ollama (local); 9 stream event types including thinking_delta
+- **Permission System**: 6-step deny-first security with bypass-immune safety checks, protected paths, auto-classifier, and plugin-contributed rules (Step 3.5)
 - **Sandbox Isolation**: Docker/Bubblewrap/seccomp backends with per-tool policies, seccomp profiles, and resource limits
 - **LSP Code Intelligence**: Language server integration for TypeScript, Go, Python, Rust, Java, C++, Ruby
 - **Multi-Agent Orchestration**: Spawn sub-agents with isolated QueryEngine instances, permission cascading, event bus coordination, and budget enforcement
@@ -35,7 +35,7 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 - **Steering**: Inject messages mid-execution via `steer()` or after completion via `followUp()`; Ctrl+I toggle in UI
 - **Budget Enforcement**: Proactive token limits per session/turn/tool-result/sub-agent with opt-in BudgetConfig
 - **Plugin Contributions**: Plugins can contribute tools, hooks, permission rules, prompt templates, and MCP server configs
-- **Typed Errors**: `Result<T,E>` for explicit error handling; `KCError` with 18 stable codes (api_rate_limit, tool_timeout, budget_exceeded, etc.)
+- **Typed Errors**: `KCError` with 20 stable codes (api_rate_limit, tool_timeout, budget_exceeded, etc.); never swallow errors silently
 - **ExecutionEnv**: Swappable FileSystem/Shell abstraction; MockExecutionEnv for testing without real I/O
 - **Session Management**: Session persistence, archival, pruning, and recovery with configurable retention
 - **Interactive REPL**: Terminal UI with sidebar, diff preview, command palette, model selector, and steer mode
@@ -153,7 +153,7 @@ Options:
   -c, --cwd <directory>       Working directory
   -m, --mode <mode>           Permission mode (default/bypassPermissions/auto)
   --model <model>             LLM model to use
-  --provider <provider>       LLM provider (anthropic/openai/qwen/glm/ollama)
+  --provider <provider>       LLM provider (anthropic/openai/deepseek/qwen/glm/mimo/kimi/step/gemini/openai-compatible/ollama)
   --max-turns <number>        Maximum number of agent turns
   --max-budget <amount>       Maximum budget in USD
   -v, --verbose               Enable verbose output
@@ -243,10 +243,11 @@ src/
 ├── api/                            # LLM API clients
 │   ├── BaseApiClient.ts            # Abstract base (streamChat, chat, formatMessages, formatTools)
 │   ├── AnthropicClient.ts          # Anthropic SSE streaming with stateful content block parser
-│   ├── OpenAICompatibleClient.ts   # OpenAI-compatible (used for OpenAI, Qwen, GLM, DeepSeek)
+│   ├── OpenAICompatibleClient.ts   # OpenAI-compatible (OpenAI, Qwen, GLM, DeepSeek, Mimo, Kimi, Step, Gemini)
 │   ├── OllamaClient.ts             # Local Ollama client
+│   ├── ThinkingTagParser.ts        # Inline <think> tag stream parser
 │   ├── capabilities.ts             # Provider capability detection
-│   ├── param-tuner.ts              # Dynamic parameter tuning per model
+│   ├── protocol.ts                 # API module public types
 │   ├── index.ts                    # Factory function + provider config defaults
 │   └── prompts/
 │       ├── prompt-builder.ts       # System prompt construction
@@ -255,8 +256,12 @@ src/
 │       └── types.ts                # Prompt type definitions
 │
 ├── bootstrap/                      # Initialization
+│   ├── Bootstrap.ts                # Bootstrap orchestration
+│   ├── app.ts                      # Application wiring
+│   ├── init-sequence.ts            # Startup init sequence (log level, services)
 │   ├── state.ts                    # GlobalState (session, cwd, permission mode)
 │   ├── config.ts                   # 5-layer config loading (defaults < user < project < env < CLI)
+│   ├── cli-config.ts               # CLI argument parsing into config
 │   ├── autoConfig.ts               # Auto-configuration with project type detection
 │   └── profiler.ts                 # Startup performance tracking
 │
@@ -268,6 +273,12 @@ src/
 │
 ├── hooks/                          # Post-turn hook system
 │   └── postTurnHooks.ts           # Fire-and-forget hooks executed after each turn
+│
+├── im/                             # IM bridge (instant messaging integration)
+│   ├── im-bridge.ts                # IM ↔ agent bridge
+│   ├── protocol.ts                 # IM protocol types
+│   └── adapters/
+│       └── feishu.ts               # Feishu (Lark) adapter
 │
 ├── lsp/                            # Language Server Protocol integration
 │   ├── client.ts                   # LSP client manager
@@ -304,7 +315,7 @@ src/
 │   └── telemetry.ts               # Memory usage tracking
 │
 ├── metrics/                        # Metrics collection
-│   └── cacheMetrics.ts            # Cache hit/miss tracking
+│   └── kvCacheMetrics.ts           # KV-cache hit/miss tracking
 │
 ├── orchestrator/                   # Multi-agent coordination
 │   ├── types.ts                    # SubAgentIdentity, SpawnConfig, Runtime, Error types
@@ -319,11 +330,14 @@ src/
 │       └── in-process.ts          # AsyncLocalStorage-based process isolation
 │
 ├── permissions/                    # Security system
-│   ├── engine.ts                   # 6-step deny-first decision flow
+│   ├── engine.ts                   # 6-step deny-first decision flow (plugin rules at Step 3.5)
 │   ├── rules.ts                    # Rule parsing/matching with wildcard support
+│   ├── ruleParser.ts               # Permission rule string parser
 │   ├── classifier.ts               # Rule-based auto classifier (quick path + heuristics)
+│   ├── commandNormalizer.ts        # Shell command normalization before rule matching
 │   ├── readonlyCommands.ts         # Shared read-only command patterns (bash + git)
 │   ├── protectedPaths.ts           # Bypass-immune protected path definitions
+│   ├── protocol.ts                 # Permission module public types
 │   └── interaction.ts              # Interactive user permission handler
 │
 ├── plugins/                        # Plugin system
@@ -341,6 +355,10 @@ src/
 │   ├── QueryEngineCompaction.ts    # Auto-compaction handler (tiered engine selection)
 │   ├── QueryEngineMemory.ts        # Memory integration (pre-query loading, post-turn extraction)
 │   ├── QueryEngineError.ts         # Error handling, circuit breaker, retry logic
+│   ├── QueryEnginePlanning.ts      # Planning phase handler
+│   ├── QueryEngineImportance.ts    # Message importance tagging
+│   ├── QueryEngineRuntimeControl.ts # Runtime control (pause/steer/limits)
+│   ├── completion-report.ts        # Turn completion reporting
 │   └── protocol.ts                 # QueryEngine public types (QueryEngineLike interface)
 │
 ├── services/                       # System services
@@ -358,22 +376,23 @@ src/
 │   │   ├── compression.ts          # Cache value compression
 │   │   ├── consistency.ts          # Cache consistency verification
 │   │   └── index.ts                # Cache module entry
-│   ├── ServiceContainer.ts         # Dependency injection container
 │   ├── execution-env.ts            # ExecutionEnv interface (FileSystem + Shell)
 │   ├── execution-env-local.ts      # Local filesystem + shell implementation
 │   ├── execution-env-mock.ts       # Mock implementation for testing
 │   ├── cachePrefix.ts              # Stable/ephemeral prompt prefix for cache hits
-│   ├── cacheMetrics.ts             # Cache hit/miss tracking
+│   ├── promptCacheMetrics.ts       # Prompt cache hit/miss tracking
 │   ├── sessionManager.ts           # Session lifecycle (save, load, archive, prune, stats)
+│   ├── replSession.ts              # Non-UI REPL session persistence
 │   ├── idleDetection.ts            # Idle detection for consolidation triggering
 │   ├── consolidationScheduler.ts   # Scheduled memory consolidation
 │   ├── memoryConsolidation.ts      # Consolidation execution logic
 │   ├── memoryExtraction.ts         # Memory extraction from conversations
+│   ├── memory-extraction-guard.ts  # Guardrails for LLM memory extraction
 │   ├── memoryQuality.ts            # Memory quality assessment
 │   ├── extractionPrompts.ts        # LLM prompts for memory extraction
 │   ├── consolidationPrompts.ts     # LLM prompts for consolidation
+│   ├── operation-audit-log.ts      # High-risk operation audit logging
 │   ├── error-classifier.ts         # Error classification for retry decisions
-│   ├── paramTuner.ts               # Parameter auto-tuning service
 │   ├── behavioralAdapter.ts        # Behavioral adaptation based on patterns
 │   ├── sessionMetrics.ts           # Session metrics collection
 │   ├── stateValidator.ts           # State validation service
@@ -428,7 +447,7 @@ src/
 │       ├── prompt-adapter.ts       # Prompt adapter
 │       └── tool-adapter.ts         # Tool adapter
 │
-├── tools/                          # 20 built-in tool implementations
+├── tools/                          # 21 built-in tool implementations + registry
 │   ├── AgentTool/                  # Sub-agent spawning
 │   ├── AskUserTool/                # Interactive user prompts
 │   ├── BashTool/                   # Shell execution with dangerous-command detection
@@ -437,6 +456,7 @@ src/
 │   ├── DockerTool/                 # Docker operations
 │   ├── FileEditTool/               # Exact string replacement in files
 │   ├── FileReadTool/               # File reading with size limits
+│   ├── FileRestoreTool/            # Undo session file writes/edits (snapshot rollback)
 │   ├── FileWriteTool/              # File writing with path validation
 │   ├── GitTool/                    # Git operations
 │   ├── GlobTool/                   # File pattern matching
@@ -449,36 +469,59 @@ src/
 │   ├── TodoWriteTool/              # Task list management
 │   ├── WebFetchTool/               # URL content fetching
 │   ├── WebSearchTool/              # Web search via configurable providers
-│   └── TaskStore.ts                # Shared task state storage
+│   ├── TaskStore.ts                # Shared task state storage
+│   ├── registry.ts                 # TOOL_MANIFEST (23 tools incl. TeamCreate + LSP) with lazy loading
+│   └── protocol.ts                 # Tool module public types
 │
 ├── terminal/                       # Terminal utilities
 │
-├── ui/                             # Terminal UI components
+├── ui/                             # Terminal UI (ink/React)
 │   ├── components/
-│   │   ├── App.ts                  # Main application component
-│   │   ├── ChatView.ts             # Chat message display
-│   │   ├── CommandPalette.ts       # Fuzzy-search command palette
-│   │   ├── InputBox.ts             # User input component
-│   │   ├── ModelSelector.ts        # Interactive model/provider switcher
-│   │   ├── Sidebar.ts              # Sidebar with Tools/Files/Tasks/Memory panels
-│   │   ├── StatusBar.ts            # Status bar component
-│   │   └── ToolCallCard.ts         # Tool call display card
+│   │   ├── AppRoot.tsx             # Root application component
+│   │   ├── ChatPanel.tsx           # Chat panel composition
+│   │   ├── ChatMessagesView.tsx    # Chat message list rendering
+│   │   ├── CommandPalette.tsx      # Fuzzy-search command palette
+│   │   ├── DiffPreview.tsx         # Pending file diff preview
+│   │   ├── Editor.tsx              # Input editor
+│   │   ├── HeaderBar.tsx           # Header bar
+│   │   ├── Layout.tsx              # Yoga (flexbox) layout composition
+│   │   ├── PermissionDialog.tsx    # Interactive permission prompts
+│   │   ├── SidebarPanel.tsx        # Sidebar with Tools/Files/Tasks/Memory panels
+│   │   ├── StatusBarView.tsx       # Status bar rendering
+│   │   ├── ToolCallCard.ts         # Tool call display card
+│   │   └── slash-commands.ts       # Slash command registry
+│   ├── dialogs/
+│   │   └── FilePicker.tsx          # File picker dialog
+│   ├── hooks/                      # React hooks (keybindings, focus layer, virtual scroll, …)
+│   ├── focus-stack.ts              # Single arbiter for ESC/focus semantics
+│   ├── keybinding-manager.ts       # Keybinding schema and dispatch
+│   ├── keypress.ts                 # Raw keypress decoding
+│   ├── event-bus.ts                # UI event bus
+│   ├── event-normalizer.ts         # Agent event → view event normalization
+│   ├── view-protocol.ts            # UI data contracts (single source of truth)
+│   ├── bridge-protocol.ts          # UI ↔ engine bridge types
+│   ├── session-mapper.ts           # Session state → view model mapping
 │   ├── diff-viewer.ts              # Multi-file diff viewer
 │   ├── formatter.ts                # Text formatting utilities
-│   ├── layout.ts                   # Multi-panel layout manager (4 modes)
-│   ├── mouse.ts                    # Mouse event handler (SGR parsing)
-│   ├── renderer.ts                 # Terminal renderer
+│   ├── layout.ts                   # Layout policy (Yoga owns all measurement)
+│   ├── renderer.tsx                # ink renderer entry
 │   ├── spinner.ts                  # Loading spinner
 │   ├── statusline.ts               # Status line display
-│   ├── theme.ts                    # Theme system (5 built-in themes)
-│   ├── virtual-scroll.ts           # Virtual scrolling for long conversations
+│   ├── theme.ts                    # Theme system (8 built-in themes)
 │   └── index.ts                    # UI module entry
 │
 └── utils/                          # Shared utilities
-    ├── errors.ts                   # KCError, ErrorCode (18 codes), ExecError, error helpers
-    ├── result.ts                   # Result<T,E> sum type (ok/err, mapResult, flatMap)
+    ├── errors.ts                   # KCError, ErrorCode (20 codes), ExecError, error helpers
     ├── errorHandling.ts            # Unified error handling wrappers for tools
+    ├── api-key.ts                  # API key resolution helpers
+    ├── async-helpers.ts            # Async utilities
+    ├── fs-walk.ts                  # Filesystem walking helpers
+    ├── git.ts                      # Git helpers
+    ├── project-detect.ts           # Project type detection
+    ├── ssrf.ts                     # SSRF guard (private network URL deny for WebFetch)
     ├── tokenEstimation.ts          # tiktoken-based token estimation
+    ├── tokenize.ts                 # Tokenizer helpers
+    ├── toolResultBoundary.ts       # Tool result boundary marking
     ├── format.ts                   # Date/time formatting (getAgeText)
     ├── path.ts                     # Path validation helpers
     ├── semaphore.ts                # Async semaphore for concurrency control
@@ -498,6 +541,7 @@ src/
 | Docker | Docker container and image operations | ✗ |
 | FileEdit | Exact string replacement in files | ✗ |
 | FileRead | Read files with size limits | ✓ |
+| FileRestore | Undo session file writes/edits (snapshot rollback) | ✗ |
 | FileWrite | Write files with path validation | ✗ |
 | Git | Git operations (status, log, diff, commit, etc.) | ✗ |
 | Glob | File pattern matching | ✓ |
@@ -529,9 +573,9 @@ src/
 The permission system implements defense-in-depth:
 
 1. **Deny-first**: Deny rules are checked first and cannot be bypassed
-2. **Plugin rules** (Step 1.5): Plugins can contribute permission rules with priority-based evaluation
-3. **Tool-specific**: Each tool can implement custom permission checks via `checkPermissions()`
-4. **Security-critical**: Protected paths (`/etc/passwd`, `.ssh`, `.gnupg`, etc.) always require explicit approval — even in bypass mode
+2. **Tool-specific**: Each tool can implement custom permission checks via `checkPermissions()`
+3. **Security-critical**: Protected paths (`/etc/passwd`, `.ssh`, `.gnupg`, etc.) always require explicit approval — even in bypass mode
+4. **Plugin rules** (Step 3.5): Plugins can contribute permission rules with priority-based evaluation — they can tighten but never loosen bypass-immune decisions
 5. **Dangerous commands**: Patterns like `rm -rf /`, `mkfs`, `dd to /dev/` are hard-denied
 6. **Read-only commands**: Safe commands (`ls`, `cat`, `grep`, `find`, `git status`, etc.) are auto-allowed
 7. **Permission cascading**: Sub-agents inherit permission modes that never exceed the parent's level
@@ -623,14 +667,14 @@ npm run test:coverage # Run tests with coverage report
 - [Home](docs/repowiki/Home.md) — Overview, architecture diagram, quick start
 - [Architecture](docs/repowiki/Architecture.md) — Layer diagram, init sequence, data flow
 - [Query Engine](docs/repowiki/Query-Engine.md) — State machine, streaming, steering
-- [Tools System](docs/repowiki/Tools-System.md) — 22 tools, registry, two-phase execution
+- [Tools System](docs/repowiki/Tools-System.md) — 23 tools, registry, two-phase execution
 - [API Clients](docs/repowiki/API-Clients.md) — 11 providers, prompt system
 - [Permission System](docs/repowiki/Permission-System.md) — 6-step deny-first, rule system
 - [Sandbox](docs/repowiki/Sandbox.md) — Isolation backends, HMAC signing, compaction
 - [Orchestrator](docs/repowiki/Orchestrator.md) — Multi-agent lifecycle, EventBus
 - [Memory System](docs/repowiki/Memory-System.md) — File-based memory, consolidation
 - [Plugin System](docs/repowiki/Plugin-System.md) — 5 contribution types, hooks
-- [UI System](docs/repowiki/UI-System.md) — Layout, themes, overlays, mouse support
+- [UI System](docs/repowiki/UI-System.md) — Layout, themes, focus-stack dialogs, event pipeline
 - [State Management](docs/repowiki/State-Management.md) — Observable store, SessionTree
 - [Configuration](docs/repowiki/Configuration.md) — 5-layer config, env vars
 - [Testing](docs/repowiki/Testing.md) — Vitest patterns, mocks, coverage
@@ -647,8 +691,8 @@ npm run test:coverage # Run tests with coverage report
 - [Migration Guide](docs/guides/migration-guide.md) — v1 to v2 migration
 - [Architecture Optimization Spec](docs/specs/architecture-optimization-spec.md) — v3.2 design decisions and implementation details
 - [Optimization Tasks](docs/specs/optimization-tasks.md) — Task breakdown with dependency tracking
-- [NEXT Optimization](docs/specs/NEXT_OPTIMIZATION_SPEC.md) — Forward-looking optimization plan
-- [UI Event System](docs/specs/ui-event-system-spec.md) — UI redesign specification
+- [Architecture Hardening](docs/specs/architecture-hardening-spec.md) — Architecture consistency and robustness hardening
+- [UI Structural Hardening](docs/specs/ui-structural-hardening-spec.md) — UI structural red lines and hardening tasks
 
 ## Contributing
 
@@ -688,8 +732,8 @@ npm run typecheck && npm test
 - **Protocol-first**: every module exposes its public types in `protocol.ts`
   (types only — never implementation — to avoid circular imports).
 - **Comments sparingly**: only when the *why* is non-obvious. No multi-line docstrings.
-- **Error handling**: return `Result<T, E>`; use `KCError` with a stable `ErrorCode`.
-  Never swallow errors silently.
+- **Error handling**: use `KCError` with a stable `ErrorCode` and the unified
+  error-handling wrappers in `src/utils/errorHandling.ts`. Never swallow errors silently.
 - **Tools** use the `ExecutionEnv` abstraction (never direct FS/Shell access) and must
   go through `ToolExecutor` so sandbox and permission checks apply.
 - **Path alias**: import internal modules with `@/...` (e.g. `import { buildTool } from '@/Tool'`).

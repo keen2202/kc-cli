@@ -31,7 +31,11 @@ export default defineConfig({
         'src/acp/**/*.ts',
         'src/hooks/**/*.ts',
         'src/plugins/**/*.ts',
-        'src/ui/**/*.ts',
+        'src/ui/**/*.{ts,tsx}',
+        'src/agp/**/*.ts',
+        'src/im/**/*.ts',
+        'src/commands/**/*.ts',
+        'src/metrics/**/*.ts',
       ],
       exclude: [
         'src/**/*.test.ts',
@@ -57,6 +61,32 @@ export default defineConfig({
           branches: 55,
           functions: 65,
           lines: 65,
+        },
+        // Newly tracked modules (previously coverage blind spots): temporary
+        // lower bar until dedicated tests are added; ratchet upward over time.
+        'src/agp/**/*.ts': {
+          statements: 40,
+          branches: 35,
+          functions: 40,
+          lines: 40,
+        },
+        'src/im/**/*.ts': {
+          statements: 40,
+          branches: 35,
+          functions: 40,
+          lines: 40,
+        },
+        'src/commands/**/*.ts': {
+          statements: 40,
+          branches: 35,
+          functions: 40,
+          lines: 40,
+        },
+        'src/ui/**/*.tsx': {
+          statements: 40,
+          branches: 35,
+          functions: 40,
+          lines: 40,
         },
       },
     },

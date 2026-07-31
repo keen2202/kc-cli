@@ -3,8 +3,8 @@ import type { ChatMessage } from '../query/protocol';
 import type { BaseApiClient } from '../api';
 
 // Mock fullCompact so that tests never make real LLM calls
-vi.mock('../services/compaction', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../services/compaction')>();
+vi.mock('../services/compaction/functional', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../services/compaction/functional')>();
   return { ...actual, fullCompact: vi.fn() };
 });
 
@@ -20,7 +20,7 @@ vi.mock('../services/logger', () => ({
 
 // Import AFTER the mock is set up
 import { CompactionHandler } from './QueryEngineCompaction';
-import { fullCompact } from '../services/compaction';
+import { fullCompact } from '../services/compaction/functional';
 import { logger } from '../services/logger';
 
 // ── Helpers ──────────────────────────────────────────────────────────────

@@ -115,100 +115,59 @@ export function resolveModel(provider: LLMProvider, requestedModel: string): str
 }
 
 /**
+ * Single source of truth for provider default base URLs.
+ * Consumed by both createAPIClient and getDefaultBaseUrl — do not duplicate.
+ */
+const PROVIDER_BASE_URLS: Record<LLMProvider, string> = {
+  'openai': 'https://api.openai.com',
+  'qwen': 'https://dashscope.aliyuncs.com',
+  'glm': 'https://open.bigmodel.cn/api/paas',
+  'deepseek': 'https://api.deepseek.com',
+  'mimo': 'https://api.xiaomimimo.com',
+  'kimi': 'https://api.moonshot.cn',
+  'step': 'https://api.stepfun.com',
+  'gemini': 'https://generativelanguage.googleapis.com',
+  'openai-compatible': '',
+  'anthropic': 'https://api.anthropic.com',
+  'ollama': 'http://localhost:11434',
+};
+
+/**
  * Create an LLM API client based on provider configuration.
  * Factory function that abstracts away provider-specific initialization.
  */
 export function createAPIClient(config: APIClientFactoryConfig): BaseApiClient {
   const { provider, apiKey, baseUrl, model } = config;
 
+  if (!(provider in PROVIDER_BASE_URLS)) {
+    throw new Error(`Unknown LLM provider: ${provider}. Supported: ${Object.keys(PROVIDER_BASE_URLS).join(', ')}`);
+  }
+
+  const resolvedBaseUrl = baseUrl || PROVIDER_BASE_URLS[provider];
+  const resolvedModel = resolveModel(provider, model);
+
   switch (provider) {
-    case 'openai':
-      return new OpenAICompatibleClient({
-        apiKey: apiKey || '',
-        baseUrl: baseUrl || 'https://api.openai.com',
-        model: resolveModel('openai', model),
-        provider: 'openai',
-      });
-
-    case 'qwen':
-      return new OpenAICompatibleClient({
-        apiKey: apiKey || '',
-        baseUrl: baseUrl || 'https://dashscope.aliyuncs.com',
-        model: resolveModel('qwen', model),
-        provider: 'qwen',
-      });
-
-    case 'glm':
-      return new OpenAICompatibleClient({
-        apiKey: apiKey || '',
-        baseUrl: baseUrl || 'https://open.bigmodel.cn/api/paas',
-        model: resolveModel('glm', model),
-        provider: 'glm',
-      });
-
-    case 'deepseek':
-      return new OpenAICompatibleClient({
-        apiKey: apiKey || '',
-        baseUrl: baseUrl || 'https://api.deepseek.com',
-        model: resolveModel('deepseek', model),
-        provider: 'deepseek',
-      });
-
-    case 'mimo':
-      return new OpenAICompatibleClient({
-        apiKey: apiKey || '',
-        baseUrl: baseUrl || 'https://api.xiaomimimo.com',
-        model: resolveModel('mimo', model),
-        provider: 'mimo',
-      });
-
-    case 'kimi':
-      return new OpenAICompatibleClient({
-        apiKey: apiKey || '',
-        baseUrl: baseUrl || 'https://api.moonshot.cn',
-        model: resolveModel('kimi', model),
-        provider: 'kimi',
-      });
-
-    case 'step':
-      return new OpenAICompatibleClient({
-        apiKey: apiKey || '',
-        baseUrl: baseUrl || 'https://api.stepfun.com',
-        model: resolveModel('step', model),
-        provider: 'step',
-      });
-
-    case 'gemini':
-      return new OpenAICompatibleClient({
-        apiKey: apiKey || '',
-        baseUrl: baseUrl || 'https://generativelanguage.googleapis.com',
-        model: resolveModel('gemini', model),
-        provider: 'gemini',
-      });
-
-    case 'openai-compatible':
-      return new OpenAICompatibleClient({
-        apiKey: apiKey || '',
-        baseUrl: baseUrl || '',
-        model: resolveModel('openai-compatible', model),
-        provider: 'openai',
-      });
-
     case 'anthropic':
       return new AnthropicClient({
         apiKey: apiKey || '',
-        baseUrl: baseUrl || 'https://api.anthropic.com',
-        model: resolveModel('anthropic', model),
+        baseUrl: resolvedBaseUrl,
+        model: resolvedModel,
       });
 
     case 'ollama':
       return new OllamaClient({
-        baseUrl: baseUrl || 'http://localhost:11434',
-        model: resolveModel('ollama', model),
+        baseUrl: resolvedBaseUrl,
+        model: resolvedModel,
       });
 
     default:
-      throw new Error(`Unknown LLM provider: ${provider}. Supported: openai, qwen, glm, deepseek, mimo, kimi, step, gemini, openai-compatible, anthropic, ollama`);
+      // All remaining providers speak the OpenAI-compatible wire protocol.
+      return new OpenAICompatibleClient({
+        apiKey: apiKey || '',
+        baseUrl: resolvedBaseUrl,
+        model: resolvedModel,
+        provider: provider === 'openai-compatible' ? 'openai' : provider,
+      });
   }
 }
 
@@ -216,32 +175,11 @@ export function createAPIClient(config: APIClientFactoryConfig): BaseApiClient {
  * Get default base URL for a provider
  */
 export function getDefaultBaseUrl(provider: LLMProvider): string {
-  switch (provider) {
-    case 'openai':
-      return 'https://api.openai.com';
-    case 'qwen':
-      return 'https://dashscope.aliyuncs.com';
-    case 'glm':
-      return 'https://open.bigmodel.cn/api/paas';
-    case 'deepseek':
-      return 'https://api.deepseek.com';
-    case 'mimo':
-      return 'https://api.xiaomimimo.com';
-    case 'kimi':
-      return 'https://api.moonshot.cn';
-    case 'step':
-      return 'https://api.stepfun.com';
-    case 'gemini':
-      return 'https://generativelanguage.googleapis.com';
-    case 'openai-compatible':
-      return '';
-    case 'anthropic':
-      return 'https://api.anthropic.com';
-    case 'ollama':
-      return 'http://localhost:11434';
-    default:
-      throw new Error(`Unknown provider: ${provider}`);
+  const url = PROVIDER_BASE_URLS[provider];
+  if (url === undefined) {
+    throw new Error(`Unknown provider: ${provider}`);
   }
+  return url;
 }
 
 /**

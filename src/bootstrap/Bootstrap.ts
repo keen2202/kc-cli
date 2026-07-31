@@ -29,8 +29,6 @@ import {
   loadMCPConfig,
   type MCPServerConfig,
 } from '../mcp';
-import { getGlobalRegistry } from '../agp/registry';
-import { getTraceManager } from '../agp/trace-manager';
 import { createSurfacePromptRecords } from '../api/prompts/instruction-surfaces';
 import { registerFailureBridgingHook } from '../hooks/postTurnHooks';
 import { createMemoryIntegration } from '../memory/integration';
@@ -375,18 +373,22 @@ export class Bootstrap {
     profileCheckpoint('plugin_mcp_initialized');
 
     // ── Phase 3d: Initialize AGP (Autogenesis Protocol) system ──
-    if (!bareMode) {
+    // The AGP subsystem is loaded lazily (dynamic import) so the bootstrap has
+    // no compile/load-time dependency on src/agp — it stays a pluggable module.
+    if (!bareMode && (config.agp?.enabled ?? true)) {
       try {
+        const { getGlobalRegistry } = await import('../agp/registry');
+        const agpConfig = config.agp;
         const agpRegistry = getGlobalRegistry({
           persistDir: path.join(cwd, '.kc-cli', 'agp'),
-          tracingEnabled: true,
+          tracingEnabled: agpConfig?.tracingEnabled ?? true,
           evolution: {
-            enabled: false,
-            budget: 3,
+            enabled: agpConfig?.evolution?.enabled ?? false,
+            budget: agpConfig?.evolution?.budget ?? 3,
             targetResources: [],
             safetyInvariants: [],
-            autoRollback: true,
-            persistState: true,
+            autoRollback: agpConfig?.evolution?.autoRollback ?? true,
+            persistState: agpConfig?.evolution?.persistState ?? true,
           },
         });
         updateState({ agpRegistry });
@@ -544,9 +546,12 @@ export class Bootstrap {
           await memoryService.addMemory(projectHash, memory);
         },
       });
-      registerFailureBridgingHook(bridgeIntegration, () =>
-        getTraceManager().buildEvidenceBundle()
-      );
+      registerFailureBridgingHook(bridgeIntegration, await (async () => {
+        // Lazy AGP load keeps failure bridging decoupled from src/agp at
+        // compile time; if AGP cannot load, bridge with an empty provider.
+        const { getTraceManager } = await import('../agp/trace-manager');
+        return () => getTraceManager().buildEvidenceBundle();
+      })());
     }
     profileCheckpoint('failure_bridging_wired');
 

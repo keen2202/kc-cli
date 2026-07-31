@@ -1,4 +1,4 @@
-// Conversational-query exemption tests.
+﻿// Conversational-query exemption tests.
 //
 // Greetings/small talk must complete with zero tool calls and must NOT be
 // dragged through the SWE-bench task machinery (Phase 1/3 steers,
@@ -33,7 +33,7 @@ vi.mock('../../src/api', () => ({
   },
 }));
 
-vi.mock('../../src/services/compaction', () => ({
+vi.mock('../../src/services/compaction/functional', () => ({
   shouldCompact: vi.fn(() => false),
   microcompact: vi.fn((msgs: any) => ({ wasCompacted: false, messages: msgs, tokensSaved: 0 })),
   fullCompact: vi.fn(async (msgs: any) => ({ wasCompacted: false, messages: msgs, tokensSaved: 0 })),

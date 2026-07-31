@@ -5,7 +5,7 @@ vi.mock('../../src/memory/relevanceSearch', () => ({
   findRelevantMemories: vi.fn(),
 }));
 
-vi.mock('../../src/services/memoryExtraction', () => ({
+vi.mock('../../src/memory/memoryExtraction', () => ({
   extractMemoriesFromMessages: vi.fn(),
   extractMemoriesHybrid: vi.fn(),
 }));
@@ -15,7 +15,7 @@ import {
   createMemoryIntegration,
 } from '../../src/memory/integration';
 import { findRelevantMemories } from '../../src/memory/relevanceSearch';
-import { extractMemoriesHybrid } from '../../src/services/memoryExtraction';
+import { extractMemoriesHybrid } from '../../src/memory/memoryExtraction';
 import type { MemoryManifestEntry, MemoryEntry, MemoryConfig } from '../../src/memory/types';
 import type { ChatMessage } from '../../src/types/message';
 

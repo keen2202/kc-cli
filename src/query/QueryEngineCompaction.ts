@@ -2,7 +2,7 @@
 
 import { logger } from '../services/logger';
 import type { ChatMessage, TurnTag } from '../query/protocol';
-import { shouldCompact, microcompact, fullCompact, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES, needsForceTruncation, forceTruncate } from '../services/compaction';
+import { shouldCompact, microcompact, fullCompact, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES, needsForceTruncation, forceTruncate } from '../services/compaction/functional';
 import { estimateMessageTokensArray } from '../utils/tokenEstimation';
 import type { BaseApiClient } from '../api';
 import { classifyApiError, getRetryDelay } from '../services/error-classifier';

@@ -2,6 +2,7 @@
 // Provides precise token counting using js-tiktoken with LRU caching.
 
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import type { ChatMessage } from '../query/protocol';
 import { getCacheManager } from '../services/cache';
 
@@ -46,6 +47,18 @@ export type TokenEncoding = 'cl100k_base' | 'o200k_base' | 'tiktoken' | 'custom'
 const tokenCache = getCacheManager().getOrCreate<number>('token-estimation', 'token', { maxSize: 2000 });
 
 /**
+ * Cache-key length cutoff: texts longer than this are keyed by
+ * `<length>:<sha1>` instead of the full text, so multi-KB tool outputs do not
+ * bloat cache memory by being retained as Map keys.
+ */
+const LONG_TEXT_KEY_THRESHOLD = 1024;
+
+function cacheKeyFor(text: string): string {
+  if (text.length <= LONG_TEXT_KEY_THRESHOLD) return text;
+  return `${text.length}:${createHash('sha1').update(text).digest('base64')}`;
+}
+
+/**
  * Token counter with TieredCache for LRU eviction and hit rate tracking.
  */
 export class TokenCounter {
@@ -67,7 +80,8 @@ export class TokenCounter {
     if (!text || text.length === 0) return 0;
 
     // Check managed TieredCache (with automatic LRU eviction and hit tracking)
-    const cached = tokenCache.get(text);
+    const cacheKey = cacheKeyFor(text);
+    const cached = tokenCache.get(cacheKey);
     if (cached !== undefined) return cached;
 
     // Get encoder
@@ -86,7 +100,7 @@ export class TokenCounter {
       result = this.heuristicCount(text);
     }
 
-    tokenCache.set(text, result);
+    tokenCache.set(cacheKey, result);
     return result;
   }
 

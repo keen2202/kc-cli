@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryEngine } from '../../src/query/QueryEngine';
 import { initializeState } from '../../src/bootstrap/state';
 import type { LLMProvider } from '../../src/api';
@@ -12,7 +12,7 @@ vi.mock('../../src/api', () => ({
 }));
 
 // Mock the compaction service
-vi.mock('../../src/services/compaction', () => ({
+vi.mock('../../src/services/compaction/functional', () => ({
   shouldCompact: vi.fn(() => false),
   microcompact: vi.fn((msgs: any) => ({ wasCompacted: false, messages: msgs, tokensSaved: 0 })),
   fullCompact: vi.fn(),
@@ -51,7 +51,7 @@ describe('QueryEngine Retry Logic', () => {
 
   describe('Compaction retry', () => {
     it('should retry compaction on transient error', async () => {
-      const { fullCompact } = await import('../../src/services/compaction');
+      const { fullCompact } = await import('../../src/services/compaction/functional');
 
       let callCount = 0;
       (fullCompact as any).mockImplementation(async () => {

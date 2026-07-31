@@ -10,6 +10,7 @@
 import type { ToolDefinition } from '../../tools/protocol';
 import type { ResourceRegistrationRecord, ResourceEntity, ToolMetadata, ExportedRepresentation } from '../protocol';
 import { createResourceEntity, createRegistrationRecord, createFunctionCallingRep } from '../types';
+import { zodToJsonSchema } from '../../utils/zodToJsonSchema';
 
 // ─── ToolDefinition → RSPL Record ────────────────────────────────────────────
 
@@ -99,94 +100,14 @@ export function applyRecordToTool(
 /**
  * Extract a human-readable description from a Zod schema.
  * Returns a JSON-like object description.
+ * Delegates to the canonical converter in src/utils/zodToJsonSchema
+ * (a hand-rolled local duplicate was removed in the dedup pass).
  */
 function describeZodSchema(schema: any): Record<string, unknown> {
   try {
     return zodToJsonSchema(schema);
   } catch {
     return { type: 'unknown', description: 'Schema could not be extracted' };
-  }
-}
-
-/**
- * Convert a Zod schema to a JSON Schema-like object.
- * Handles common Zod types: object, string, number, boolean, array, enum, optional.
- */
-function zodToJsonSchema(schema: any): Record<string, unknown> {
-  if (!schema || !schema._def) {
-    return { type: 'unknown' };
-  }
-
-  const def = schema._def;
-  const typeName = def.typeName;
-
-  switch (typeName) {
-    case 'ZodObject': {
-      const properties: Record<string, unknown> = {};
-      const required: string[] = [];
-
-      if (def.shape) {
-        const shape = typeof def.shape === 'function' ? def.shape() : def.shape;
-        for (const [key, value] of Object.entries(shape)) {
-          properties[key] = zodToJsonSchema(value);
-          // Check if field is optional
-          const fieldDef = (value as any)?._def;
-          if (fieldDef?.typeName !== 'ZodOptional') {
-            required.push(key);
-          }
-        }
-      }
-
-      return {
-        type: 'object',
-        properties,
-        required: required.length > 0 ? required : undefined,
-      };
-    }
-
-    case 'ZodString':
-      return { type: 'string', description: def.description };
-
-    case 'ZodNumber':
-      return { type: 'number', description: def.description };
-
-    case 'ZodBoolean':
-      return { type: 'boolean', description: def.description };
-
-    case 'ZodArray':
-      return {
-        type: 'array',
-        items: def.type ? zodToJsonSchema(def.type) : { type: 'unknown' },
-      };
-
-    case 'ZodEnum':
-      return {
-        type: 'string',
-        enum: def.values,
-      };
-
-    case 'ZodOptional':
-      return {
-        ...zodToJsonSchema(def.innerType),
-        optional: true,
-      };
-
-    case 'ZodDefault':
-      return {
-        ...zodToJsonSchema(def.innerType),
-        default: def.defaultValue?.(),
-      };
-
-    case 'ZodLiteral':
-      return { type: typeof def.value, const: def.value };
-
-    case 'ZodUnion':
-      return {
-        oneOf: def.options?.map((opt: any) => zodToJsonSchema(opt)) ?? [],
-      };
-
-    default:
-      return { type: 'unknown', zodType: typeName };
   }
 }
 

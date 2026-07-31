@@ -26,6 +26,7 @@ import {
   ensureGitignore,
   getKcCliBasePath,
 } from './paths';
+import { KCError } from '../utils/errors';
 import { parseFrontmatter, composeMemoryFile, validateMemoryType } from './frontmatter';
 import { invalidateScoreCache } from './relevanceSearch';
 
@@ -196,7 +197,7 @@ export class FileMemoryService implements MemoryService {
   ): Promise<void> {
     const existing = await this.getMemory(projectHash, fileName);
     if (!existing) {
-      throw new Error(`Memory not found: ${fileName}`);
+      throw new KCError('session_not_found', `Memory not found: ${fileName}`, { fileName });
     }
 
     const merged: MemoryEntry = {
@@ -336,7 +337,7 @@ export class FileMemoryService implements MemoryService {
       await fs.rename(sourcePath, targetPath);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        throw new Error(`Session not found: ${sessionId}`);
+        throw new KCError('session_not_found', `Session not found: ${sessionId}`, { sessionId });
       }
       throw err;
     }

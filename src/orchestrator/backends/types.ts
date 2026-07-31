@@ -9,10 +9,9 @@ import type { ToolUseContext } from '../../tools/protocol.js';
  * Implementations can use different execution strategies:
  * - InProcess: Same process with AsyncLocalStorage isolation
  * - Subprocess: Separate child process
- * - Tmux: Terminal multiplexer backend
  */
 export interface SubAgentBackend {
-  readonly type: 'in_process' | 'subprocess' | 'tmux';
+  readonly type: 'in_process' | 'subprocess';
 
   /**
    * Spawn a new sub-agent

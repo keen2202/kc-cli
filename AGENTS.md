@@ -18,14 +18,14 @@ npm run kc             # Start interactive REPL
 ## Architecture
 
 - **Entry**: `src/main.ts` → REPL + CLI command handling
-- **Core loop**: `src/query/QueryEngine.ts` — Facade over 4 sub-modules (State, Compaction, Memory, Error); idle→compact→stream→decide→execute state machine with steering support; protocol types in `query/protocol.ts`
-- **Tools**: `src/tools/` — 22 built-in tools using `buildTool()` factory with Zod schemas, two-phase execution (prepare/execute/finalize)
+- **Core loop**: `src/query/QueryEngine.ts` — Facade over 7 sub-modules (State, Compaction, Memory, Error, Planning, Importance, RuntimeControl); idle→compact→stream→decide→execute state machine with steering support; protocol types in `query/protocol.ts`
+- **Tools**: `src/tools/` — 23 registered tools (21 under `src/tools/` + TeamCreate + LSP in `TOOL_MANIFEST`) using `buildTool()` factory with Zod schemas, two-phase execution (prepare/execute/finalize)
 - **API clients**: `src/api/` — 11 providers (Anthropic, OpenAI, DeepSeek, Qwen, GLM, Mimo, Kimi, Step, Gemini, OpenAI-compatible, Ollama); extend `BaseApiClient`; protocol types in `api/protocol.ts`
 - **Permissions**: `src/permissions/` — 6-step deny-first with bypass-immune protected paths + plugin-contributed rules (Step 3.5)
 - **Sandbox**: `src/services/sandbox*.ts` — Docker/Bubblewrap/seccomp backends with fallback chain
 - **Orchestrator**: `src/orchestrator/` — Multi-agent with `AsyncLocalStorage` isolation; protocol types in `orchestrator/protocol.ts`
 - **Memory**: `src/memory/` — File-based persistent memory with YAML frontmatter, 4 types (user/feedback/project/reference), relevance search, auto-extraction and consolidation
-- **UI**: `src/ui/` — Terminal UI with theme system, mouse support, multi-panel layout, steer mode (Ctrl+I)
+- **UI**: `src/ui/` — ink/React terminal UI with theme system, focus-stack dialogs, multi-panel layout, steer mode (Ctrl+I)
 - **LSP**: `src/lsp/` — Language server integration (TS, Go, Python, Rust, Java, C++, Ruby)
 - **MCP**: `src/mcp/` — Model Context Protocol client with stdio/HTTP transports
 - **State**: `src/state/` — Observable state store (`store.ts`), state machine validation (`machine.ts`), session tree for branching conversations (`session-tree.ts`), event types (`events.ts`); protocol types in `state/protocol.ts`
@@ -36,7 +36,6 @@ npm run kc             # Start interactive REPL
 - **ExecutionEnv**: `src/services/execution-env.ts` — Swappable FileSystem/Shell abstraction for tools
 - **Commands**: `src/commands/` — CLI command handlers (/branch, /checkout, /history)
 - **Metrics**: `src/metrics/` — Cache hit/miss tracking
-- **Terminal**: `src/terminal/` — Terminal utilities
 - **Executors**: `src/executors/` — Tool execution orchestration (`toolExecutor.ts`)
 - **Hooks**: `src/hooks/` — Post-turn hook processing (`postTurnHooks.ts`)
 - **Utils**: `src/utils/` — Shared utilities (error handling, path security, semaphore, token estimation, format)
@@ -69,8 +68,7 @@ What the permission system (`src/permissions/`) actually enforces on agent behav
 - `ChatMessage` / `ToolCall` — Message types for LLM conversation
 - `PermissionResult` — Permission decision (allow/deny/ask)
 - `MemoryEntry` — Persistent memory with YAML frontmatter
-- `Result<T, E>` — Sum type for explicit error handling (ok/err)
-- `KCError` — Typed error with stable ErrorCode (18 codes: api_rate_limit, tool_timeout, budget_exceeded, etc.)
+- `KCError` — Typed error with stable ErrorCode (20 codes: api_rate_limit, tool_timeout, budget_exceeded, etc.)
 - `ExecutionEnv` — Swappable FileSystem + Shell abstraction for tool backends
 - `SessionTree` — Non-linear conversation tree with branching, checkout, merge
 

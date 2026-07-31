@@ -1,4 +1,4 @@
-// QueryEngine Comprehensive Coverage Tests - Part 2
+﻿// QueryEngine Comprehensive Coverage Tests - Part 2
 // Covers: message trimming, buildApiMessages, circuit breaker, event creation,
 // configuration variations, multiple submissions, edge cases, clear/reset,
 // state machine, behavioral adapter, getMessages, retry exhaustion, multi-turn
@@ -45,7 +45,7 @@ vi.mock('../../src/api', () => ({
   },
 }));
 
-vi.mock('../../src/services/compaction', () => ({
+vi.mock('../../src/services/compaction/functional', () => ({
   shouldCompact: vi.fn(() => true),
   microcompact: vi.fn((msgs: any) => ({
     wasCompacted: false,

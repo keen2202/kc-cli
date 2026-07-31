@@ -10,7 +10,7 @@ import type { EvidenceBundle, EvidenceCluster } from '../agp/sepl/protocol';
 import {
   extractMemoriesHybrid,
   type LlmExtractionClient,
-} from '../services/memoryExtraction';
+} from './memoryExtraction';
 import type { BudgetEnforcer } from '../services/budget';
 
 export interface MemoryIntegrationConfig {

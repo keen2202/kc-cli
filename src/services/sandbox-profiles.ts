@@ -26,6 +26,9 @@ export class BubblewrapSandbox implements SandboxBackend {
    */
   private _supportsRlimit: boolean | null = null;
 
+  /** Cached availability probe (execSync `which bwrap` runs at most once). */
+  private _available: boolean | null = null;
+
   /**
    * Detect whether this bwrap version supports --rlimit-* options.
    * bwrap < 0.10 does not support rlimit.
@@ -49,13 +52,15 @@ export class BubblewrapSandbox implements SandboxBackend {
   }
 
   isAvailable(): boolean {
+    if (this._available !== null) return this._available;
     try {
       execSync('which bwrap', { stdio: 'ignore' });
-      return true;
+      this._available = true;
     } catch {
       logger.debug('bwrap not available');
-      return false;
+      this._available = false;
     }
+    return this._available;
   }
 
   wrapCommand(command: string, options: SandboxOptions): string {
@@ -152,18 +157,26 @@ export class BubblewrapSandbox implements SandboxBackend {
 export class SeccompSandbox implements SandboxBackend {
   readonly name = 'seccomp';
 
+  /** Cached availability probe (execSync/readFileSync run at most once). */
+  private _available: boolean | null = null;
+
   isAvailable(): boolean {
+    if (this._available !== null) return this._available;
     try {
       // Only supported on Linux
-      if (process.platform !== 'linux') return false;
+      if (process.platform !== 'linux') {
+        this._available = false;
+        return false;
+      }
       // Verify timeout command is available
       execSync('which timeout', { stdio: 'ignore', timeout: 2000 });
       // Verify seccomp is enabled in kernel via the standard API
       const seccompAvail = fs.readFileSync('/proc/sys/kernel/seccomp/actions_avail', 'utf-8');
-      return seccompAvail.includes('errno');
+      this._available = seccompAvail.includes('errno');
     } catch {
-      return false;
+      this._available = false;
     }
+    return this._available;
   }
 
   /**
