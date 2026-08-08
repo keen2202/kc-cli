@@ -18,10 +18,12 @@ describe('FileEditTool error handling', () => {
   it('returns structured error with stack for path traversal (catch block)', async () => {
     // Absolute path outside workspace triggers assertPathWithinWorkspace throw,
     // exercising the catch block with getErrorMessage + getErrorStack.
-    const env = createMockExecutionEnv('/tmp');
+    // cwd is nested so the access root (parent of cwd) is /tmp, keeping
+    // /etc/passwd outside the scope since fc44302 widened the boundary to siblings.
+    const env = createMockExecutionEnv('/tmp/workspace');
     const result = await tool.call(
       { file_path: '/etc/passwd', edits: [{ old_string: 'foo', new_string: 'bar', replace_all: false }], dry_run: false },
-      { cwd: '/tmp', env } as any,
+      { cwd: '/tmp/workspace', env } as any,
     );
     expect(result.isError).toBe(true);
     expect(result.message).toContain('File edit failed');
