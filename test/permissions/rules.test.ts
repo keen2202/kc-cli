@@ -40,6 +40,18 @@ describe('PermissionRules', () => {
       const result = parseRuleString('Tool123');
       expect(result.toolName).toBe('Tool123');
     });
+
+    it('should parse wildcard tool name', () => {
+      const result = parseRuleString('*');
+      expect(result.toolName).toBe('*');
+      expect(result.ruleContent).toBeUndefined();
+    });
+
+    it('should parse wildcard tool name with content pattern', () => {
+      const result = parseRuleString('*(rm *)');
+      expect(result.toolName).toBe('*');
+      expect(result.ruleContent).toBe('rm *');
+    });
   });
 
   describe('formatRuleString', () => {
@@ -53,6 +65,11 @@ describe('PermissionRules', () => {
 
     it('should roundtrip parse/format', () => {
       const original = 'Bash(git commit:*)';
+      expect(formatRuleString(parseRuleString(original))).toBe(original);
+    });
+
+    it('should roundtrip wildcard rule', () => {
+      const original = '*(rm *)';
       expect(formatRuleString(parseRuleString(original))).toBe(original);
     });
   });

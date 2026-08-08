@@ -6,10 +6,11 @@ import { getCacheManager } from '../services/cache';
 /**
  * Parse rule string into PermissionRuleValue
  * Format: "ToolName" or "ToolName(contentPattern)"
- * Examples: "Bash", "Bash(ls *)", "Bash(git commit:*)", "FileWrite(/src/*)"
+ * "*" (or "*(contentPattern)") matches any tool name
+ * Examples: "Bash", "Bash(ls *)", "Bash(git commit:*)", "FileWrite(/src/*)", "*", "*(rm *)"
  */
 export function parseRuleString(ruleString: string): PermissionRuleValue {
-  const match = ruleString.match(/^([A-Za-z]+)(?:\((.+)\))?$/);
+  const match = ruleString.match(/^(\*|[A-Za-z]+)(?:\((.+)\))?$/);
 
   if (!match) {
     return {

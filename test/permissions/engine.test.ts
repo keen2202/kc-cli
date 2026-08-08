@@ -270,6 +270,63 @@ describe('PermissionEngine', () => {
     });
   });
 
+  describe('Wildcard tool rules (*)', () => {
+    it('deny rule with * matches any tool', async () => {
+      const result = await hasPermissionsToUseTool('FileRead', {}, {
+        config: { alwaysDenyRules: ['*'] },
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('deny rule with * and content pattern matches any tool content', async () => {
+      const result = await hasPermissionsToUseTool('Bash', { command: 'rm -rf /' }, {
+        content: 'rm -rf /',
+        config: { alwaysDenyRules: ['*(rm *)'] },
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('deny rule with * and content pattern does not match other content', async () => {
+      const result = await hasPermissionsToUseTool('Bash', { command: 'ls' }, {
+        content: 'ls',
+        config: { alwaysDenyRules: ['*(rm *)'] },
+      });
+      // Falls through to mode default (ask)
+      expect(result.behavior).toBe('ask');
+    });
+
+    it('allow rule with * matches any tool', async () => {
+      const result = await hasPermissionsToUseTool('FileRead', {}, {
+        config: { alwaysAllowRules: ['*'] },
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('allow rule with * and content pattern matches tool content', async () => {
+      const result = await hasPermissionsToUseTool('Bash', { command: 'ls -la' }, {
+        content: 'ls -la',
+        config: { alwaysAllowRules: ['*(ls *)'] },
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('ask rule with * overrides dontAsk mode default', async () => {
+      initializeState({ permissionMode: 'dontAsk' });
+      const result = await hasPermissionsToUseTool('Bash', { command: 'ls' }, {
+        content: 'ls',
+        config: { alwaysAskRules: ['*'] },
+      });
+      expect(result.behavior).toBe('ask');
+    });
+
+    it('wildcard allow rule cannot override security-critical checks', async () => {
+      const result = await hasPermissionsToUseTool('FileRead', { path: '/etc/passwd' }, {
+        config: { alwaysAllowRules: ['*'] },
+      });
+      expect(result.behavior).toBe('ask');
+    });
+  });
+
   describe('C1: Plugin rules cannot bypass security-critical checks', () => {
     it('should block plugin allow rule on protected path /etc/shadow', async () => {
       const pluginManager = {

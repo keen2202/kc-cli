@@ -427,6 +427,16 @@ function matchRules(
   content?: string
 ): boolean {
   for (const rule of rules) {
+    // Wildcard: * matches any tool name
+    if (rule.ruleValue.toolName === '*') {
+      if (!rule.ruleValue.ruleContent) {
+        return true;
+      }
+      if (content && matchPattern(rule.ruleValue.ruleContent, content)) {
+        return true;
+      }
+      continue;
+    }
     if (rule.ruleValue.toolName !== toolName) {
       continue;
     }
