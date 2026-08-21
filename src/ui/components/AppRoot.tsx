@@ -57,6 +57,13 @@ interface FileItem {
 
 const MAX_ATTACHMENTS = 5;
 
+interface PermissionQueueEntry {
+  request: PermissionRequest;
+  resolve: (decision: PermissionDecision) => void;
+  /** Guards against double-settlement from a normal decision + dispose. */
+  settled: boolean;
+}
+
 // ── Error Bar ──
 
 interface ErrorBarProps {
@@ -252,7 +259,10 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
   const [showPalette, setShowPalette] = useState(false);
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [fileItems, setFileItems] = useState<FileItem[]>([]);
+  // Permission requests are queued FIFO. `permissionRequest` only ever shows
+  // the head of the queue; `permissionQueueRef` holds the unresolved entries.
   const [permissionRequest, setPermissionRequest] = useState<PermissionRequest | null>(null);
+  const permissionQueueRef = useRef<PermissionQueueEntry[]>([]);
   // Ctrl+O expands the pending permission request into a full DiffPreview overlay.
   const [showDiffDetail, setShowDiffDetail] = useState(false);
 
@@ -291,10 +301,14 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
   // Session ID lives in state so /session new|<id> can swap it and re-render.
   const [sessionId, setSessionId] = useState(() => getState().sessionId);
 
-  // Register the interactive authorization handler with the engine. The
-  // returned Promise resolves when the user decides; PermissionDialog.onDecide
-  // guarantees a resolution on every path (Esc → 'deny') so the awaiting
-  // executor generator can never deadlock.
+  // Register the interactive authorization handler with the engine.
+  //
+  // Concurrent tool calls can each request authorization at the same time.
+  // The UI only has one confirmation slot, so requests are queued FIFO:
+  // one request is displayed and owns the keyboard; when the user decides it,
+  // its Promise resolves and the next queued request is shown. Without this,
+  // a later request overwrites an earlier one, leaving its executor Promise
+  // pending forever and the whole turn stuck in `executing`.
   useEffect(() => {
     queryEngine.setPermissionRequestHandler((req: UIPermissionRequest) =>
       new Promise<PermissionDecision>((resolve) => {
@@ -305,20 +319,52 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
           resolve('allow');
           return;
         }
-        setPermissionRequest({
-          toolName: req.toolName,
-          inputSummary: req.inputSummary,
-          details: req.details,
-          diffs: req.diffs,
-          onDecide: (decision) => {
-            resolve(decision);
-            setPermissionRequest(null);
-            setShowDiffDetail(false);
+
+        const settle = (decision: PermissionDecision) => {
+          if (entry.settled) return;
+          entry.settled = true;
+          const index = permissionQueueRef.current.indexOf(entry);
+          if (index !== -1) permissionQueueRef.current.splice(index, 1);
+          resolve(decision);
+          setShowDiffDetail(false);
+          setPermissionRequest(permissionQueueRef.current[0]?.request ?? null);
+        };
+
+        const entry: PermissionQueueEntry = {
+          resolve,
+          settled: false,
+          request: {
+            toolName: req.toolName,
+            inputSummary: req.inputSummary,
+            details: req.details,
+            diffs: req.diffs,
+            onDecide: settle,
           },
-        });
+        };
+        permissionQueueRef.current.push(entry);
+        // If the confirmation slot is already showing an earlier request, this
+        // entry waits in the queue. React batches concurrent `setPermissionRequest`
+        // updates, so the functional guard is required to keep the first request
+        // visible.
+        setPermissionRequest((current) => current ?? entry.request);
       }),
     );
-    return () => queryEngine.setPermissionRequestHandler(null);
+    return () => {
+      queryEngine.setPermissionRequestHandler(null);
+      // Tear-down safety net: resolving the visible request via the focus
+      // layer's onDispose is not enough when hidden requests are still
+      // queued. Deny every unresolved entry so no executor Promise can hang.
+      const queued = permissionQueueRef.current.splice(0);
+      for (const entry of queued) {
+        if (entry.settled) continue;
+        entry.settled = true;
+        entry.resolve('deny');
+      }
+      // If this effect is cleaned up while the component stays mounted
+      // (e.g. the engine instance is swapped), drop the now-dead UI state.
+      setPermissionRequest(null);
+      setShowDiffDetail(false);
+    };
   }, [queryEngine]);
 
   const addSystemMsg = useCallback((content: string) => {
