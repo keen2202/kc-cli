@@ -1,0 +1,295 @@
+# knip baseline — audit round3 T11 (knip 6.32.2, generated 2026-08-23T07:01:07Z)
+# Dead-export BASELINE ONLY — not a CI gate yet. Do not bulk-fix; dispose via task work.
+# Config: knip.json (entry: src/main.ts + vitest.config.ts; project: src/**/*.{ts,tsx})
+$ npx knip
+Unused files (12)
+src/lsp/index.ts                
+src/services/compaction/full.ts 
+src/services/compaction/index.ts
+src/tools/AgentTool/index.ts    
+src/tools/ConfigTool/index.ts   
+src/tools/DeployTool/index.ts   
+src/tools/MonitorTool/index.ts  
+src/tools/TaskGetTool/index.ts  
+src/tools/TodoWriteTool/index.ts
+src/ui/bridge-protocol.ts       
+src/ui/hooks/useKeybindings.ts  
+src/ui/hooks/useVirtualScroll.ts
+Unused devDependencies (1)
+@types/diff  package.json:58:6
+Unlisted binaries (1)
+bwrap  src/services/sandbox-profiles.ts
+Unresolved imports (29)
+../../src/types/message        test/api/BaseApiClient.test.ts:4:34                   
+../../src/types/tools          test/executors/toolExecutor-permission.test.ts:15:53  
+../../src/types/message        test/executors/toolExecutor-permission.test.ts:16:31  
+../../src/types/tools          test/executors/toolExecutor-plugin-hooks.test.ts:14:65
+../../src/types/message        test/executors/toolExecutor-plugin-hooks.test.ts:15:31
+../../src/types/tools          test/executors/toolExecutor-timeout.test.ts:4:53      
+../../src/types/message        test/executors/toolExecutor-timeout.test.ts:5:31      
+../../src/types/tools          test/executors/toolExecutor.test.ts:3:53              
+../../src/types/message        test/executors/toolExecutor.test.ts:4:31              
+../../src/types/tools          test/integration/multi-agent.test.ts:6:47             
+../../src/types/permissions    test/integration/multi-agent.test.ts:7:37             
+../../src/types/message        test/memory/integration.test.ts:20:34                 
+../../src/types/orchestrator   test/orchestrator/result-aggregator.test.ts:3:37      
+../../src/types/message        test/permissions/interaction.test.ts:5:31             
+../../src/types/message        test/plugins/hooks.test.ts:3:34                       
+../../src/types/tools          test/plugins/hooks.test.ts:4:49                       
+../../src/types/message        test/query/anchor-protection.test.ts:4:34             
+../../src/types/tools          test/query/level-adaptation.test.ts:9:37              
+../../src/types/message        test/query/QueryEngine-coverage-2.test.ts:26:44       
+../../src/types/message        test/query/QueryEngine-coverage-4.test.ts:137:31      
+../../src/types/message        test/query/QueryEngine-coverage.test.ts:30:34         
+../../src/types/message        test/query/QueryEngineCompaction-coverage.test.ts:7:34
+../src/services/compaction.js  test/QueryEngine.test.ts:455:13                       
+../../src/types/tools          test/services/behavioralAdapter.test.ts:8:37          
+../../src/types/message        test/services/compaction-coverage.test.ts:10:34       
+../../src/types/message        test/services/compaction.test.ts:2:34                 
+../../src/types/message        test/services/memoryExtraction-enhanced.test.ts:6:34  
+../../src/types/message        test/services/stateValidator.test.ts:3:74             
+../../src/types/message        test/state/session-tree.test.ts:3:34                  
+Unused exports (101)
+getPromptTemplate                function  src/agp/adapters/prompt-adapter.ts:72:17     
+renderPromptTemplate             function  src/agp/adapters/prompt-adapter.ts:81:17     
+applyEvolvedPrompt               function  src/agp/adapters/prompt-adapter.ts:98:17     
+createDefaultSystemPrompt        function  src/agp/adapters/prompt-adapter.ts:124:17    
+createBeginnerSystemPrompt       function  src/agp/adapters/prompt-adapter.ts:164:17    
+createAdvancedSystemPrompt       function  src/agp/adapters/prompt-adapter.ts:183:17    
+AGP_STATE_FORMAT                           src/agp/dynamic-manager.ts:19:14             
+resetDynamicManager              function  src/agp/dynamic-manager.ts:197:17            
+DEFAULT_AGP_CONFIG                         src/agp/registry.ts:33:14                    
+hasGlobalRegistry                function  src/agp/registry.ts:229:17                   
+DEFAULT_SEPL_CONFIG                        src/agp/sepl/protocol.ts:489:14              
+generateHypothesisId             function  src/agp/sepl/protocol.ts:506:17              
+generateModificationId           function  src/agp/sepl/protocol.ts:511:17              
+createEmptyEvolvableState        function  src/agp/sepl/protocol.ts:518:17              
+buildEvolvableState              function  src/agp/sepl/protocol.ts:525:17              
+resetServerInterface             function  src/agp/server-interface.ts:292:17           
+isResourceType                   function  src/agp/types.ts:27:17                       
+isEvolvable                      function  src/agp/types.ts:35:17                       
+createFunctionCallingRep         function  src/agp/types.ts:89:17                       
+qualifiedResourceName            function  src/agp/types.ts:119:17                      
+parseQualifiedName               function  src/agp/types.ts:129:17                      
+createEvolutionConfig            function  src/agp/types.ts:179:17                      
+resetVersionManager              function  src/agp/version-manager.ts:400:17            
+ApiError                                   src/api/index.ts:5:25                        
+CachePrefixService                         src/api/index.ts:13:10                       
+buildCacheStrategy                         src/api/index.ts:13:30                       
+canonicalStringify                         src/api/index.ts:13:50                       
+OpenAICompatibleClient                     src/api/index.ts:16:10                       
+AnthropicClient                            src/api/index.ts:19:10                       
+OllamaClient                               src/api/index.ts:22:10                       
+PROVIDER_MODELS                            src/api/index.ts:31:10                       
+resolveModel                               src/api/index.ts:31:27                       
+VERSION                                    src/bootstrap/app.ts:5:10                    
+initLogLevel                               src/bootstrap/app.ts:6:10                    
+runAgent                                   src/bootstrap/app.ts:6:24                    
+buildSystemPrompt                          src/bootstrap/app.ts:6:34                    
+buildSystemPrompt                          src/bootstrap/init-sequence.ts:12:10         
+LARGE_MAX_BUFFER                           src/constants.ts:7:14                        
+EXTENDED_TOOL_TIMEOUT_MS                   src/constants.ts:13:14                       
+AGENT_TOOL_TIMEOUT_MS                      src/constants.ts:16:14                       
+MCP_TOOL_NAME_PATTERN                      src/mcp/tool-bridge.ts:32:14                 
+CODE_BLOCK_RATIO_THRESHOLD                 src/memory/memory-extraction-guard.ts:23:14  
+DEFAULT_MAX_ENTRIES                        src/memory/memory-extraction-guard.ts:27:14  
+resetLlmExtractionState          function  src/memory/memoryExtraction.ts:443:17        
+getScoreCacheHitRate             function  src/memory/relevanceSearch.ts:319:17         
+getAgeText                                 src/memory/relevanceSearch.ts:363:10         
+getAgeText                                 src/memory/scanner.ts:93:10                  
+PROTECTED_PATH_SUBSTRINGS_REGEX            src/permissions/protectedPaths.ts:67:14      
+PROTECTED_PATH_SUBSTRINGS                  src/permissions/protectedPaths.ts:72:14      
+WINDOWS_PROTECTED_PATTERNS                 src/permissions/protectedPaths.ts:110:14     
+shellAwareNormalize              function  src/permissions/readonlyCommands.ts:18:17    
+READONLY_BASH_PATTERNS                     src/permissions/readonlyCommands.ts:61:14    
+READONLY_GIT_COMMANDS                      src/permissions/readonlyCommands.ts:87:14    
+discoverPlugins                            src/plugins/index.ts:2:10                    
+loadPlugin                                 src/plugins/index.ts:2:27                    
+getConsistencyManager            function  src/services/cache/consistency.ts:191:17     
+cacheKey                                   src/services/cache/index.ts:8:23             
+contentKey                                 src/services/cache/index.ts:8:33             
+CacheManager                               src/services/cache/index.ts:9:10             
+stableHash                                 src/services/cache/index.ts:10:10            
+CacheConsistencyManager                    src/services/cache/index.ts:11:10            
+getConsistencyManager                      src/services/cache/index.ts:11:35            
+FileContentCache                           src/services/cache/index.ts:12:10            
+formatCacheDashboard             function  src/services/cache/index.ts:17:17            
+MAX_TOKEN_LIMIT                            src/services/compaction/functional.ts:18:14  
+getCompactionStrategy            function  src/services/compaction/functional.ts:309:17 
+DiffLineRow                                src/ui/components/DiffPreview.tsx:189:34     
+FileTab                                    src/ui/components/DiffPreview.tsx:189:47     
+deleteAfter                      function  src/ui/components/InputBox.ts:94:17          
+moveCursorUp                     function  src/ui/components/InputBox.ts:114:17         
+moveCursorDown                   function  src/ui/components/InputBox.ts:125:17         
+moveToLineEnd                    function  src/ui/components/InputBox.ts:142:17         
+deleteToLineEnd                  function  src/ui/components/InputBox.ts:162:17         
+default                          function  src/ui/components/OperationSummary.tsx:203:16
+SLASH_COMMAND_ALIASES                      src/ui/components/slash-commands.ts:12:14    
+isAgentPrefixed                  function  src/ui/event-normalizer.ts:86:17             
+useFocusStack                    function  src/ui/hooks/useFocusLayer.ts:21:17          
+formatTextDelta                            src/ui/index.ts:1:10                         
+formatToolCall                             src/ui/index.ts:1:27                         
+formatDiff                                 src/ui/index.ts:1:61                         
+formatSeparator                            src/ui/index.ts:1:73                         
+formatStatusLine                           src/ui/index.ts:1:104                        
+formatCodeBlock                            src/ui/index.ts:1:122                        
+isBareMode                                 src/ui/index.ts:1:152                        
+Spinner                                    src/ui/index.ts:2:10                         
+updateStatus                               src/ui/index.ts:3:10                         
+clearStatus                                src/ui/index.ts:3:24                         
+computeDiff                                src/ui/index.ts:4:10                         
+renderDiffLines                            src/ui/index.ts:4:23                         
+renderInkUI                                src/ui/index.ts:5:10                         
+UIEventBus                                 src/ui/index.ts:6:10                         
+getTheme                                   src/ui/index.ts:7:10                         
+listThemes                                 src/ui/index.ts:7:20                         
+BREAKPOINTS                                src/ui/layout.ts:14:14                       
+getCurrentTheme                  function  src/ui/theme.ts:393:17                       
+resolveColor                     function  src/ui/theme.ts:400:17                       
+hasApiKey                        function  src/utils/api-key.ts:58:17                   
+TimeoutError                     class     src/utils/async-helpers.ts:8:14              
+withRetry                        function  src/utils/async-helpers.ts:70:23             
+getModifiedFiles                 function  src/utils/git.ts:225:23                      
+safeTimeoutMs                    function  src/utils/timeout.ts:23:17                   
+Unused exported types (131)
+ACPRequest                  type       src/acp/index.ts:2:15                       
+ACPResponse                 type       src/acp/index.ts:2:27                       
+ACPNotification             type       src/acp/index.ts:2:40                       
+ACPSessionInfo              type       src/acp/index.ts:2:57                       
+ResourceMetadata            type       src/agp/protocol.ts:88:13                   
+AgentMetadata               interface  src/agp/protocol.ts:105:18                  
+ToolMetadata                interface  src/agp/protocol.ts:118:18                  
+EnvMetadata                 interface  src/agp/protocol.ts:129:18                  
+MemMetadata                 interface  src/agp/protocol.ts:138:18                  
+SafetyInvariant             interface  src/agp/protocol.ts:271:18                  
+FailureSignature            interface  src/agp/sepl/protocol.ts:38:18              
+EvidenceEventRef            interface  src/agp/sepl/protocol.ts:48:18              
+EvalSplit                   type       src/agp/sepl/protocol.ts:86:13              
+SplitRepeat                 interface  src/agp/sepl/protocol.ts:89:18              
+SplitResult                 interface  src/agp/sepl/protocol.ts:99:18              
+GateSplitDetail             interface  src/agp/sepl/protocol.ts:105:18             
+GateDecision                interface  src/agp/sepl/protocol.ts:117:18             
+AcceptanceGateConfig        interface  src/agp/sepl/protocol.ts:129:18             
+EvaluatorBackendOptions     interface  src/agp/sepl/protocol.ts:141:18             
+EvaluatorBackend            interface  src/agp/sepl/protocol.ts:156:18             
+SweBenchEvaluatorBackend    interface  src/agp/sepl/protocol.ts:171:18             
+EvolutionEvalConfig         interface  src/agp/sepl/protocol.ts:182:18             
+ProposalAudit               interface  src/agp/sepl/protocol.ts:198:18             
+ProposalCandidate           interface  src/agp/sepl/protocol.ts:210:18             
+TraceSpace                  interface  src/agp/sepl/protocol.ts:223:18             
+Hypothesis                  interface  src/agp/sepl/protocol.ts:247:18             
+HypothesisSpace             interface  src/agp/sepl/protocol.ts:264:18             
+Modification                interface  src/agp/sepl/protocol.ts:276:18             
+ModificationSpace           interface  src/agp/sepl/protocol.ts:295:18             
+ObjectiveSpec               interface  src/agp/sepl/protocol.ts:305:18             
+EvaluationResult            interface  src/agp/sepl/protocol.ts:323:18             
+EvaluationSpace             interface  src/agp/sepl/protocol.ts:340:18             
+EvolvableVariable           interface  src/agp/sepl/protocol.ts:354:18             
+EvolvableState              interface  src/agp/sepl/protocol.ts:376:18             
+SEPLOperator                interface  src/agp/sepl/protocol.ts:392:18             
+SEPLOutput                  interface  src/agp/sepl/protocol.ts:402:18             
+EvolutionCycleState         interface  src/agp/sepl/protocol.ts:421:18             
+EvolutionCycleResult        interface  src/agp/sepl/protocol.ts:447:18             
+SEPLConfig                  interface  src/agp/sepl/protocol.ts:467:18             
+ServerRequest               interface  src/agp/server-interface.ts:27:18           
+LLMStreamEvent              type       src/api/index.ts:7:3                        
+TokenUsage                  type       src/api/index.ts:8:3                        
+LLMResponse                 type       src/api/index.ts:10:3                       
+FrozenPrefix                type       src/api/index.ts:14:15                      
+EphemeralContent            type       src/api/index.ts:14:29                      
+CacheStrategyType           type       src/api/index.ts:14:64                      
+OpenAICompatibleConfig      type       src/api/index.ts:17:15                      
+AnthropicConfig             type       src/api/index.ts:20:15                      
+OllamaConfig                type       src/api/index.ts:23:15                      
+ProviderModelInfo           type       src/api/index.ts:30:28                      
+TaskComplexity              type       src/api/prompts/task-prompts.ts:35:13       
+InstructionSurfaceCategory  type       src/api/prompts/types.ts:33:13              
+IMRichTextElement           interface  src/im/protocol.ts:26:18                    
+IMSessionConfig             interface  src/im/protocol.ts:70:18                    
+IMServerConfig              interface  src/im/protocol.ts:76:18                    
+IMEngineEvent               interface  src/im/protocol.ts:98:18                    
+TextDocumentEdit            interface  src/lsp/navigation.ts:17:18                 
+CreateFile                  interface  src/lsp/navigation.ts:22:18                 
+RenameFile                  interface  src/lsp/navigation.ts:27:18                 
+DeleteFile                  interface  src/lsp/navigation.ts:33:18                 
+MCPConfig                   type       src/mcp/index.ts:8:3                        
+MCPTool                     type       src/mcp/index.ts:9:3                        
+MCPToolResult               type       src/mcp/index.ts:10:3                       
+MCPInitializeResult         type       src/mcp/index.ts:11:3                       
+MCPConnectionStatus         type       src/mcp/index.ts:12:3                       
+TransportType               type       src/mcp/index.ts:13:3                       
+TransportType               type       src/mcp/types.ts:4:13                       
+MCPResource                 interface  src/mcp/types.ts:36:18                      
+MCPPrompt                   interface  src/mcp/types.ts:43:18                      
+MCPListResourcesResult      interface  src/mcp/types.ts:85:18                      
+MCPListPromptsResult        interface  src/mcp/types.ts:89:18                      
+MCPErrorCode                enum       src/mcp/types.ts:118:13                     
+ParseStats                  interface  src/memory/memory-extraction-guard.ts:131:18
+MemorySignature             interface  src/memory/protocol.ts:16:18                
+ConsolidationLock           interface  src/memory/protocol.ts:117:18               
+MemoryLlmExtractionConfig   interface  src/memory/protocol.ts:127:18               
+EvolutionEventType          type       src/orchestrator/event-bus.ts:15:13         
+SubAgentIdentity            interface  src/orchestrator/protocol.ts:20:18          
+MultiAgentEvent             type       src/orchestrator/protocol.ts:74:31          
+SubAgentError               type       src/orchestrator/protocol.ts:93:13          
+PermissionAllowDecision     interface  src/permissions/protocol.ts:13:18           
+PermissionDenyDecision      interface  src/permissions/protocol.ts:22:18           
+PermissionPassthrough       interface  src/permissions/protocol.ts:40:18           
+PermissionRuleSource        type       src/permissions/protocol.ts:62:13           
+UIPermissionDecision        type       src/permissions/protocol.ts:109:13          
+Plugin                      type       src/plugins/index.ts:3:15                   
+PluginHooks                 type       src/plugins/index.ts:3:23                   
+PluginManifest              type       src/plugins/index.ts:3:36                   
+PluginStatus                type       src/plugins/index.ts:3:52                   
+BackupRef                   interface  src/query/completion-report.ts:34:18        
+Role                        type       src/query/protocol.ts:9:13                  
+Message                     interface  src/query/protocol.ts:11:18                 
+ToolResultMessage           type       src/query/protocol.ts:33:13                 
+SystemMessage               interface  src/query/protocol.ts:49:18                 
+ToolMessage                 interface  src/query/protocol.ts:54:18                 
+ContextEfficiencyConfig     interface  src/query/protocol.ts:135:18                
+ReconnectState              type       src/services/autoReconnect.ts:21:13         
+VersionedEntry              interface  src/services/cache/consistency.ts:4:18      
+CacheEntry                  type       src/services/cache/index.ts:8:50            
+CacheStats                  type       src/services/cache/index.ts:8:67            
+TieredCacheOptions          type       src/services/cache/index.ts:8:84            
+CacheCategory               type       src/services/cache/index.ts:9:46            
+GlobalCacheStats            type       src/services/cache/index.ts:9:66            
+ErrorClass                  type       src/services/error-classifier.ts:5:13       
+ServiceStatus               type       src/services/healthCheck.ts:6:13            
+ToolSandboxPolicy           interface  src/services/sandbox-policy.ts:22:18        
+IssueType                   type       src/services/stateValidator.ts:6:13         
+IssueSeverity               type       src/services/stateValidator.ts:13:13        
+FileOperationKind           type       src/state/file-operation-journal.ts:10:13   
+MultiAgentEvent             type       src/state/types.ts:6:27                     
+SubAgentResult              type       src/state/types.ts:6:44                     
+TokenUsage                  type       src/state/types.ts:6:60                     
+UserInteractionRequest      interface  src/tools/protocol.ts:17:18                 
+ToolModule                  interface  src/tools/registry.ts:11:18                 
+TaskRecord                  interface  src/tools/TaskStore.ts:3:18                 
+CanonicalEventType          type       src/ui/event-normalizer.ts:13:13            
+StreamActivity              type       src/ui/hooks/useStreamingEvents.ts:11:13    
+EventMiddleware             type       src/ui/index.ts:6:27                        
+EventHandler                type       src/ui/index.ts:6:49                        
+UIEvent                     type       src/ui/index.ts:6:68                        
+Theme                       type       src/ui/index.ts:7:37                        
+ThemeTokens                 type       src/ui/index.ts:7:49                        
+ThemeColors                 type       src/ui/index.ts:7:67                        
+BreakpointName              type       src/ui/layout.ts:3:13                       
+Density                     type       src/ui/layout.ts:4:13                       
+ThemeSyntax                 interface  src/ui/theme.ts:18:18                       
+ThemeDiff                   interface  src/ui/theme.ts:26:18                       
+SidebarSection              type       src/ui/view-protocol.ts:14:13               
+ThinkingStepLabel           type       src/ui/view-protocol.ts:119:13              
+WithRetryOptions            interface  src/utils/async-helpers.ts:46:18            
+WalkEntry                   interface  src/utils/fs-walk.ts:6:18                   
+Unused exported enum members (2)
+RefactorExtract  CodeActionKind  src/lsp/code-actions.ts:11:3
+RefactorInline   CodeActionKind  src/lsp/code-actions.ts:12:3
+Duplicate exports (1)
+OperationSummary|default  src/ui/components/OperationSummary.tsx
+Configuration hints (2)
+src/main.ts         knip.json  Remove redundant entry pattern
+vitest.config.ts    knip.json  Remove redundant entry pattern
+
+[knip exit code: 0]

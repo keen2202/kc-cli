@@ -386,24 +386,6 @@ export class ToolExecutor {
         }
       }
 
-      // 2b. Tool prepare hook (may modify input, skip execution, or provide early result)
-      if ((tool as any).prepare) {
-        try {
-          const prepareResult = await (tool as any).prepare(effectiveInput, context);
-          if (prepareResult.skip) {
-            const skipResult = (prepareResult.result ?? {
-              toolCallId: toolCall.id,
-              output: 'Tool execution skipped by prepare hook',
-              isError: false,
-            }) as ToolResult;
-            return skipResult;
-          }
-          effectiveInput = prepareResult.input;
-        } catch (err) {
-          logger.tools.error('[Prepare] hook error: ' + String(err));
-        }
-      }
-
       // 3. Permission check
       const permissionResult = await this.checkPermission(toolCall, tool, context);
       if (permissionResult.behavior === 'deny') {
@@ -515,17 +497,8 @@ export class ToolExecutor {
         };
       }
 
-      // 5. Tool finalize hook (may transform result)
+      // 5. Plugin postToolUse hook (may override result)
       let finalResult = result;
-      if ((tool as any).finalize) {
-        try {
-          finalResult = (await (tool as any).finalize(effectiveInput, result, context)) as ToolResult;
-        } catch (err) {
-          logger.tools.error('[Finalize] hook error: ' + String(err));
-        }
-      }
-
-      // 6. Plugin postToolUse hook (may override result)
       if (this.pluginHooks?.postToolUse) {
         try {
           const postResult = await this.pluginHooks.postToolUse(toolCall.toolName, effectiveInput, finalResult, context);

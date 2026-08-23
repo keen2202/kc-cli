@@ -1,6 +1,6 @@
 # Memory System
 
-File-based persistent memory with YAML frontmatter, relevance search, and consolidation.
+File-based persistent memory with YAML frontmatter, relevance search, and LLM auto-extraction. (Scheduled consolidation is PARKED — removed in audit round3 T10; see docs/specs/memory-consolidation-pending.md.)
 
 ## Storage
 
@@ -159,7 +159,7 @@ Pre-query memory loading into system prompt:
 
 ### Consolidation
 `src/services/memoryConsolidation.ts`:
-- Scheduled after consolidation threshold (24 hours, 5 sessions minimum)
+- [PARKED] Scheduled consolidation threshold (24 hours, 5 sessions minimum) — feature removed in audit round3 T10, pending a dedicated spec (docs/specs/memory-consolidation-pending.md)
 - Merges related memories
 - Prunes low-confidence entries
 - Updates descriptions and cross-references

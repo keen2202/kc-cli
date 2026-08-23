@@ -4,6 +4,8 @@
 // turn-budget extension. Pure move — event semantics preserved.
 
 import { logger } from '../services/logger';
+import { getOperationAuditLog } from '../services/operation-audit-log';
+import { getState } from '../bootstrap/state';
 import { autoCommitAll } from '../utils/git';
 import type { AgentEvent } from '../state/types';
 import type { AssistantMessage } from './protocol';
@@ -44,6 +46,40 @@ export interface TurnControlDeps {
   minTurns: number;
   cwd: string;
   steer(message: string): void;
+}
+
+/**
+ * H1 (round3): surface a failed auto-commit instead of silently swallowing it.
+ * Auto-commit is best-effort — a failure must never interrupt the turn — but
+ * it protects the rollback safety net, so every failure is (a) warn-logged
+ * under the `query` module and (b) recorded in the operation audit trail so a
+ * completed session can be reconstructed. Audit recording itself is
+ * best-effort and mirrors toolExecutor.recordOperationAudit.
+ */
+function surfaceAutoCommitFailure(context: string, err: unknown): void {
+  logger.query.warn('[auto-commit] failed', {
+    context,
+    error: err instanceof Error ? err.message : String(err),
+  });
+  try {
+    let sessionId = 'unknown';
+    try {
+      sessionId = getState().sessionId;
+    } catch {
+      // Bootstrap state not initialized (e.g. unit tests) — keep 'unknown'.
+    }
+    getOperationAuditLog().record({
+      sessionId,
+      tool: 'git',
+      inputSummary: context,
+      permissionDecision: 'allow',
+      sandboxed: false,
+      isError: true,
+      durationMs: 0,
+    });
+  } catch {
+    // Auditing must never disrupt the turn (same contract as toolExecutor).
+  }
 }
 
 /**
@@ -145,8 +181,9 @@ export async function* afterStreamingTurn(
         logger.query.info(`[QueryEngine] Periodic auto-commit at turn ${turnCount}`);
         yield textDeltaEvent(`[Auto-commit checkpoint at turn ${turnCount}]\n`);
       }
-    } catch {
-      // Non-fatal
+    } catch (err) {
+      // H1 (round3): non-fatal — surface instead of swallowing.
+      surfaceAutoCommitFailure(`periodic auto-commit checkpoint at turn ${turnCount}`, err);
     }
   }
 
@@ -183,8 +220,9 @@ export async function* afterStreamingTurn(
           logger.query.info('[QueryEngine] Auto-committed changes on turn limit');
           yield textDeltaEvent(`[Auto-committed ${deps.modifiedFiles.size} modified file(s)]\n`);
         }
-      } catch {
-        // Non-fatal
+      } catch (err) {
+        // H1 (round3): non-fatal — surface instead of swallowing.
+        surfaceAutoCommitFailure('auto-commit on turn limit reached', err);
       }
     }
   }

@@ -23,7 +23,7 @@ import {
   hasFeedbackSignal,
   resetExtractionState,
   type LlmExtractionClient,
-} from '../../src/services/memoryExtraction';
+} from '../../src/memory/memoryExtraction';
 import { getTelemetry, resetTelemetry } from '../../src/memory/telemetry';
 import { DEFAULT_MEMORY_CONFIG } from '../../src/memory/protocol';
 import type { MemoryConfig } from '../../src/memory/types';

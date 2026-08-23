@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   extractMemoriesFromMessages,
   resetExtractionState,
-} from '../../src/services/memoryExtraction';
+} from '../../src/memory/memoryExtraction';
 import type { ChatMessage } from '../../src/types/message';
 
 function makeUserMessage(content: string): ChatMessage {

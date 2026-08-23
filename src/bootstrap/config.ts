@@ -5,13 +5,17 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import { logger } from '../services/logger';
+// T17: provider id set is owned by the PROVIDER_SPECS table (import-free leaf
+// module — safe to evaluate this early at boot).
+import { PROVIDER_IDS } from '../api/provider-specs';
 
 export const ConfigSchema = z.object({
   // API Configuration
   apiKey: z.string().optional(),
   apiBaseUrl: z.string().optional(),
   model: z.string().default('deepseek-v4-pro'),
-  provider: z.enum(['anthropic', 'openai', 'ollama', 'deepseek', 'openai-compatible', 'qwen', 'glm', 'mimo', 'kimi', 'step', 'gemini']).default('deepseek'),
+  // Derived from PROVIDER_SPECS — adding a provider row there extends this enum.
+  provider: z.enum(PROVIDER_IDS).default('deepseek'),
 
   // Permission Configuration
   permissionMode: z.enum(['default', 'bypassPermissions', 'dontAsk', 'plan', 'acceptEdits', 'auto']).default('default'),

@@ -2,6 +2,9 @@
 // and P2 worker_threads isolation with wall-clock timeout
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // ── Hoisted mock for worker_threads so tests can control Worker behaviour ──
 const { workerMock } = vi.hoisted(() => {
@@ -153,6 +156,101 @@ describe('[S1] resolveAllowed — AC-S1.1', () => {
   });
 });
 
+describe('[C2] resolveAllowed traversal hardening', () => {
+  it('rejects sibling directory sharing the whitelist prefix (/data/dbs-backup)', () => {
+    mockState({ sql: { allowedPaths: ['/data/dbs'], allowWrite: false } });
+    expect(resolveAllowed(getState(), '/data/dbs-backup/x.db', '/test')).toBeNull();
+  });
+
+  it('rejects input containing a ".." segment (fail-closed)', () => {
+    mockState({ sql: { allowedPaths: ['/data/dbs'], allowWrite: false } });
+    expect(resolveAllowed(getState(), '/data/dbs/../x.db', '/test')).toBeNull();
+  });
+
+  it('rejects ".." even when normalization would land inside the whitelist', () => {
+    // /data/dbs/../dbs/x.db normalizes to /data/dbs/x.db (inside), but the raw
+    // input carries a '..' segment and must fail closed regardless.
+    mockState({ sql: { allowedPaths: ['/data/dbs'], allowWrite: false } });
+    expect(resolveAllowed(getState(), '/data/dbs/../dbs/x.db', '/test')).toBeNull();
+  });
+
+  it('rejects relative-path traversal joined via cwd (../ escape)', () => {
+    mockState({ sql: { allowedPaths: ['/test/data'], allowWrite: false } });
+    expect(resolveAllowed(getState(), '../escape.db', '/test/data')).toBeNull();
+  });
+
+  it('allows a target equal to the whitelist entry itself (exact boundary)', () => {
+    mockState({ sql: { allowedPaths: ['/data/dbs'], allowWrite: false } });
+    expect(resolveAllowed(getState(), '/data/dbs', '/test')).toEqual({
+      path: '/data/dbs',
+      readonly: true,
+    });
+  });
+
+  it('allows a nested path under the whitelist boundary', () => {
+    mockState({ sql: { allowedPaths: ['/data/dbs'], allowWrite: false } });
+    expect(resolveAllowed(getState(), '/data/dbs/sub/app.db', '/test')).toEqual({
+      path: '/data/dbs/sub/app.db',
+      readonly: true,
+    });
+  });
+
+  it('rejects a symlink inside the whitelist pointing outside (real fs)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'sqltool-c2-'));
+    try {
+      const inside = join(tmp, 'dbs');
+      const outside = join(tmp, 'outside');
+      mkdirSync(inside);
+      mkdirSync(outside);
+      const secret = join(outside, 'secret.db');
+      writeFileSync(secret, 'not a real database');
+      symlinkSync(secret, join(inside, 'leak.db'));
+
+      mockState({ sql: { allowedPaths: [inside], allowWrite: false } });
+      expect(resolveAllowed(getState(), join(inside, 'leak.db'), '/test')).toBeNull();
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('still allows a real file directly inside the whitelist (real fs)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'sqltool-c2-'));
+    try {
+      const inside = join(tmp, 'dbs');
+      mkdirSync(inside);
+      const legit = join(inside, 'app.db');
+      writeFileSync(legit, 'not a real database');
+
+      mockState({ sql: { allowedPaths: [inside], allowWrite: false } });
+      expect(resolveAllowed(getState(), legit, '/test')).toEqual({
+        path: legit,
+        readonly: true,
+      });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('allows an internal symlink whose target stays inside the whitelist (real fs)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'sqltool-c2-'));
+    try {
+      const inside = join(tmp, 'dbs');
+      mkdirSync(inside);
+      const real = join(inside, 'real.db');
+      writeFileSync(real, 'not a real database');
+      symlinkSync(real, join(inside, 'alias.db'));
+
+      mockState({ sql: { allowedPaths: [inside], allowWrite: false } });
+      expect(resolveAllowed(getState(), join(inside, 'alias.db'), '/test')).toEqual({
+        path: join(inside, 'alias.db'),
+        readonly: true,
+      });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('[S1] tool.call rejection paths — AC-S1.1/S1.2/S1.3', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -172,6 +270,17 @@ describe('[S1] tool.call rejection paths — AC-S1.1/S1.2/S1.3', () => {
       baseCtx(),
     );
     expect(r.isError).toBe(true);
+  });
+
+  it('rejects traversal database path via call (AC-C2)', async () => {
+    mockState({ sql: { allowedPaths: ['/data/dbs'], allowWrite: false } });
+    for (const database of ['/data/dbs-backup/x.db', '/data/dbs/../x.db']) {
+      const r = await tool.call(
+        { query: 'SELECT 1', database, timeout: 30 },
+        baseCtx(),
+      );
+      expect(r.isError).toBe(true);
+    }
   });
 
   it('blocks ATTACH via call (AC-S1.2)', async () => {

@@ -1,8 +1,13 @@
-import type { LLMProvider } from '../api';
+import type { ApiKeyPattern, LLMProvider } from '../api/provider-specs';
+import { PROVIDER_SPECS } from '../api/provider-specs';
 
 /**
  * Validate an API key for the given provider.
  * Returns null if valid, or an error message string if invalid.
+ *
+ * Provider-specific format rules are read from the PROVIDER_SPECS table (T17);
+ * this function only applies them. The rejection messages are historical
+ * strings — do not reword them (tests and users match on them verbatim).
  */
 export function validateApiKey(key: string, provider: LLMProvider): string | null {
   if (!key || key.trim().length === 0) {
@@ -16,35 +21,27 @@ export function validateApiKey(key: string, provider: LLMProvider): string | nul
     return `API key is too short (${trimmed.length} chars). A valid key is typically 20+ characters.`;
   }
 
+  // Unknown-at-runtime ids (JS callers): no format enforced, same as before.
+  const pattern: ApiKeyPattern = PROVIDER_SPECS[provider]?.keyPattern ?? { kind: 'none' };
+
   // Provider-specific format checks
-  switch (provider) {
-    case 'anthropic':
-      if (!trimmed.startsWith('sk-ant-')) {
-        return 'Invalid Anthropic key format — keys should start with "sk-ant-".';
+  switch (pattern.kind) {
+    case 'prefix': {
+      if (!pattern.prefixes.some(prefix => trimmed.startsWith(prefix))) {
+        const label = pattern.messageLabel ?? provider;
+        return `Invalid ${label} key format — keys should start with "${pattern.prefixes[0]}".`;
       }
       break;
-    case 'openai':
-    case 'deepseek':
-    case 'qwen':
-    case 'glm':
-    case 'mimo':
-    case 'kimi':
-    case 'step':
-    case 'openai-compatible':
-      if (!trimmed.startsWith('sk-') && !trimmed.startsWith('fk-')) {
-        return `Invalid ${provider} key format — keys should start with "sk-".`;
+    }
+    case 'minLength': {
+      if (trimmed.length < pattern.minLength) {
+        const label = pattern.messageLabel ?? provider;
+        return `Invalid ${label} key — keys should be at least ${pattern.minLength} characters.`;
       }
       break;
-    case 'gemini':
-      // Google AI Studio keys are typically alphanumeric strings without a fixed prefix
-      if (trimmed.length < 20) {
-        return 'Invalid Gemini key — keys should be at least 20 characters.';
-      }
-      break;
-    case 'ollama':
-      // Ollama doesn't use API keys
-      break;
-    default:
+    }
+    case 'none':
+      // No API-key format enforced for this provider
       break;
   }
 

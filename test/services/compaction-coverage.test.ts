@@ -6,7 +6,7 @@ import {
   formatCompactSummary,
   COMPACTABLE_TOOLS,
   MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES,
-} from '../../src/services/compaction';
+} from '../../src/services/compaction/functional';
 import type { ChatMessage } from '../../src/types/message';
 
 function makeMsg(role: string, content?: string, opts?: Partial<ChatMessage>): ChatMessage {

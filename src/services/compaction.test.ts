@@ -4,9 +4,9 @@ import {
   shouldCompact,
   MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES,
   COMPACTABLE_TOOLS,
-} from './compaction';
+} from './compaction/functional';
 import type { ChatMessage } from '../query/protocol';
-import type { CompactConfig } from './compaction';
+import type { CompactConfig } from './compaction/functional';
 
 function makeMessages(count: number, contentLength: number = 100): ChatMessage[] {
   return Array.from({ length: count }, (_, i) => ({

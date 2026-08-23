@@ -61,7 +61,8 @@ export class OpenAICompatibleClient extends BaseApiClient {
   protected buildRequestBody(config: LLMRequestConfig): Record<string, unknown> {
     const body: Record<string, unknown> = {
       model: this.model,
-      messages: this.formatMessagesCacheAware(config.messages, config.ephemeralContent),
+      // T18/M4 boundary: reclaim the concrete shapes (see protocol-decoupling test).
+      messages: this.formatMessagesCacheAware(config.messages as ChatMessage[], config.ephemeralContent),
       stream: config.stream ?? true,
     };
 
@@ -79,7 +80,7 @@ export class OpenAICompatibleClient extends BaseApiClient {
     }
 
     if (config.tools && config.tools.length > 0) {
-      body.tools = this.formatToolsCacheAware(config.tools);
+      body.tools = this.formatToolsCacheAware(config.tools as ToolDefinition[]);
     }
 
     // OpenAI: enable prompt caching for supported models
@@ -138,40 +139,30 @@ export class OpenAICompatibleClient extends BaseApiClient {
   }
 
   /**
-   * Send a chat completion request
+   * Send a chat completion request.
+   * Transport + error pipeline delegated to BaseApiClient.withChatErrorHandling;
+   * only payload building and response parsing are provider-specific here.
    */
   async chat(config: LLMRequestConfig): Promise<LLMResponse> {
     if (!this.apiKey) {
       throw new ApiError(`${this.provider} API key is required. Use /key to set.`, 401);
     }
-    const requestBody = this.buildRequestBody({ ...config, stream: false });
-    const headers = this.buildHeaders();
-
-    // Provider-specific endpoint
-    const endpoint = this.getEndpoint();
-
-    try {
-      const response = await fetch(this.buildUrl(endpoint), {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
+    return this.withChatErrorHandling(
+      'OpenAI Compatible',
+      {
+        url: this.buildUrl(this.getEndpoint()),
+        body: this.buildRequestBody({ ...config, stream: false }),
         signal: config.abortSignal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'OpenAI Compatible API error', response);
-      }
-
-      const data = await response.json() as Record<string, unknown>;
-      return this.parseResponse(data);
-    } catch (error) {
-      this.handleApiError(error, 'Failed to call OpenAI Compatible API');
-    }
+      },
+      data => this.parseResponse(data),
+    );
   }
 
   /**
-   * Stream chat completion response
+   * Stream chat completion response.
+   * Transport + catch-yield-error-finally-cancel pipeline delegated to
+   * BaseApiClient.withStreamErrorHandling; buffer resets and the SSE frame
+   * parser remain provider-specific.
    */
   async *streamChat(config: LLMRequestConfig): AsyncGenerator<LLMStreamEvent> {
     if (!this.apiKey) {
@@ -182,41 +173,16 @@ export class OpenAICompatibleClient extends BaseApiClient {
     this.thinkingParser.reset();
     this.streamUsage = null;
 
-    const requestBody = this.buildRequestBody({ ...config, stream: true });
-    const headers = {
-      ...this.buildHeaders(),
-      'Accept': 'text/event-stream',
-    };
-
-    const endpoint = this.getEndpoint();
-
-    let response: Response | undefined;
-    try {
-      response = await fetch(this.buildUrl(endpoint), {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
+    yield* this.withStreamErrorHandling(
+      'OpenAI Compatible',
+      {
+        url: this.buildUrl(this.getEndpoint()),
+        body: this.buildRequestBody({ ...config, stream: true }),
+        headers: { ...this.buildHeaders(), 'Accept': 'text/event-stream' },
         signal: config.abortSignal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'OpenAI Compatible API error', response);
-      }
-
-      if (!response.body) {
-        throw new Error('Response body is null');
-      }
-
-      yield* this.parseStreamResponse(response.body);
-    } catch (error) {
-      yield {
-        type: 'error',
-        error: error instanceof Error ? error : new Error(String(error)),
-      };
-    } finally {
-      await response?.body?.cancel();
-    }
+      },
+      body => this.parseStreamResponse(body),
+    );
   }
 
   /**
@@ -229,39 +195,20 @@ export class OpenAICompatibleClient extends BaseApiClient {
   }
 
   /**
-   * Get model information
+   * Get model information.
+   * Reads from capabilities.ts (single source of truth, audit round3 T16) —
+   * no local model table; the lookup is scoped to this.provider. `maxTokens`
+   * carries the model CONTEXT WINDOW (matching the previous table's semantics).
    */
   getModelInfo() {
-    const modelInfo: Record<string, { maxTokens: number }> = {
-      // OpenAI models
-      'gpt-4': { maxTokens: 8192 },
-      'gpt-4-turbo': { maxTokens: 128000 },
-      'gpt-4o': { maxTokens: 128000 },
-      'gpt-4o-mini': { maxTokens: 128000 },
-      'gpt-3.5-turbo': { maxTokens: 16385 },
-      // Qwen models
-      'qwen-turbo': { maxTokens: 8192 },
-      'qwen-plus': { maxTokens: 32768 },
-      'qwen-max': { maxTokens: 32768 },
-      'qwen-long': { maxTokens: 1000000 },
-      // DeepSeek models
-      'deepseek-v4-pro': { maxTokens: 131072 },
-      'deepseek-v4-flash': { maxTokens: 131072 },
-      // GLM models
-      'glm-4': { maxTokens: 128000 },
-      'glm-4-plus': { maxTokens: 128000 },
-      'glm-4-flash': { maxTokens: 128000 },
-      'glm-4-air': { maxTokens: 128000 },
-    };
-
-    const info = modelInfo[this.model] || { maxTokens: 128000 };
+    const caps = getCapabilities(this.provider, this.model);
 
     return {
       provider: this.provider,
       model: this.model,
-      maxTokens: info.maxTokens,
-      supportsStreaming: true,
-      supportsTools: true,
+      maxTokens: caps.maxContextWindow,
+      supportsStreaming: caps.supportsStreaming,
+      supportsTools: caps.supportsToolUse,
     };
   }
 

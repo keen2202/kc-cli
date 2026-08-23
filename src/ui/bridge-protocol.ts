@@ -23,6 +23,12 @@ export interface BridgeResponse {
 
 /**
  * Create a bridge writer that handles framing and buffering.
+ *
+ * @internal Kept despite zero current callers (audit round3 T11): designated
+ * implementation vehicle for the open JSON-output mode
+ * (`docs/specs/ui-event-system-tasks.md` Phase 7 T7.1/T7.3; the `--json` CLI
+ * flag already exists unwired in `bootstrap/cli-config.ts`). Delete if Phase 7
+ * has not landed by one release after audit round 3.
  */
 export function createBridgeWriter(sessionId: string) {
   let sequence = 0;

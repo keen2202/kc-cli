@@ -18,13 +18,13 @@ npm run kc             # Start interactive REPL
 ## Architecture
 
 - **Entry**: `src/main.ts` → REPL + CLI command handling
-- **Core loop**: `src/query/QueryEngine.ts` — Facade over 11 sub-modules (State, Compaction, Memory, Error, Planning, Importance, RuntimeControl, Decision, TurnControl, Streaming, Execution); idle→compact→stream→decide→execute state machine with steering support; protocol types in `query/protocol.ts`
-- **Tools**: `src/tools/` — 23 registered tools (21 under `src/tools/` + TeamCreate + LSP in `TOOL_MANIFEST`) using `buildTool()` factory with Zod schemas, two-phase execution (prepare/execute/finalize)
-- **API clients**: `src/api/` — 11 providers (Anthropic, OpenAI, DeepSeek, Qwen, GLM, Mimo, Kimi, Step, Gemini, OpenAI-compatible, Ollama); extend `BaseApiClient`; protocol types in `api/protocol.ts`
+- **Core loop**: `src/query/QueryEngine.ts` — Facade over 13 sub-modules (State, Compaction, Memory, Error, Events, Execution, Planning, Importance, RuntimeControl, Decision, TurnControl, Streaming, Verification); idle→compact→stream→decide→execute state machine with steering support; protocol types in `query/protocol.ts`
+- **Tools**: `src/tools/` — 23 registered tools (21 under `src/tools/` + TeamCreate + LSP in `TOOL_MANIFEST`) using `buildTool()` factory with Zod schemas, single-phase execution (`call` + permission check + plugin preToolUse/postToolUse hooks)
+- **API clients**: `src/api/` — 11 provider endpoints served by 3 client classes (`AnthropicClient`, `OpenAICompatibleClient`, `OllamaClient`); the other 8 providers (OpenAI, DeepSeek, Qwen, GLM, Mimo, Kimi, Step, Gemini) are OpenAI-compatible configuration endpoints; extend `BaseApiClient`; protocol types in `api/protocol.ts`
 - **Permissions**: `src/permissions/` — 6-step deny-first with bypass-immune protected paths + plugin-contributed rules (Step 3.5)
 - **Sandbox**: `src/services/sandbox*.ts` — Docker/Bubblewrap/seccomp backends with fallback chain
 - **Orchestrator**: `src/orchestrator/` — Multi-agent with `AsyncLocalStorage` isolation; protocol types in `orchestrator/protocol.ts`
-- **Memory**: `src/memory/` — File-based persistent memory with YAML frontmatter, 4 types (user/feedback/project/reference), relevance search, auto-extraction and consolidation
+- **Memory**: `src/memory/` — File-based persistent memory with YAML frontmatter, 4 types (user/feedback/project/reference), relevance search, LLM auto-extraction (consolidation parked — see `docs/specs/memory-consolidation-pending.md`)
 - **UI**: `src/ui/` — ink/React terminal UI with theme system, focus-stack dialogs, multi-panel layout, steer mode (Ctrl+I)
 - **LSP**: `src/lsp/` — Language server integration (TS, Go, Python, Rust, Java, C++, Ruby)
 - **MCP**: `src/mcp/` — Model Context Protocol client with stdio/HTTP transports
@@ -40,7 +40,7 @@ npm run kc             # Start interactive REPL
 - **Hooks**: `src/hooks/` — Post-turn hook processing (`postTurnHooks.ts`)
 - **Utils**: `src/utils/` — Shared utilities (error handling, path security, semaphore, token estimation, format)
 - **ACP**: `src/acp/` — Agent Communication Protocol server and handlers
-- **AGP**: `src/agp/` — Autogenesis Protocol for self-evolving multi-agent system (adapters, SEPL evolution loop, strategies)
+- **AGP**: `src/agp/` — Evolution infrastructure (reserved): global registry, trace manager, prompt adapter, and evidence-bundle types (SEPL self-evolution loop removed in audit round3 T09 — dormant code, zero callers)
 
 ## Conventions
 
@@ -51,6 +51,14 @@ npm run kc             # Start interactive REPL
 - Coverage thresholds: lines 60%, branches 50%, functions 60%, statements 60%
 - Config priority: defaults < user (`~/.kc-cli/settings.json`) < project (`.kc-cli/settings.json`) < env (`KC_*`) < CLI args
 - Protocol-first: each module defines public types in `protocol.ts`
+- **File naming decision table** (audit round3 T26/L3 — applies to NEW code only; no bulk renames):
+  | File content | Name | Examples |
+  |---|---|---|
+  | Default class export / framework-style module | PascalCase matching the export | `QueryEngineDecision.ts` |
+  | Pure functions / helpers / factories | camelCase or kebab-case, ONE style per directory | `query/` is all-PascalCase → stay there; `utils/`, `services/` are camel/kebab |
+  | Public type contracts of a module | always `protocol.ts` | `state/protocol.ts`, `api/protocol.ts` |
+  - `src/Tool.ts` adjudication (T26): **name kept** despite mixed conventions — `buildTool` is imported by 20+ tool files; renaming costs more than the inconsistency. Do not add sibling factories under conflicting names.
+  - Manager/Service/Handler suffixes overlap historically; for new classes pick the suffix matching the dominant verb of its API (`XxxStore`, `XxxTracker`, `XxxGate`) rather than defaulting to Manager.
 
 ## Risk Boundaries
 
@@ -63,7 +71,7 @@ What the permission system (`src/permissions/`) actually enforces on agent behav
 
 ## Key Types
 
-- `ToolDefinition` — Tool interface with optional `prepare`/`finalize` methods
+- `ToolDefinition` — Tool interface (`call` + optional `checkPermissions`; no per-tool prepare/finalize hooks)
 - `AgentEvent` — Discriminated union for state machine events (includes thinking_delta, cache_status, steered)
 - `ChatMessage` / `ToolCall` — Message types for LLM conversation
 - `PermissionResult` — Permission decision (allow/deny/ask)
@@ -81,6 +89,8 @@ What the permission system (`src/permissions/`) actually enforces on agent behav
 - Sandbox tests: `sandbox-e2e.test.ts` for isolation verification
 - Multi-agent tests: `multi-agent.test.ts` for orchestrator coverage
 - Reproduce a single failing test: `npx vitest run <file-path>` (add `-t "<test name>"` to narrow to one case)
+- **Soft-skip ban** (audit round3 T03): environment-dependent tests must skip via `it.skipIf`/`describe.skipIf` so they appear in the reporter's skipped count — silent early-`return` inside a test body, or runtime-conditional `try { await import() }` + `describe.skip` downgrades, are forbidden; a green CI run with hidden skips is treated as unverified. CI runs a dedicated `sandbox-e2e` job (ubuntu + bubblewrap) where the backend exists and skips indicate regressions.
+- **Mock ban for security-critical modules** (audit round3 C4): do not `vi.mock` permissions/sandbox/protectedPaths and then assert call counts on the mocks — such mock-asserts-mock cases are invalid coverage; drive the real implementation with `MockFileSystem`/`MockShell` instead.
 
 ### UI red lines (ui-structural-hardening, non-negotiable)
 

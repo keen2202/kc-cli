@@ -1,0 +1,26 @@
+{
+  "modules": {
+    "acp": 92,
+    "agp": 23.74,
+    "api": 87.39,
+    "bootstrap": 63.91,
+    "commands": 100,
+    "executors": 82.35,
+    "hooks": 96,
+    "im": 71.09,
+    "lsp": 93.23,
+    "mcp": 90.27,
+    "memory": 94.25,
+    "metrics": 71.43,
+    "orchestrator": 93.03,
+    "permissions": 88.44,
+    "plugins": 87.57,
+    "query": 86.29,
+    "services": 89.63,
+    "state": 95.73,
+    "tools": 81.06,
+    "ui": 72.71,
+    "utils": 83.51
+  },
+  "note": ""
+}

@@ -2,20 +2,38 @@ import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { zodToJsonSchema } from '../../src/utils/zodToJsonSchema';
 
+/**
+ * Coverage tests for src/utils/zodToJsonSchema.ts.
+ *
+ * T22 (audit round 3): the handwritten converter was replaced by a thin
+ * wrapper over `zod-to-json-schema`. Expectations below were migrated to the
+ * maintained package's draft-07 output. Differences vs the deleted handwritten
+ * implementation are adjudicated in test/utils/zodToJsonSchema-migration.test.ts:
+ *   - root `$schema` on every conversion
+ *   - `additionalProperties: false` on every z.object node (zod strips unknown keys)
+ *   - `.describe()` preserved on ALL nodes (old impl kept it only on strings)
+ *   - unions → anyOf / primitive type arrays (was oneOf)
+ *   - nullable → type arrays with "null" / anyOf + {type:"null"} (was `nullable:true`)
+ *   - numeric nativeEnum type "number" (was "string"), bigint integer/int64,
+ *     ZodPromise inner type, ZodMap entry tuples, null literal without const
+ */
+
+const $S = 'http://json-schema.org/draft-07/schema#';
+
 // ---------------------------------------------------------------------------
 // Basic types
 // ---------------------------------------------------------------------------
 describe('basic types', () => {
   it('converts ZodString', () => {
-    expect(zodToJsonSchema(z.string())).toEqual({ type: 'string' });
+    expect(zodToJsonSchema(z.string())).toEqual({ type: 'string', $schema: $S });
   });
 
   it('converts ZodNumber', () => {
-    expect(zodToJsonSchema(z.number())).toEqual({ type: 'number' });
+    expect(zodToJsonSchema(z.number())).toEqual({ type: 'number', $schema: $S });
   });
 
   it('converts ZodBoolean', () => {
-    expect(zodToJsonSchema(z.boolean())).toEqual({ type: 'boolean' });
+    expect(zodToJsonSchema(z.boolean())).toEqual({ type: 'boolean', $schema: $S });
   });
 
   it('converts ZodEnum', () => {
@@ -23,6 +41,7 @@ describe('basic types', () => {
     expect(zodToJsonSchema(schema)).toEqual({
       type: 'string',
       enum: ['a', 'b', 'c'],
+      $schema: $S,
     });
   });
 
@@ -36,6 +55,7 @@ describe('basic types', () => {
     expect(zodToJsonSchema(schema)).toEqual({
       type: 'string',
       enum: ['red', 'green', 'blue'],
+      $schema: $S,
     });
   });
 
@@ -45,12 +65,13 @@ describe('basic types', () => {
       Down,
     }
     const schema = z.nativeEnum(Dir);
-    const result = zodToJsonSchema(schema);
-    expect(result).toMatchObject({ type: 'string' });
-    // Numeric enums have reverse-mapping entries
-    expect(Array.isArray(result.enum)).toBe(true);
-    expect(result.enum).toContain(0);
-    expect(result.enum).toContain(1);
+    // Maintained package emits the correct JSON type for numeric enums
+    // (the handwritten converter wrongly declared "string").
+    expect(zodToJsonSchema(schema)).toEqual({
+      type: 'number',
+      enum: [0, 1],
+      $schema: $S,
+    });
   });
 });
 
@@ -64,6 +85,7 @@ describe('string constraints', () => {
       type: 'string',
       minLength: 3,
       maxLength: 100,
+      $schema: $S,
     });
   });
 
@@ -71,6 +93,7 @@ describe('string constraints', () => {
     expect(zodToJsonSchema(z.string().email())).toEqual({
       type: 'string',
       format: 'email',
+      $schema: $S,
     });
   });
 
@@ -78,6 +101,7 @@ describe('string constraints', () => {
     expect(zodToJsonSchema(z.string().url())).toEqual({
       type: 'string',
       format: 'uri',
+      $schema: $S,
     });
   });
 
@@ -85,6 +109,7 @@ describe('string constraints', () => {
     expect(zodToJsonSchema(z.string().uuid())).toEqual({
       type: 'string',
       format: 'uuid',
+      $schema: $S,
     });
   });
 
@@ -92,6 +117,7 @@ describe('string constraints', () => {
     expect(zodToJsonSchema(z.string().datetime())).toEqual({
       type: 'string',
       format: 'date-time',
+      $schema: $S,
     });
   });
 
@@ -99,6 +125,7 @@ describe('string constraints', () => {
     expect(zodToJsonSchema(z.string().regex(/^[a-z]+$/))).toEqual({
       type: 'string',
       pattern: '^[a-z]+$',
+      $schema: $S,
     });
   });
 
@@ -106,6 +133,7 @@ describe('string constraints', () => {
     expect(zodToJsonSchema(z.string().describe('A username'))).toEqual({
       type: 'string',
       description: 'A username',
+      $schema: $S,
     });
   });
 
@@ -117,11 +145,12 @@ describe('string constraints', () => {
       minLength: 5,
       maxLength: 255,
       description: 'Email address',
+      $schema: $S,
     });
   });
 
   it('handles string with no checks', () => {
-    expect(zodToJsonSchema(z.string())).toEqual({ type: 'string' });
+    expect(zodToJsonSchema(z.string())).toEqual({ type: 'string', $schema: $S });
   });
 });
 
@@ -135,28 +164,30 @@ describe('number constraints', () => {
       type: 'number',
       minimum: 0,
       maximum: 100,
+      $schema: $S,
     });
   });
 
   it('adds exclusive minimum (gt)', () => {
-    // `.gt()` creates a check with inclusive:false
     expect(zodToJsonSchema(z.number().gt(0))).toEqual({
       type: 'number',
       exclusiveMinimum: 0,
+      $schema: $S,
     });
   });
 
   it('adds exclusive maximum (lt)', () => {
-    // `.lt()` creates a check with inclusive:false
     expect(zodToJsonSchema(z.number().lt(100))).toEqual({
       type: 'number',
       exclusiveMaximum: 100,
+      $schema: $S,
     });
   });
 
   it('adds int type', () => {
     expect(zodToJsonSchema(z.number().int())).toEqual({
       type: 'integer',
+      $schema: $S,
     });
   });
 
@@ -166,11 +197,12 @@ describe('number constraints', () => {
       type: 'integer',
       exclusiveMinimum: 0,
       exclusiveMaximum: 100,
+      $schema: $S,
     });
   });
 
   it('handles number with no checks', () => {
-    expect(zodToJsonSchema(z.number())).toEqual({ type: 'number' });
+    expect(zodToJsonSchema(z.number())).toEqual({ type: 'number', $schema: $S });
   });
 });
 
@@ -182,39 +214,43 @@ describe('array', () => {
     expect(zodToJsonSchema(z.array(z.string()))).toEqual({
       type: 'array',
       items: { type: 'string' },
+      $schema: $S,
     });
   });
 
-  it('emits minItems from min() (Q5 fix reads minLength from Zod def)', () => {
+  it('emits minItems from min()', () => {
     expect(zodToJsonSchema(z.array(z.number()).min(1))).toEqual({
       type: 'array',
       items: { type: 'number' },
       minItems: 1,
+      $schema: $S,
     });
   });
 
-  it('emits maxItems from max() (Q5 fix reads maxLength from Zod def)', () => {
+  it('emits maxItems from max()', () => {
     expect(zodToJsonSchema(z.array(z.boolean()).max(5))).toEqual({
       type: 'array',
       items: { type: 'boolean' },
       maxItems: 5,
+      $schema: $S,
     });
   });
 
-  it('emits both minItems and maxItems from min().max() (Q5 fix reads from Zod def)', () => {
+  it('emits both minItems and maxItems from min().max()', () => {
     const schema = z.array(z.string()).min(2).max(10);
     expect(zodToJsonSchema(schema)).toEqual({
       type: 'array',
       items: { type: 'string' },
       minItems: 2,
       maxItems: 10,
+      $schema: $S,
     });
   });
 
-  it('handles array with no constraints', () => {
+  it('handles array with no constraints (any items omit the items key)', () => {
     expect(zodToJsonSchema(z.array(z.any()))).toEqual({
       type: 'array',
-      items: {},
+      $schema: $S,
     });
   });
 });
@@ -235,6 +271,8 @@ describe('object', () => {
         age: { type: 'number' },
       },
       required: ['name', 'age'],
+      additionalProperties: false,
+      $schema: $S,
     });
   });
 
@@ -250,6 +288,8 @@ describe('object', () => {
         name: { type: 'string' },
         age: { type: 'number' },
       },
+      additionalProperties: false,
+      $schema: $S,
     });
     expect(result).not.toHaveProperty('required');
   });
@@ -268,6 +308,8 @@ describe('object', () => {
         email: { type: 'string' },
       },
       required: ['id', 'name'],
+      additionalProperties: false,
+      $schema: $S,
     });
   });
 
@@ -288,14 +330,16 @@ describe('object', () => {
             count: { type: 'number' },
           },
           required: ['created', 'count'],
+          additionalProperties: false,
         },
       },
       required: ['meta'],
+      additionalProperties: false,
+      $schema: $S,
     });
   });
 
   it('treats ZodDefault fields as optional (not required)', () => {
-    // isOptional returns true for ZodDefault (line 245)
     const schema = z.object({
       name: z.string().default('hello'),
       age: z.number(),
@@ -308,6 +352,8 @@ describe('object', () => {
         age: { type: 'number' },
       },
       required: ['age'],
+      additionalProperties: false,
+      $schema: $S,
     });
   });
 
@@ -321,7 +367,6 @@ describe('object', () => {
   });
 
   it('treats ZodOptional wrapped in ZodEffects as optional', () => {
-    // .optional().refine() creates ZodEffects<ZodOptional> — isOptional must recurse
     const schema = z.object({
       a: z.string().optional().refine((s) => !s || s.length > 0),
       b: z.number(),
@@ -329,6 +374,31 @@ describe('object', () => {
     const result = zodToJsonSchema(schema);
     expect(result).toHaveProperty('required', ['b']);
     expect(result).not.toHaveProperty('required', ['a']);
+  });
+
+  it('preserves .describe() on number/object/array fields (T22 fix — old impl dropped these)', () => {
+    const schema = z.object({
+      timeout: z.number().describe('Timeout in seconds'),
+      options: z.array(z.string()).describe('Choices'),
+      target: z.object({ path: z.string() }).describe('Where to write'),
+    });
+    expect(zodToJsonSchema(schema)).toEqual({
+      type: 'object',
+      properties: {
+        timeout: { type: 'number', description: 'Timeout in seconds' },
+        options: { type: 'array', items: { type: 'string' }, description: 'Choices' },
+        target: {
+          type: 'object',
+          properties: { path: { type: 'string' } },
+          required: ['path'],
+          additionalProperties: false,
+          description: 'Where to write',
+        },
+      },
+      required: ['timeout', 'options', 'target'],
+      additionalProperties: false,
+      $schema: $S,
+    });
   });
 });
 
@@ -338,12 +408,12 @@ describe('object', () => {
 describe('ZodEffects', () => {
   it('unwraps .refine() to inner schema', () => {
     const schema = z.string().refine((s) => s.length > 5);
-    expect(zodToJsonSchema(schema)).toEqual({ type: 'string' });
+    expect(zodToJsonSchema(schema)).toEqual({ type: 'string', $schema: $S });
   });
 
   it('unwraps .transform() to inner schema', () => {
     const schema = z.string().transform((s) => s.length);
-    expect(zodToJsonSchema(schema)).toEqual({ type: 'string' });
+    expect(zodToJsonSchema(schema)).toEqual({ type: 'string', $schema: $S });
   });
 
   it('unwraps chained refinements', () => {
@@ -351,7 +421,7 @@ describe('ZodEffects', () => {
       .number()
       .refine((n) => n > 0)
       .refine((n) => n < 100);
-    expect(zodToJsonSchema(schema)).toEqual({ type: 'number' });
+    expect(zodToJsonSchema(schema)).toEqual({ type: 'number', $schema: $S });
   });
 
   it('unwraps refine on object schema', () => {
@@ -362,6 +432,8 @@ describe('ZodEffects', () => {
       type: 'object',
       properties: { x: { type: 'number' } },
       required: ['x'],
+      additionalProperties: false,
+      $schema: $S,
     });
   });
 });
@@ -370,15 +442,22 @@ describe('ZodEffects', () => {
 // ZodOptional
 // ---------------------------------------------------------------------------
 describe('ZodOptional', () => {
-  it('unwraps optional string', () => {
-    expect(zodToJsonSchema(z.string().optional())).toEqual({
-      type: 'string',
+  it('unwraps optional string nested in an object', () => {
+    const schema = z.object({ a: z.string().optional() });
+    expect(zodToJsonSchema(schema)).toEqual({
+      type: 'object',
+      properties: { a: { type: 'string' } },
+      additionalProperties: false,
+      $schema: $S,
     });
   });
 
-  it('unwraps optional number', () => {
-    expect(zodToJsonSchema(z.number().optional())).toEqual({
-      type: 'number',
+  it('renders a ROOT-level optional as anyOf with not:{} (maintained-package convention)', () => {
+    // The handwritten converter unwrapped root optionals; zod-to-json-schema
+    // keeps them representable via anyOf [{ not: {} }, <inner>].
+    expect(zodToJsonSchema(z.string().optional())).toEqual({
+      anyOf: [{ not: {} }, { type: 'string' }],
+      $schema: $S,
     });
   });
 });
@@ -392,6 +471,7 @@ describe('ZodDefault', () => {
     expect(zodToJsonSchema(schema)).toEqual({
       type: 'string',
       default: 'hello',
+      $schema: $S,
     });
   });
 
@@ -400,6 +480,7 @@ describe('ZodDefault', () => {
     expect(zodToJsonSchema(schema)).toEqual({
       type: 'number',
       default: 42,
+      $schema: $S,
     });
   });
 
@@ -413,6 +494,8 @@ describe('ZodDefault', () => {
       properties: {
         role: { type: 'string', default: 'user' },
       },
+      additionalProperties: false,
+      $schema: $S,
     });
     // Default fields should not appear in required
     expect(result).not.toHaveProperty('required');
@@ -423,28 +506,59 @@ describe('ZodDefault', () => {
 // ZodNullable
 // ---------------------------------------------------------------------------
 describe('ZodNullable', () => {
-  it('marks schema as nullable', () => {
+  it('marks primitive schemas nullable via type array', () => {
     const schema = z.string().nullable();
     expect(zodToJsonSchema(schema)).toEqual({
-      type: 'string',
-      nullable: true,
+      type: ['string', 'null'],
+      $schema: $S,
     });
   });
 
-  it('unwraps nullable number', () => {
+  it('marks number schemas nullable via type array', () => {
     expect(zodToJsonSchema(z.number().nullable())).toEqual({
-      type: 'number',
-      nullable: true,
+      type: ['number', 'null'],
+      $schema: $S,
     });
   });
 
-  it('unwraps nullable object', () => {
+  it('marks object schemas nullable via anyOf with null branch', () => {
     const schema = z.object({ id: z.string() }).nullable();
     expect(zodToJsonSchema(schema)).toEqual({
+      anyOf: [
+        {
+          type: 'object',
+          properties: { id: { type: 'string' } },
+          required: ['id'],
+          additionalProperties: false,
+        },
+        { type: 'null' },
+      ],
+      $schema: $S,
+    });
+  });
+
+  it('keeps nullable nested field inside object properties', () => {
+    const schema = z.object({
+      data: z.object({ x: z.number() }).nullable(),
+    });
+    expect(zodToJsonSchema(schema)).toEqual({
       type: 'object',
-      properties: { id: { type: 'string' } },
-      required: ['id'],
-      nullable: true,
+      properties: {
+        data: {
+          anyOf: [
+            {
+              type: 'object',
+              properties: { x: { type: 'number' } },
+              required: ['x'],
+              additionalProperties: false,
+            },
+            { type: 'null' },
+          ],
+        },
+      },
+      required: ['data'],
+      additionalProperties: false,
+      $schema: $S,
     });
   });
 });
@@ -453,17 +567,49 @@ describe('ZodNullable', () => {
 // ZodUnion
 // ---------------------------------------------------------------------------
 describe('ZodUnion', () => {
-  it('creates oneOf with two options', () => {
+  it('collapses two scalar options into a type array', () => {
     const schema = z.union([z.string(), z.number()]);
     expect(zodToJsonSchema(schema)).toEqual({
-      oneOf: [{ type: 'string' }, { type: 'number' }],
+      type: ['string', 'number'],
+      $schema: $S,
     });
   });
 
-  it('creates oneOf with three options', () => {
+  it('collapses three scalar options into a type array', () => {
     const schema = z.union([z.string(), z.number(), z.boolean()]);
     expect(zodToJsonSchema(schema)).toEqual({
-      oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'boolean' }],
+      type: ['string', 'number', 'boolean'],
+      $schema: $S,
+    });
+  });
+
+  it('renders object unions as anyOf (was oneOf)', () => {
+    const schema = z.union([
+      z.object({ t: z.literal('a'), v: z.string() }),
+      z.object({ t: z.literal('b'), n: z.number() }),
+    ]);
+    expect(zodToJsonSchema(schema)).toEqual({
+      anyOf: [
+        {
+          type: 'object',
+          properties: {
+            t: { type: 'string', const: 'a' },
+            v: { type: 'string' },
+          },
+          required: ['t', 'v'],
+          additionalProperties: false,
+        },
+        {
+          type: 'object',
+          properties: {
+            t: { type: 'string', const: 'b' },
+            n: { type: 'number' },
+          },
+          required: ['t', 'n'],
+          additionalProperties: false,
+        },
+      ],
+      $schema: $S,
     });
   });
 });
@@ -476,6 +622,7 @@ describe('ZodLiteral', () => {
     expect(zodToJsonSchema(z.literal('hello'))).toEqual({
       type: 'string',
       const: 'hello',
+      $schema: $S,
     });
   });
 
@@ -483,6 +630,7 @@ describe('ZodLiteral', () => {
     expect(zodToJsonSchema(z.literal(42))).toEqual({
       type: 'number',
       const: 42,
+      $schema: $S,
     });
   });
 
@@ -490,13 +638,15 @@ describe('ZodLiteral', () => {
     expect(zodToJsonSchema(z.literal(true))).toEqual({
       type: 'boolean',
       const: true,
+      $schema: $S,
     });
   });
 
-  it('converts null literal', () => {
+  it('renders null literal as empty object schema (no const)', () => {
+    // zod-to-json-schema has no const representation for null.
     expect(zodToJsonSchema(z.literal(null))).toEqual({
       type: 'object',
-      const: null,
+      $schema: $S,
     });
   });
 });
@@ -510,6 +660,7 @@ describe('ZodRecord', () => {
     expect(zodToJsonSchema(schema)).toEqual({
       type: 'object',
       additionalProperties: { type: 'string' },
+      $schema: $S,
     });
   });
 
@@ -518,6 +669,7 @@ describe('ZodRecord', () => {
     expect(zodToJsonSchema(schema)).toEqual({
       type: 'object',
       additionalProperties: { type: 'number' },
+      $schema: $S,
     });
   });
 
@@ -534,7 +686,9 @@ describe('ZodRecord', () => {
           count: { type: 'number' },
         },
         required: ['name', 'count'],
+        additionalProperties: false,
       },
+      $schema: $S,
     });
   });
 });
@@ -550,6 +704,7 @@ describe('ZodTuple', () => {
       items: [{ type: 'string' }, { type: 'number' }],
       minItems: 2,
       maxItems: 2,
+      $schema: $S,
     });
   });
 
@@ -560,6 +715,7 @@ describe('ZodTuple', () => {
       items: [{ type: 'boolean' }],
       minItems: 1,
       maxItems: 1,
+      $schema: $S,
     });
   });
 
@@ -570,6 +726,7 @@ describe('ZodTuple', () => {
       items: [],
       minItems: 0,
       maxItems: 0,
+      $schema: $S,
     });
   });
 });
@@ -578,25 +735,27 @@ describe('ZodTuple', () => {
 // Special types (Any, Unknown, fallback)
 // ---------------------------------------------------------------------------
 describe('special types', () => {
-  it('ZodAny returns empty object', () => {
-    expect(zodToJsonSchema(z.any())).toEqual({});
+  it('ZodAny returns empty schema plus $schema', () => {
+    expect(zodToJsonSchema(z.any())).toEqual({ $schema: $S });
   });
 
-  it('ZodUnknown returns empty object', () => {
-    expect(zodToJsonSchema(z.unknown())).toEqual({});
+  it('ZodUnknown returns empty schema plus $schema', () => {
+    expect(zodToJsonSchema(z.unknown())).toEqual({ $schema: $S });
   });
 
   it('ZodDate converts to string with date-time format', () => {
     expect(zodToJsonSchema(z.date())).toEqual({
       type: 'string',
       format: 'date-time',
+      $schema: $S,
     });
   });
 
-  it('ZodBigInt converts to string with integer pattern', () => {
+  it('ZodBigInt converts to integer with int64 format', () => {
     expect(zodToJsonSchema(z.bigint())).toEqual({
-      type: 'string',
-      pattern: '^-?\\d+$',
+      type: 'integer',
+      format: 'int64',
+      $schema: $S,
     });
   });
 
@@ -607,14 +766,20 @@ describe('special types', () => {
         { type: 'object', properties: { a: { type: 'string' } }, required: ['a'] },
         { type: 'object', properties: { b: { type: 'number' } }, required: ['b'] },
       ],
+      $schema: $S,
     });
   });
 
-  it('ZodMap converts to object with additionalProperties', () => {
+  it('ZodMap converts to array of key/value entry tuples', () => {
     const schema = z.map(z.string(), z.number());
-    expect(zodToJsonSchema(schema)).toEqual({
-      type: 'object',
-      additionalProperties: { type: 'number' },
+    expect(zodToJsonSchema(schema)).toMatchObject({
+      type: 'array',
+      items: {
+        type: 'array',
+        items: [{ type: 'string' }, { type: 'number' }],
+        minItems: 2,
+        maxItems: 2,
+      },
     });
   });
 
@@ -624,12 +789,15 @@ describe('special types', () => {
       type: 'array',
       items: { type: 'string' },
       uniqueItems: true,
+      $schema: $S,
     });
   });
 
-  it('ZodPromise falls back to { type: "object" } as truly unsupported type', () => {
-    // ZodPromise is not handled by the converter
-    expect(zodToJsonSchema(z.promise(z.string()))).toEqual({ type: 'object' });
+  it('ZodPromise renders the awaited inner type', () => {
+    expect(zodToJsonSchema(z.promise(z.string()))).toEqual({
+      type: 'string',
+      $schema: $S,
+    });
   });
 });
 
@@ -657,20 +825,23 @@ describe('nested complex schemas', () => {
               name: { type: 'string' },
             },
             required: ['id', 'name'],
+            additionalProperties: false,
           },
         },
       },
       required: ['items'],
+      additionalProperties: false,
+      $schema: $S,
     });
   });
 
-  it('union of objects (discriminated-like)', () => {
+  it('union of objects (discriminated-like) renders as anyOf', () => {
     const schema = z.union([
       z.object({ type: z.literal('a'), value: z.string() }),
       z.object({ type: z.literal('b'), count: z.number() }),
     ]);
     expect(zodToJsonSchema(schema)).toEqual({
-      oneOf: [
+      anyOf: [
         {
           type: 'object',
           properties: {
@@ -678,6 +849,7 @@ describe('nested complex schemas', () => {
             value: { type: 'string' },
           },
           required: ['type', 'value'],
+          additionalProperties: false,
         },
         {
           type: 'object',
@@ -686,8 +858,10 @@ describe('nested complex schemas', () => {
             count: { type: 'number' },
           },
           required: ['type', 'count'],
+          additionalProperties: false,
         },
       ],
+      $schema: $S,
     });
   });
 
@@ -713,10 +887,13 @@ describe('nested complex schemas', () => {
               },
             },
             required: ['inner'],
+            additionalProperties: false,
           },
         },
       },
       required: ['outer'],
+      additionalProperties: false,
+      $schema: $S,
     });
   });
 
@@ -736,26 +913,8 @@ describe('nested complex schemas', () => {
         name: { type: 'string' },
       },
       required: ['name'],
-    });
-  });
-
-  it('object with nullable nested field', () => {
-    const schema = z.object({
-      data: z
-        .object({ x: z.number() })
-        .nullable(),
-    });
-    expect(zodToJsonSchema(schema)).toEqual({
-      type: 'object',
-      properties: {
-        data: {
-          type: 'object',
-          properties: { x: { type: 'number' } },
-          required: ['x'],
-          nullable: true,
-        },
-      },
-      required: ['data'],
+      additionalProperties: false,
+      $schema: $S,
     });
   });
 
@@ -773,6 +932,8 @@ describe('nested complex schemas', () => {
         age: { type: 'integer', minimum: 0 },
       },
       required: ['email', 'age'],
+      additionalProperties: false,
+      $schema: $S,
     });
   });
 });

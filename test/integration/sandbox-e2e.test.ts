@@ -1,12 +1,15 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { SandboxManager } from '../../src/services/sandbox';
 import { execSync, spawnSync } from 'child_process';
 
 /**
  * End-to-end sandbox security verification tests.
  *
- * These tests verify sandbox isolation at the OS level when a real
- * backend is available. Tests gracefully skip when no backend exists.
+ * Audit round3 (T03): skips must be EXPLICIT. The backend probe + execution
+ * canary below runs once at module load (synchronously) so that every
+ * environment-dependent case uses `it.skipIf(...)` and therefore shows up in
+ * the reporter's skipped count — silent early-`return` soft-skips are banned
+ * (see AGENTS.md → Testing).
  */
 
 function getAvailableBackend(): string | null {
@@ -21,12 +24,82 @@ function getAvailableBackend(): string | null {
   return null;
 }
 
-const availableBackend = getAvailableBackend();
+interface SandboxProbe {
+  works: boolean;
+  backend: string | null;
+  workDir?: string;
+  manager?: SandboxManager;
+}
 
 /**
- * Run a sandboxed command and capture stdout even if the command fails.
- * Uses `spawnSync` to reliably capture output regardless of exit code.
+ * Probe whether a real backend can actually execute commands: a backend
+ * binary may be present yet unable to bind-mount paths (e.g. Docker in
+ * GitHub Actions), so a canary write inside the sandbox is mandatory.
  */
+function probeSandbox(): SandboxProbe {
+  const backend = getAvailableBackend();
+  if (!backend) {
+    console.warn('[sandbox-e2e] no sandbox backend available — E2E cases will report as skipped');
+    return { works: false, backend: null };
+  }
+
+  // Use a non-/tmp workDir to avoid bwrap --tmpfs /tmp shadowing
+  const workDir = `/var/tmp/kc-sandbox-e2e-${Date.now()}`;
+  try {
+    execSync(`mkdir -p ${workDir}`);
+  } catch (err) {
+    console.warn(`[sandbox-e2e] cannot create workDir ${workDir}: ${String(err)} — E2E cases will report as skipped`);
+    return { works: false, backend };
+  }
+
+  const manager = new SandboxManager({
+    workDir,
+    enabled: true,
+    backend: backend as 'bubblewrap' | 'docker',
+  });
+
+  if (!manager.isAvailable()) {
+    return { works: false, backend, workDir };
+  }
+
+  try {
+    const canaryCmd = manager.wrapCommand(
+      'echo "canary" > /work/canary.txt && cat /work/canary.txt',
+      'Bash'
+    );
+    const result = spawnSync('sh', ['-c', canaryCmd], {
+      cwd: workDir,
+      timeout: 15000,
+      encoding: 'utf-8',
+    });
+    const output = (result.stdout?.trim?.() ?? '');
+    if (output !== 'canary') {
+      console.warn(`[sandbox-e2e] canary failed — backend ${manager.getBackendName()} is present but cannot execute sandboxed commands. E2E cases will report as skipped.`);
+      return { works: false, backend, workDir, manager };
+    }
+  } catch (err) {
+    console.warn(`[sandbox-e2e] canary threw (${String(err)}) — backend cannot execute sandboxed commands. E2E cases will report as skipped.`);
+    return { works: false, backend, workDir, manager };
+  }
+
+  return { works: true, backend, workDir, manager };
+}
+
+const probe = probeSandbox();
+
+/** Explicit skip variant: every environment-dependent case MUST use this. */
+const itWithWorkingSandbox = it.skipIf(!probe.works);
+
+/** CPU-limit manager probed at module scope so its skip is explicit too. */
+const cpuManager = probe.works
+  ? new SandboxManager({
+      workDir: probe.workDir,
+      enabled: true,
+      backend: probe.backend as 'bubblewrap' | 'docker',
+      cpuTimeLimitSec: 2,
+    })
+  : null;
+
 function runSandboxed(cmd: string, options: { cwd?: string; timeout?: number } = {}): string {
   const result = spawnSync('sh', ['-c', cmd], {
     cwd: options.cwd,
@@ -42,56 +115,10 @@ function runSandboxed(cmd: string, options: { cwd?: string; timeout?: number } =
 }
 
 describe('Sandbox E2E Security Verification', () => {
-  let manager: SandboxManager;
-  let workDir: string;
-  let sandboxWorks = false;
-
-  beforeAll(() => {
-    if (!availableBackend) return;
-
-    // Use a non-/tmp workDir to avoid bwrap --tmpfs /tmp shadowing
-    workDir = `/var/tmp/kc-sandbox-e2e-${Date.now()}`;
-    execSync(`mkdir -p ${workDir}`);
-
-    manager = new SandboxManager({
-      workDir,
-      enabled: true,
-      backend: availableBackend as any,
-    });
-
-    if (!manager.isAvailable()) return;
-
-    // Canary: verify the sandbox can actually execute commands with this
-    // workDir. In CI environments the backend binary may be present but
-    // unable to bind-mount paths (e.g. Docker in GitHub Actions).
-    try {
-      const canaryCmd = manager.wrapCommand(
-        'echo "canary" > /work/canary.txt && cat /work/canary.txt',
-        'Bash'
-      );
-      const result = spawnSync('sh', ['-c', canaryCmd], {
-        cwd: workDir,
-        timeout: 15000,
-        encoding: 'utf-8',
-      });
-      const output = (result.stdout?.trim?.() ?? '');
-      sandboxWorks = output === 'canary';
-      if (!sandboxWorks) {
-        console.log(`  ⏭ Sandbox canary failed — backend ${manager.getBackendName()} is present but cannot execute sandboxed commands in CI. Skipping all E2E sandbox tests.`);
-      }
-    } catch {
-      console.log(`  ⏭ Sandbox canary threw — backend ${manager.getBackendName()} cannot execute sandboxed commands in CI. Skipping all E2E sandbox tests.`);
-    }
-  });
-
   describe('filesystem isolation', () => {
-    it('should allow writing to workspace directory', () => {
-      if (!sandboxWorks) {
-        console.log('  ⏭ Skipping: sandbox not functional');
-        return;
-      }
-
-      const wrappedCmd = manager!.wrapCommand(
+    itWithWorkingSandbox('should allow writing to workspace directory', () => {
+      const workDir = probe.workDir!;
+      const wrappedCmd = probe.manager!.wrapCommand(
         'echo "test" > testfile.txt && cat testfile.txt',
         'Bash'
       );
@@ -103,71 +130,44 @@ describe('Sandbox E2E Security Verification', () => {
       execSync('rm -f testfile.txt', { cwd: workDir });
     });
 
-    it('should prevent writing to system directories', () => {
-      if (!sandboxWorks) {
-        console.log('  ⏭ Skipping: sandbox not functional');
-        return;
-      }
-
-      const wrappedCmd = manager!.wrapCommand(
+    itWithWorkingSandbox('should prevent writing to system directories', () => {
+      const wrappedCmd = probe.manager!.wrapCommand(
         'echo "hacked" > /etc/testfile 2>&1 || echo WRITE_DENIED',
         'Bash'
       );
 
-      const stdout = runSandboxed(wrappedCmd, { cwd: workDir });
+      const stdout = runSandboxed(wrappedCmd, { cwd: probe.workDir });
       // System directories are read-only in sandbox
       expect(stdout).toContain('WRITE_DENIED');
     });
 
-    it('should restrict access outside workspace', () => {
-      if (!sandboxWorks) {
-        console.log('  ⏭ Skipping: sandbox not functional');
-        return;
-      }
-
+    itWithWorkingSandbox('should restrict access outside workspace', () => {
       // Inside sandbox, system dirs are read-only bind mounts
-      const wrappedCmd = manager!.wrapCommand(
+      const wrappedCmd = probe.manager!.wrapCommand(
         'touch /usr/bin/test_write 2>&1 || echo ACCESS_DENIED',
         'Bash'
       );
 
-      const stdout = runSandboxed(wrappedCmd, { cwd: workDir });
+      const stdout = runSandboxed(wrappedCmd, { cwd: probe.workDir });
       expect(stdout).toContain('ACCESS_DENIED');
     });
   });
 
   describe('network isolation', () => {
-    it('should block network access when allowNetwork is false', () => {
-      if (!sandboxWorks) {
-        console.log('  ⏭ Skipping: sandbox not functional');
-        return;
-      }
-
-      const wrappedCmd = manager!.wrapCommand(
+    itWithWorkingSandbox('should block network access when allowNetwork is false', () => {
+      const wrappedCmd = probe.manager!.wrapCommand(
         'curl -s --connect-timeout 3 https://example.com 2>&1 || echo NETWORK_DENIED',
         'Bash'
       );
 
-      const stdout = runSandboxed(wrappedCmd, { cwd: workDir, timeout: 15000 });
+      const stdout = runSandboxed(wrappedCmd, { cwd: probe.workDir, timeout: 15000 });
       expect(stdout).toContain('NETWORK_DENIED');
     });
   });
 
   describe('resource limits', () => {
-    it('should enforce CPU time limit', () => {
-      if (!sandboxWorks) {
-        console.log('  ⏭ Skipping: sandbox not functional');
-        return;
-      }
-
-      const strictManager = new SandboxManager({
-        workDir,
-        enabled: true,
-        backend: availableBackend as any,
-        cpuTimeLimitSec: 2,
-      });
-
-      if (!strictManager.isAvailable()) return;
+    it.skipIf(!cpuManager?.isAvailable())('should enforce CPU time limit', () => {
+      const strictManager = cpuManager!;
 
       const wrappedCmd = strictManager.wrapCommand(
         'while true; do :; done',
@@ -176,7 +176,7 @@ describe('Sandbox E2E Security Verification', () => {
 
       try {
         execSync(wrappedCmd, {
-          cwd: workDir,
+          cwd: probe.workDir,
           timeout: 8000,
           encoding: 'utf-8',
         });
@@ -188,33 +188,23 @@ describe('Sandbox E2E Security Verification', () => {
   });
 
   describe('command injection prevention', () => {
-    it('should properly escape single quotes in commands', () => {
-      if (!sandboxWorks) {
-        console.log('  ⏭ Skipping: sandbox not functional');
-        return;
-      }
-
-      const wrappedCmd = manager!.wrapCommand(
+    itWithWorkingSandbox('should properly escape single quotes in commands', () => {
+      const wrappedCmd = probe.manager!.wrapCommand(
         "echo 'hello world'",
         'Bash'
       );
 
-      const stdout = runSandboxed(wrappedCmd, { cwd: workDir });
+      const stdout = runSandboxed(wrappedCmd, { cwd: probe.workDir });
       expect(stdout.trim()).toBe('hello world');
     });
 
-    it('should handle commands with special characters', () => {
-      if (!sandboxWorks) {
-        console.log('  ⏭ Skipping: sandbox not functional');
-        return;
-      }
-
-      const wrappedCmd = manager!.wrapCommand(
+    itWithWorkingSandbox('should handle commands with special characters', () => {
+      const wrappedCmd = probe.manager!.wrapCommand(
         'echo "test $HOME"',
         'Bash'
       );
 
-      const stdout = runSandboxed(wrappedCmd, { cwd: workDir });
+      const stdout = runSandboxed(wrappedCmd, { cwd: probe.workDir });
       expect(stdout).toContain('test');
     });
   });

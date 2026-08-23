@@ -17,7 +17,7 @@ import {
   PATH_PLACEHOLDER,
   MAX_CONTENT_BYTES,
   MIN_CONTENT_LENGTH,
-} from '../../src/services/memory-extraction-guard';
+} from '../../src/memory/memory-extraction-guard';
 
 /** Build a single frontmatter block in the format buildExtractionPrompt emits. */
 function block(name: string, description: string, type: string, content: string): string {

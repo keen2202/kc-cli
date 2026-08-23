@@ -42,8 +42,15 @@ export class HttpTransport {
       this.useSdk = true;
       this.connected = true;
       return;
-    } catch {
-      // SDK not available, fall back to hand-rolled implementation
+    } catch (err) {
+      // Optional-dependency feature detection: the SDK is not installed (or
+      // failed to load), which is a supported configuration — fall back to the
+      // hand-rolled POST/SSE implementation in this class. Logged at debug so
+      // the fallback is observable without turning "SDK absent" into an
+      // error-level signal.
+      logger.mcp.debug('[MCP http] SDK transport unavailable — using built-in fallback', {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     this.connected = true;

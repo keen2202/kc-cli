@@ -7,7 +7,8 @@
  * (summary only), the permission decision, whether it was sandboxed,
  * success/failure, duration, and any backup snapshot produced.
  *
- * Design mirrors `agp/audit-log.ts` (ring buffer + persistence) with three
+ * Design follows the ring-buffer + persistence pattern of the retired
+ * `agp/audit-log.ts` (removed in audit-remediation-round3 T09) with three
  * deliberate differences for the tool hot path:
  *   - Entries are appended as JSON Lines to a per-date file
  *     (`.kc-cli/audit/operations-<date>.jsonl`) rather than rewriting a blob.

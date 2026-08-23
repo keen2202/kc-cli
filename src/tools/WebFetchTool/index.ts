@@ -5,7 +5,7 @@ import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import { secondsToMs } from '../../utils/timeout';
-import { isInternalUrl } from '../../utils/ssrf';
+import { assertFetchableUrl } from '../../utils/ssrf';
 import { wrapIfUntrustedSource } from '../../utils/toolResultBoundary';
 import { VERSION } from '../../bootstrap/cli-config';
 import * as https from 'https';
@@ -29,8 +29,15 @@ export const tool = buildTool<WebFetchInput, string>({
   inputSchema: WebFetchInputSchema,
 
   call: async (input, context): Promise<ToolResultType<string>> => {
+    // H2 (round3): fail-closed gate. Unparseable / non-HTTP(S) / internal
+    // targets are rejected here instead of falling through the lexical-only
+    // isInternalUrl predicate as "external".
+    const gate = assertFetchableUrl(input.url);
+    if (!gate.ok) {
+      return toolError(gate.message);
+    }
     try {
-      const url = new URL(input.url);
+      const url = gate.url;
       const isHttps = url.protocol === 'https:';
       const client = isHttps ? https : http;
 
@@ -62,8 +69,9 @@ export const tool = buildTool<WebFetchInput, string>({
             // Handle redirects
             if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
               clearTimeout(globalTimeout);
-              // S6: validate every redirect hop against the same SSRF guard as
-              // the initial URL. A redirect to an internal/private range is rejected.
+              // S6: validate every redirect hop through the same fail-closed
+              // gate as the initial URL. A redirect to an internal/private
+              // range — or to a non-HTTP(S) scheme — is rejected.
               let redirectUrl: URL;
               try {
                 redirectUrl = new URL(res.headers.location, url);
@@ -71,10 +79,9 @@ export const tool = buildTool<WebFetchInput, string>({
                 resolve(toolError(`Invalid redirect Location: ${res.headers.location}`));
                 return;
               }
-              if (isInternalUrl(redirectUrl)) {
-                resolve(toolError(
-                  `SSRF blocked: redirect to internal network ${redirectUrl.hostname} is not allowed`
-                ));
+              const hopGate = assertFetchableUrl(redirectUrl);
+              if (!hopGate.ok) {
+                resolve(toolError(hopGate.message));
                 return;
               }
               resolve(toolResult(`Redirect to: ${res.headers.location}`, {
@@ -145,12 +152,15 @@ export const tool = buildTool<WebFetchInput, string>({
   },
 
   checkPermissions: (input, context): PermissionResult => {
-    // Block internal/private URLs (SSRF) — same guard applied to redirect hops in call().
-    const url = new URL(input.url);
-    if (isInternalUrl(url)) {
+    // Block unparseable / non-HTTP(S) / internal URLs (SSRF, fail-closed) —
+    // the same gate is re-applied to every redirect hop in call(). Unlike the
+    // previous inline `new URL()` here, garbage input denies cleanly instead
+    // of throwing out of the permission check.
+    const gate = assertFetchableUrl(input.url);
+    if (!gate.ok) {
       return {
         behavior: 'deny',
-        message: `Access to internal URLs is blocked: ${url.hostname}`,
+        message: gate.message,
       };
     }
 

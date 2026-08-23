@@ -1,10 +1,16 @@
 // Tests for MCP tool bridge - tests the real convertMCPTool function
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Import the REAL tool-bridge module (no mocking of the module itself)
-import { convertMCPTool } from '../../src/mcp/tool-bridge';
+import {
+  convertMCPTool,
+  toValidatedToolName,
+  validateMCPInputSchema,
+  MCP_TOOL_NAME_MAX_LENGTH,
+} from '../../src/mcp/tool-bridge';
 import type { MCPTool, MCPToolResult } from '../../src/mcp/types';
 import type { MCPClientManager } from '../../src/mcp/client-manager';
+import { logger } from '../../src/services/logger';
 
 function createMockClientManager(overrides: Partial<MCPClientManager> = {}): MCPClientManager {
   return {
@@ -20,6 +26,33 @@ function createMockClientManager(overrides: Partial<MCPClientManager> = {}): MCP
     getServerInfo: vi.fn(),
     ...overrides,
   } as unknown as MCPClientManager;
+}
+
+// Spy on the real logger.mcp module logger so refusal paths are observable in
+// assertions while keeping stderr clean during test runs.
+let warnSpy: ReturnType<typeof vi.spyOn>;
+
+beforeEach(() => {
+  warnSpy = vi.spyOn(logger.mcp, 'warn').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  warnSpy.mockRestore();
+});
+
+/** Shared assertions for a refused registration (H5). */
+async function expectRefused(mcpTool: any, serverId: string, cm: MCPClientManager) {
+  const tool = convertMCPTool(mcpTool, serverId, cm);
+
+  expect(tool.isEnabled!()).toBe(false);
+  expect(warnSpy).toHaveBeenCalledTimes(1);
+
+  const result = await tool.call({}, {} as any);
+  expect(result.isError).toBe(true);
+  expect(result.message).toContain('refused');
+  expect(cm.callTool).not.toHaveBeenCalled();
+
+  return tool;
 }
 
 describe('convertMCPTool', () => {
@@ -206,32 +239,39 @@ describe('convertMCPTool', () => {
       expect(result.output).toBe('ok');
     });
 
-    it('should handle null/undefined schema', async () => {
+    it('should refuse registration when schema is null/undefined (H5)', async () => {
+      // H5: a missing schema used to fall back to a permissive passthrough
+      // schema; the trust boundary now refuses such registrations.
       const mcpTool = {
         name: 'null-schema',
         inputSchema: null as any,
       };
-      const cm = createMockClientManager({
-        callTool: vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] }),
-      });
+      const cm = createMockClientManager();
 
       const tool = convertMCPTool(mcpTool, 's', cm);
+
+      expect(tool.isEnabled!()).toBe(false);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(tool.name).toBe('mcp_refused_registration');
+
       const result = await tool.call({}, {} as any);
-      expect(result.output).toBe('ok');
+      expect(result.isError).toBe(true);
+      expect(result.message).toContain('refused');
+      expect(cm.callTool).not.toHaveBeenCalled();
     });
 
-    it('should handle non-object schema type', async () => {
+    it('should refuse registration for non-object schema type (H5)', () => {
+      // H5: only object schemas may cross the trust boundary.
       const mcpTool = {
         name: 'string-schema',
         inputSchema: { type: 'string' } as any,
       };
-      const cm = createMockClientManager({
-        callTool: vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] }),
-      });
+      const cm = createMockClientManager();
 
       const tool = convertMCPTool(mcpTool, 's', cm);
-      const result = await tool.call({}, {} as any);
-      expect(result.output).toBe('ok');
+
+      expect(tool.isEnabled!()).toBe(false);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
     });
 
     it('should handle various property types', async () => {
@@ -349,5 +389,237 @@ describe('convertMCPTool', () => {
       expect(desc).toContain('t');
       expect(desc).toContain('s');
     });
+  });
+});
+
+// ── H5 / T08: cross-trust-boundary validation ────────────────────────────────
+
+describe('toValidatedToolName (H5 whitelist constructor)', () => {
+  it('accepts well-formed composed names', () => {
+    expect(toValidatedToolName('server1', 'test-tool')).toBe('mcp_server1_test-tool');
+    expect(toValidatedToolName('srv_01', 'get_item-v2')).toBe('mcp_srv_01_get_item-v2');
+  });
+
+  it('rejects path separators in server id or tool name', () => {
+    expect(toValidatedToolName('../evil', 'tool')).toBeNull();
+    expect(toValidatedToolName('srv', 'sub/cmd')).toBeNull();
+    expect(toValidatedToolName('srv', '../../etc/passwd')).toBeNull();
+  });
+
+  it('rejects dot-dot traversal segments', () => {
+    expect(toValidatedToolName('srv', '..')).toBeNull();
+    expect(toValidatedToolName('..', 'tool')).toBeNull();
+    expect(toValidatedToolName('srv', 'foo..bar')).toBeNull();
+  });
+
+  it('rejects unicode characters', () => {
+    expect(toValidatedToolName('srv', 'tööl')).toBeNull();
+    expect(toValidatedToolName('服务', 'tool')).toBeNull();
+    expect(toValidatedToolName('srv', 'emoji🚀')).toBeNull();
+  });
+
+  it('rejects control characters and whitespace', () => {
+    expect(toValidatedToolName('srv', 'na\u0000me')).toBeNull();
+    expect(toValidatedToolName('srv', 'name\n')).toBeNull();
+    expect(toValidatedToolName('srv', '\rtab')).toBeNull();
+    expect(toValidatedToolName('srv', 'my tool')).toBeNull();
+  });
+
+  it('rejects names exceeding the 128-char cap', () => {
+    const longName = 'a'.repeat(MCP_TOOL_NAME_MAX_LENGTH); // prefix alone already > cap
+    expect(toValidatedToolName('srv', longName)).toBeNull();
+  });
+
+  it('accepts names of exactly the maximum length', () => {
+    // 'mcp_' (4) + '_' (1) + serverId + toolName === 128
+    const maxToolName = 'b'.repeat(MCP_TOOL_NAME_MAX_LENGTH - 5 - 3);
+    expect(maxToolName.length + 'srv'.length + 5).toBe(MCP_TOOL_NAME_MAX_LENGTH);
+    const composed = toValidatedToolName('srv', maxToolName);
+    expect(composed).not.toBeNull();
+    expect(composed!.length).toBe(MCP_TOOL_NAME_MAX_LENGTH);
+  });
+});
+
+describe('validateMCPInputSchema (H5 minimal shape check)', () => {
+  it('accepts object schemas with sane properties', () => {
+    expect(validateMCPInputSchema({ type: 'object' }).ok).toBe(true);
+    expect(
+      validateMCPInputSchema({
+        type: 'object',
+        properties: { query: { type: 'string' } },
+        required: ['query'],
+      }).ok
+    ).toBe(true);
+  });
+
+  it('rejects missing/null schemas', () => {
+    expect(validateMCPInputSchema(null).ok).toBe(false);
+    expect(validateMCPInputSchema(undefined).ok).toBe(false);
+  });
+
+  it('rejects non-object schema types and non-object payloads', () => {
+    expect(validateMCPInputSchema({ type: 'string' }).ok).toBe(false);
+    expect(validateMCPInputSchema('object').ok).toBe(false);
+    expect(validateMCPInputSchema([{ type: 'object' }]).ok).toBe(false);
+  });
+
+  it('rejects malformed properties and required arrays', () => {
+    expect(validateMCPInputSchema({ type: 'object', properties: 'evil' }).ok).toBe(false);
+    expect(validateMCPInputSchema({ type: 'object', required: 'query' }).ok).toBe(false);
+    expect(validateMCPInputSchema({ type: 'object', required: [42] }).ok).toBe(false);
+  });
+
+  it('rejects prototype-polluting property names', () => {
+    // JSON.parse produces an OWN '__proto__' key (an object literal would set
+    // the prototype instead) — exactly what remote servers can send us.
+    const withProto = JSON.parse('{"type":"object","properties":{"__proto__":{}}}');
+    expect(validateMCPInputSchema(withProto).ok).toBe(false);
+    expect(validateMCPInputSchema({ type: 'object', properties: { constructor: {} } }).ok).toBe(
+      false
+    );
+    expect(validateMCPInputSchema({ type: 'object', properties: { prototype: {} } }).ok).toBe(
+      false
+    );
+  });
+});
+
+describe('convertMCPTool trust boundary (H5)', () => {
+  it.each([
+    ['path separator', 'srv', '../etc/passwd'],
+    ['path separator in middle', 'srv', 'sub/cmd'],
+    ['dot-dot traversal', 'srv', '..'],
+    ['unicode characters', 'srv', 'tööl'],
+    ['control character', 'srv', 'na\u0000me'],
+  ])('refuses registration for malicious tool name (%s)', async (_label, serverId, toolName) => {
+    const cm = createMockClientManager({
+      callTool: vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'pwned' }] }),
+    });
+    const mcpTool = { name: toolName, inputSchema: { type: 'object' as const } };
+
+    const tool = await expectRefused(mcpTool, serverId, cm);
+
+    // Refused definitions are inert placeholders — the raw unvalidated name
+    // never becomes the registry key.
+    expect(tool.name).toBe('mcp_refused_registration');
+    expect(tool.description).toContain('refused');
+    const warnArg = warnSpy.mock.calls[0][1] as Record<string, unknown>;
+    expect(warnArg.serverId).toBe(serverId);
+    expect(warnArg.tool).toBe(toolName);
+  });
+
+  it('refuses registration for names exceeding the 128-char cap', async () => {
+    const cm = createMockClientManager();
+    await expectRefused(
+      { name: 'x'.repeat(200), inputSchema: { type: 'object' as const } },
+      'srv',
+      cm
+    );
+  });
+
+  it('still registers tools whose composed name passes the whitelist', () => {
+    const cm = createMockClientManager();
+    const tool = convertMCPTool(
+      { name: 'valid-tool_1', inputSchema: { type: 'object' } },
+      'server-01',
+      cm
+    );
+    expect(tool.name).toBe('mcp_server-01_valid-tool_1');
+    expect(tool.isEnabled!()).toBe(true);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('refuses registration when inputSchema is missing', async () => {
+    const cm = createMockClientManager({
+      callTool: vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] }),
+    });
+    await expectRefused({ name: 'no-schema' }, 'srv', cm);
+  });
+
+  it('refuses registration when inputSchema fails minimal shape validation', async () => {
+    const cm = createMockClientManager();
+    await expectRefused({ name: 'bad-type', inputSchema: { type: 'string' } as any }, 'srv', cm);
+  });
+
+  it('refuses registration when properties are malformed', async () => {
+    const cm = createMockClientManager();
+    await expectRefused(
+      { name: 'bad-props', inputSchema: { type: 'object', properties: '__proto__' } as any },
+      'srv',
+      cm
+    );
+  });
+
+  it('logs refusals through logger.mcp.warn with identifying context', () => {
+    convertMCPTool({ name: '..', inputSchema: { type: 'object' } }, 'srv', createMockClientManager());
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const [message, data] = warnSpy.mock.calls[0] as [string, Record<string, unknown>];
+    expect(message).toContain('Refusing tool registration');
+    expect(data).toMatchObject({ serverId: 'srv', tool: '..' });
+  });
+
+  it('executes valid tools end-to-end after passing the boundary', async () => {
+    const cm = createMockClientManager({
+      callTool: vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ran' }] }),
+    });
+    const tool = convertMCPTool(
+      { name: 'runner', inputSchema: { type: 'object', properties: { q: { type: 'string' } } } },
+      'srv',
+      cm
+    );
+
+    const result = await tool.call({ q: 'hello' }, {} as any);
+
+    expect(result.isError).toBe(false);
+    expect(result.output).toBe('ran');
+    expect(cm.callTool).toHaveBeenCalledWith('srv', 'runner', { q: 'hello' });
+  });
+});
+
+describe('input safeParse before invocation (H5)', () => {
+  const schema: MCPTool['inputSchema'] = {
+    type: 'object',
+    properties: {
+      cmd: { type: 'string' },
+      retries: { type: 'integer' },
+    },
+    required: ['cmd'],
+  };
+
+  it('returns a clear error result when inputs fail safeParse', async () => {
+    const cm = createMockClientManager({
+      callTool: vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'never' }] }),
+    });
+    const tool = convertMCPTool({ name: 'strict', inputSchema: schema }, 'srv', cm);
+
+    const result = await tool.call({ cmd: 42 }, {} as any);
+
+    expect(result.isError).toBe(true);
+    expect(result.message).toContain('Invalid input for MCP tool');
+    expect(result.message).toContain('cmd');
+    expect(cm.callTool).not.toHaveBeenCalled();
+  });
+
+  it('reports missing required fields without invoking the server', async () => {
+    const cm = createMockClientManager();
+    const tool = convertMCPTool({ name: 'strict', inputSchema: schema }, 'srv', cm);
+
+    const result = await tool.call({}, {} as any);
+
+    expect(result.isError).toBe(true);
+    expect(result.message).toContain('Invalid input for MCP tool strict');
+    expect(cm.callTool).not.toHaveBeenCalled();
+  });
+
+  it('forwards safeParsed data to the server on valid input', async () => {
+    const cm = createMockClientManager({
+      callTool: vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'ok' }] }),
+    });
+    const tool = convertMCPTool({ name: 'strict', inputSchema: schema }, 'srv', cm);
+
+    const result = await tool.call({ cmd: 'ls', retries: 2, rogue: 'stripped' }, {} as any);
+
+    expect(result.output).toBe('ok');
+    expect(cm.callTool).toHaveBeenCalledWith('srv', 'strict', { cmd: 'ls', retries: 2 });
   });
 });

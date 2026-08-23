@@ -12,6 +12,20 @@ export type { LLMStreamEvent, TokenUsage, LLMRequestConfig, LLMResponse } from '
 export { ApiError } from './protocol';
 
 /**
+ * Per-request transport details that differ between providers.
+ * Everything else about the chat/stream pipelines (fetch → !ok →
+ * handleApiError → parse, catch-yield-finally-cancel) is identical across
+ * clients and lives in the two template methods below.
+ */
+export interface ApiRequestInit {
+  url: string;
+  body: Record<string, unknown>;
+  /** Defaults to buildHeaders() when omitted (Ollama sends bare headers). */
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+}
+
+/**
  * Abstract base class for all LLM API clients.
  * Provides a unified interface for streaming and non-streaming responses.
  */
@@ -103,7 +117,10 @@ export abstract class BaseApiClient {
   protected buildRequestBody(config: LLMRequestConfig): Record<string, unknown> {
     const body: Record<string, unknown> = {
       model: this.model,
-      messages: this.formatMessages(config.messages),
+      // T18/M4 boundary: the protocol module ships opaque structural mirrors;
+      // this client's formatter works on the concrete conversation shapes that
+      // the engine passed in (runtime-guaranteed by construction).
+      messages: this.formatMessages(config.messages as ChatMessage[]),
       stream: config.stream ?? true,
     };
 
@@ -120,7 +137,7 @@ export abstract class BaseApiClient {
     }
 
     if (config.tools && config.tools.length > 0) {
-      body.tools = this.formatTools(config.tools);
+      body.tools = this.formatTools(config.tools as ToolDefinition[]);
     }
 
     return body;
@@ -329,6 +346,92 @@ export abstract class BaseApiClient {
 
     const message = error instanceof Error ? error.message : String(error);
     throw new ApiError(`${context}: ${message}`, statusCode, headers);
+  }
+
+  /**
+   * Template method for the non-streaming request pipeline (audit round3 T15/M1).
+   *
+   * Unified sequence shared by all clients:
+   *   fetch → !ok → handleApiError → parse
+   * with a single catch that re-wraps every failure — including the ApiError
+   * thrown by the !ok branch and errors thrown by `parse` — through
+   * handleApiError (preserving the historical double-wrap error messages).
+   *
+   * `op` names the operation for both error contexts: `${op} API error` on the
+   * !ok path, `Failed to call ${op} API` on the catch path; pass
+   * `failureContext` to override the latter (Ollama appends a hint sentence).
+   */
+  protected async withChatErrorHandling<T>(
+    op: string,
+    request: ApiRequestInit,
+    parse: (data: Record<string, unknown>) => T,
+    failureContext?: string,
+  ): Promise<T> {
+    let response: Response | undefined;
+    try {
+      response = await fetch(request.url, {
+        method: 'POST',
+        headers: request.headers ?? this.buildHeaders(),
+        body: JSON.stringify(request.body),
+        signal: request.signal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), `${op} API error`, response);
+      }
+
+      const data = await response.json() as Record<string, unknown>;
+      return parse(data);
+    } catch (error) {
+      this.handleApiError(error, failureContext ?? `Failed to call ${op} API`);
+    }
+  }
+
+  /**
+   * Template method for the streaming request pipeline (audit round3 T15/M1).
+   *
+   * Unified sequence shared by all clients:
+   *   fetch → !ok → handleApiError → body-null guard → yield* frames
+   * with the identical catch-yield-error-finally-cancel epilogue: any failure
+   * is yielded as a single `{ type: 'error' }` event and the response body is
+   * cancelled when the generator exits. SSE/NDJSON frame parsing itself stays
+   * in the subclass (`gen` receives the validated ReadableStream).
+   *
+   * `op` names the operation for the !ok error context (`${op} API error`).
+   */
+  protected async *withStreamErrorHandling(
+    op: string,
+    request: ApiRequestInit,
+    gen: (body: ReadableStream) => AsyncGenerator<LLMStreamEvent>,
+  ): AsyncGenerator<LLMStreamEvent> {
+    let response: Response | undefined;
+    try {
+      response = await fetch(request.url, {
+        method: 'POST',
+        headers: request.headers ?? this.buildHeaders(),
+        body: JSON.stringify(request.body),
+        signal: request.signal,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), `${op} API error`, response);
+      }
+
+      if (!response.body) {
+        throw new Error('Response body is null');
+      }
+
+      yield* gen(response.body);
+    } catch (error) {
+      yield {
+        type: 'error',
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
+    } finally {
+      await response?.body?.cancel();
+    }
   }
 
   /**

@@ -6,7 +6,7 @@ import {
   advanceCursor,
   getExtractionStats,
   resetExtractionState,
-} from '../../src/services/memoryExtraction';
+} from '../../src/memory/memoryExtraction';
 import type { PostTurnHookContext } from '../../src/hooks/postTurnHooks';
 
 // Mock FileMemoryService

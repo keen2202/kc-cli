@@ -12,6 +12,7 @@ import {
   type LlmExtractionClient,
 } from './memoryExtraction';
 import type { BudgetEnforcer } from '../services/budget';
+import { logger } from '../services/logger';
 
 export interface MemoryIntegrationConfig {
   config?: Partial<MemoryConfig>;
@@ -139,7 +140,9 @@ export class MemoryIntegration {
       // Format as context for system prompt
       return `\n\n# Relevant Memories\n\n${memoryContents.join('\n\n---\n\n')}`;
     } catch (error) {
-      console.warn('[MemoryIntegration] Failed to load memories:', error);
+      logger.memory.warn('[MemoryIntegration] Failed to load memories', {
+        error: String(error),
+      });
       return '';
     }
   }
@@ -184,15 +187,21 @@ export class MemoryIntegration {
           await this.saveMemory(memory);
           savedCount++;
         } catch (err) {
-          console.warn('[MemoryIntegration] Failed to save extracted memory:', err);
+          logger.memory.warn('[MemoryIntegration] Failed to save extracted memory', {
+            fileName: memory.fileName,
+            memoryType: memory.header.type,
+            error: String(err),
+          });
         }
       }
 
       if (savedCount > 0) {
-        console.log(`[MemoryIntegration] Extracted and saved ${savedCount} memories`);
+        logger.memory.info('[MemoryIntegration] Extracted and saved memories', { savedCount });
       }
     } catch (error) {
-      console.warn('[MemoryIntegration] Failed to extract memories:', error);
+      logger.memory.warn('[MemoryIntegration] Failed to extract memories', {
+        error: String(error),
+      });
     }
   }
 
@@ -225,7 +234,12 @@ export class MemoryIntegration {
           await this.bridgeCluster(cluster, manifest);
           savedCount++;
         } catch (err) {
-          console.warn('[MemoryIntegration] Failed to bridge failure signature:', err);
+          logger.memory.warn('[MemoryIntegration] Failed to bridge failure signature', {
+            terminalCause: cluster.signature.terminalCause,
+            mechanism: cluster.signature.mechanism,
+            fileName: failureMemoryFileName(cluster),
+            error: String(err),
+          });
         }
       }
 
@@ -234,7 +248,11 @@ export class MemoryIntegration {
         invalidateScoreCache();
       }
     } catch (error) {
-      console.warn('[MemoryIntegration] Failed to bridge failure signatures:', error);
+      logger.memory.warn('[MemoryIntegration] Failed to bridge failure signatures', {
+        clusterCount: evidence.clusters.length,
+        threshold,
+        error: String(error),
+      });
     }
   }
 

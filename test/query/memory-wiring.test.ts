@@ -39,7 +39,7 @@ vi.mock('../../src/services/sandbox', () => {
 import type { LLMProvider } from '../../src/api';
 import { initializeState } from '../../src/bootstrap/state';
 import { QueryEngine } from '../../src/query/QueryEngine';
-import { resetExtractionState } from '../../src/services/memoryExtraction';
+import { resetExtractionState } from '../../src/memory/memoryExtraction';
 import { resetTelemetry } from '../../src/memory/telemetry';
 import type { ChatMessage } from '../../src/query/protocol';
 

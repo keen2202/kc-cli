@@ -5,16 +5,15 @@ import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolUseContext, ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import { hasPermissionsToUseTool } from '../../permissions/engine';
-import { isReadOnlyBashCommand, isDangerousBashCommand } from '../../permissions/readonlyCommands';
-import { normalizeCommand } from '../../permissions/commandNormalizer';
-import { isAlreadySandboxWrapped } from '../../executors/toolExecutor';
+import { isReadOnlyBashCommand } from '../../permissions/readonlyCommands';
 import { isExecError, getErrorMessage } from '../../utils/errors';
 import { buildSafeEnv } from '../RunTool/secrets';
 import {
-  detectUnixFindOnWindows,
-  getWindowsCommandHint,
-  isCommandNotFoundOutput,
-} from './windows-compat';
+  applySandboxPreWrap,
+  checkDangerousCommand,
+  guardsWindowsFind,
+  handleNonZeroExit,
+} from '../shared/command-execution';
 
 const BashInputSchema = z.object({
   command: z.string().describe('The bash command to execute'),
@@ -45,9 +44,9 @@ export const tool = buildTool<BashInput, string>({
       // Windows guard: Unix `find` syntax resolves to FIND.EXE (text search)
       // under cmd.exe and fails with a cryptic parameter error. Fail fast with
       // an actionable diagnosis instead of a confusing downstream failure.
-      const findIncompat = detectUnixFindOnWindows(input.command);
-      if (findIncompat) {
-        return toolError(`[tool_execution_failed] Command not executed: ${findIncompat}`, {
+      const findGuard = guardsWindowsFind(input.command, process.platform);
+      if (findGuard.blocked) {
+        return toolError(findGuard.errorMessage, {
           command: input.command,
           platform: process.platform,
         });
@@ -56,33 +55,18 @@ export const tool = buildTool<BashInput, string>({
       // The ToolExecutor pre-wraps commands for 'Bash' tool at the executor level
       // (the authoritative sandbox enforcement point). If the command has already
       // been wrapped, we use it as-is to avoid double-wrapping.
-      // Check for the executor's wrapping marker and HMAC signature on the input.
-      const inputRecord = input as Record<string, unknown>;
-      const alreadyWrapped = isAlreadySandboxWrapped(inputRecord, 'Bash');
-
-      let wrappedCmd = input.command;
-      let sandboxed = false;
-      let sandboxBackend: string | undefined;
-
-      if (alreadyWrapped) {
-        // Executor already wrapped the command — use it directly
-        sandboxed = context.sandbox?.isAvailable() ?? false;
-        sandboxBackend = context.sandbox?.getBackendName();
-      } else if (context.sandbox) {
-        // Fallback: wrap via shared sandbox manager from ToolExecutor
-        try {
-          wrappedCmd = context.sandbox.wrapCommand(input.command, 'Bash');
-          sandboxed = context.sandbox.isAvailable();
-          sandboxBackend = context.sandbox.getBackendName();
-        } catch {
-          // Sandbox denied — this should have been caught by ToolExecutor already
-          throw new Error('Bash tool requires sandbox but sandbox is not available');
-        }
-      }
+      // Shared helper checks the executor's wrapping marker + HMAC signature
+      // and falls back to wrapping via the shared sandbox manager.
+      const wrap = applySandboxPreWrap({
+        command: input.command,
+        toolName: 'Bash',
+        input: input as Record<string, unknown>,
+        sandbox: context.sandbox,
+      });
 
       // Execute wrapped command via ExecutionEnv abstraction
       // Pass filtered env to prevent KC_* secrets leak (SEC-03)
-      const result = await context.env.shell.exec(wrappedCmd, {
+      const result = await context.env.shell.exec(wrap.wrappedCmd, {
         cwd: workingDir,
         timeout,
         env: buildSafeEnv(),
@@ -92,13 +76,16 @@ export const tool = buildTool<BashInput, string>({
       if (result.exitCode !== 0) {
         // Append a Windows-native replacement hint when a Unix-only command
         // fails with a "not recognized" error (e.g. grep/awk on cmd.exe).
-        const combinedOutput = `${result.stderr}\n${result.stdout}`;
-        const winHint = isCommandNotFoundOutput(combinedOutput)
-          ? getWindowsCommandHint(input.command)
-          : null;
+        const failure = handleNonZeroExit({
+          exitCode: result.exitCode,
+          command: input.command,
+          scanText: `${result.stderr}\n${result.stdout}`,
+          detail: result.stderr || 'non-zero exit code',
+          platform: process.platform,
+        });
         return toolResult(result.stdout, {
           isError: true,
-          message: `Command failed (exit ${result.exitCode}): ${result.stderr || 'non-zero exit code'}${winHint ? `\n${winHint}` : ''}`,
+          message: failure.message,
           metadata: { exitCode: result.exitCode, stderr: result.stderr },
         });
       }
@@ -108,8 +95,8 @@ export const tool = buildTool<BashInput, string>({
         metadata: {
           exitCode: 0,
           stderr: result.stderr.trim() || undefined,
-          sandboxed,
-          sandboxBackend,
+          sandboxed: wrap.sandboxed,
+          sandboxBackend: wrap.sandboxBackend,
         },
       });
     } catch (error) {
@@ -126,13 +113,12 @@ export const tool = buildTool<BashInput, string>({
   },
 
   checkPermissions: (input, context): PermissionResult => {
-    const command = normalizeCommand(input.command.trim());
-
     // Check for dangerous commands (bypass-resistant: handles var/$(...)/base64/|sh)
-    if (isDangerousBashCommand(command)) {
+    const dangerousVerdict = checkDangerousCommand(input.command, { normalize: true });
+    if (dangerousVerdict.dangerous) {
       return {
         behavior: 'deny',
-        message: `Dangerous command detected: ${command}`,
+        message: `Dangerous command detected: ${dangerousVerdict.classifiedCommand}`,
         decisionReason: {
           type: 'dangerous_command',
           reason: 'Command matches dangerous pattern',
@@ -141,6 +127,7 @@ export const tool = buildTool<BashInput, string>({
     }
 
     // Check for read-only commands
+    const command = dangerousVerdict.classifiedCommand;
     if (isReadOnlyBashCommand(command)) {
       return {
         behavior: 'allow',

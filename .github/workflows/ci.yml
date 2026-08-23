@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [20.x, 22.x]
+        node-version: [22.x, 24.x]
 
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +24,13 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Audit round3 (T23/L4): fail CI on known high-severity advisories.
+      # Baseline 2026-08-23: 0 high/critical (npm audit fix cleared the former
+      # MCP-SDK-chain highs). If this step fails, add a pin/override or an
+      # explicitly-dated exemption here — never delete the gate.
+      - name: Dependency audit (high+)
+        run: npm audit --audit-level=high
 
       - name: Lint
         run: npm run lint
@@ -42,3 +49,38 @@ jobs:
       - name: Coverage gate
         run: npx vitest run --coverage
         if: matrix.node-version == '22.x'
+
+      # Audit round3 (T20/M7): ratchet mechanism — any module below its
+      # committed baseline fails the build; modules exceeding their baseline by
+      # ≥1pp auto-raise it (the updated scripts/coverage-baseline.json must be
+      # committed with the change).
+      - name: Coverage ratchet
+        run: |
+          npx vitest run --coverage --coverage.reporter=json-summary --coverage.reporter=text-summary
+          node scripts/coverage-ratchet.mjs
+        if: matrix.node-version == '22.x' && github.ref == 'refs/heads/main'
+        continue-on-error: false
+
+  # Audit round3 (T03): guarantee the OS-level sandbox e2e suite actually
+  # EXECUTES on at least one CI leg. Without this job the canary probe finds
+  # no backend and every e2e case reports as skipped (visible in the reporter,
+  # but never verified).
+  sandbox-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install bubblewrap
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run sandbox e2e (backend present — skipped cases would mean a regression)
+        run: npx vitest run test/integration/sandbox-e2e.test.ts --reporter=verbose

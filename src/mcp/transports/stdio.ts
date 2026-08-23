@@ -3,6 +3,7 @@
 import { spawn, type ChildProcess } from 'child_process';
 import { createRequire } from 'node:module';
 import type { JSONRPCRequest, JSONRPCResponse, JSONRPCNotification } from '../types';
+import { logger } from '../../services/logger';
 
 // ESM-compatible require for optionally loading the MCP SDK transport (CommonJS)
 const require = createRequire(import.meta.url);
@@ -52,8 +53,14 @@ export class StdioTransport {
       await this.sdkTransport!.connect();
       this.useSdk = true;
       return;
-    } catch {
-      // SDK not available, fall back to hand-rolled implementation
+    } catch (err) {
+      // Optional-dependency feature detection: the SDK is not installed (or
+      // failed to load), which is a supported configuration — fall back to the
+      // hand-rolled implementation below. Logged at debug so the fallback is
+      // observable without turning "SDK absent" into an error-level signal.
+      logger.mcp.debug('[MCP stdio] SDK transport unavailable — using built-in framing fallback', {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     return new Promise((resolve, reject) => {
@@ -239,8 +246,15 @@ export class StdioTransport {
       try {
         const message = JSON.parse(body);
         this.handleMessage(message);
-      } catch {
-        // Ignore malformed messages
+      } catch (err) {
+        // Data-path failure: a complete Content-Length frame failed to parse.
+        // The transport stays alive (MCP servers may emit non-JSON frames), but
+        // the corruption is surfaced. Payload content is never logged — only
+        // its size — so message contents cannot leak into logs.
+        logger.mcp.warn('[MCP stdio] Dropping malformed JSON-RPC frame', {
+          error: err instanceof Error ? err.message : String(err),
+          bytes: body.length,
+        });
       }
     }
   }

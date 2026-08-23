@@ -14,12 +14,12 @@ KC-CLI is a modular CLI agent that orchestrates LLM providers, 21 built-in tools
 - [[State-Management]] -- Observable state store, session tree, state machine validation
 
 ### Subsystems
-- [[Tools-System]] -- 21 built-in tools, two-phase execution, lazy loading, registry
+- [[Tools-System]] -- 21 built-in tools, plugin-hook execution pipeline, lazy loading, registry
 - [[API-Clients]] -- 11 LLM providers, streaming protocol, prompt system
 - [[Permission-System]] -- 6-step deny-first engine, protected paths, plugin rules
 - [[Sandbox]] -- Docker/Bubblewrap/seccomp isolation, HMAC signing, policy system
 - [[Orchestrator]] -- Multi-agent lifecycle, EventBus, permission cascading
-- [[Memory-System]] -- File-based persistent memory, relevance search, consolidation
+- [[Memory-System]] -- File-based persistent memory, relevance search, auto-extraction
 - [[Plugin-System]] -- Contribution-based plugins, hooks, permission rules
 - [[UI-System]] -- Terminal UI (ink/React), layout system, focus-stack dialogs, theme system
 - [[Configuration]] -- 5-layer config, env vars, Zod validation
@@ -117,3 +117,9 @@ npm test
 5. **Tiered compaction**: 4 engines from cheap to expensive, circuit-breaker protected
 6. **Lazy tool loading**: CRITICAL+HIGH eager, MEDIUM+LOW+DEFERRED on-demand
 7. **AsyncLocalStorage isolation**: Sub-agents get independent contexts without process spawning
+
+
+## Reserved subsystems (no deep-dive page yet)
+
+- **AGP (`src/agp/`)** — evolution infrastructure (reserved): global registry, trace manager (evidence bundles feeding failure-bridging memory), prompt adapter. The SEPL self-evolution loop was removed in audit round3 T09; a dedicated wiki page will return only if the subsystem is revived.
+- **IM (`src/im/`)** — instant-message adapters (feishu etc.). No deep-dive page; treated as an integration periphery until it gains a stable surface worth documenting.

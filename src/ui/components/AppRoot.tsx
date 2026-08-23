@@ -5,9 +5,10 @@ import { DEFAULT_THEME } from '../theme';
 import { useStreamingEvents } from '../hooks/useStreamingEvents';
 import { Layout } from './Layout';
 import { HeaderBar } from './HeaderBar';
-import { ChatPanel } from './ChatPanel';
+import { TranscriptPanel } from '../panels/TranscriptPanel';
 import { SessionInfo } from './SessionInfo';
 import { Editor, openExternalEditor } from './Editor';
+import { ComposerPanel } from '../panels/ComposerPanel';
 import { StatusBar } from './StatusBarView.js';
 import { SidebarPanel } from './SidebarPanel';
 import { PermissionDialog, type PermissionRequest, type PermissionDecision } from './PermissionDialog';
@@ -159,6 +160,25 @@ interface AppOpenCodeProps {
 }
 
 /** Normalize an Ink (input, key) pair into a KeypressEvent for the focus stack. */
+/**
+ * Named-key resolution table (T25/L2): ink key flags mapped to focus-stack key
+ * names in strict priority order — FIRST match wins, identical precedence to
+ * the if/else chain this replaced.
+ */
+const KEY_FLAG_NAMES: ReadonlyArray<readonly [flag: string, name: string]> = [
+  ['upArrow', 'up'],
+  ['downArrow', 'down'],
+  ['leftArrow', 'left'],
+  ['rightArrow', 'right'],
+  ['pageUp', 'pageup'],
+  ['pageDown', 'pagedown'],
+  ['escape', 'escape'],
+  ['return', 'return'],
+  ['tab', 'tab'],
+  ['backspace', 'backspace'],
+  ['delete', 'delete'],
+];
+
 function toKeypressEvent(input: string, key: any): KeypressEvent {
   // Some Windows terminals deliver Shift+Tab as a raw ESC[Z sequence without
   // ink marking key.tab/key.shift — normalize it explicitly so the mode cycle
@@ -166,23 +186,19 @@ function toKeypressEvent(input: string, key: any): KeypressEvent {
   if (input === '\u001B[Z' || input === '[Z') {
     return { name: 'tab', ctrl: false, meta: false, shift: true, isPrintable: false };
   }
-  let name: string;
+  const flags = key as Record<string, unknown>;
+  let name: string | undefined;
+  for (const [flag, mapped] of KEY_FLAG_NAMES) {
+    if (flags[flag]) {
+      name = mapped;
+      break;
+    }
+  }
   let printable = false;
-  if (key.upArrow) name = 'up';
-  else if (key.downArrow) name = 'down';
-  else if (key.leftArrow) name = 'left';
-  else if (key.rightArrow) name = 'right';
-  else if (key.pageUp) name = 'pageup';
-  else if (key.pageDown) name = 'pagedown';
-  else if (key.escape) name = 'escape';
-  else if (key.return) name = 'return';
-  else if (key.tab) name = 'tab';
-  else if (key.backspace) name = 'backspace';
-  else if (key.delete) name = 'delete';
-  else {
-    name = input;
+  if (name === undefined) {
     // Printable text (single char or IME-composed string) — named keys above
     // never qualify, so consumers can trust this flag for text insertion.
+    name = input;
     printable = !key.ctrl && !key.meta && isPrintableUnicode(input);
   }
   return { name, ctrl: !!key.ctrl, meta: !!key.meta, shift: !!key.shift, isPrintable: printable };
@@ -1170,7 +1186,7 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
         }
         operationSummary={operationSummaryNode}
         chatPanel={
-          <ChatPanel
+          <TranscriptPanel
             messages={messages}
             thinkingChains={thinkingChains}
             scrollRef={chatScrollRef}
@@ -1179,10 +1195,10 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
           />
         }
         editor={
-          <Editor
+          <ComposerPanel
             text={inputState.text}
             cursorPos={inputState.cursorPos}
-            isSteerMode={inputState.steerMode}
+            isSteerMode={inputState.steerMode ?? false}
             attachments={attachmentState.attachments}
             deleteMode={attachmentState.deleteMode}
           />

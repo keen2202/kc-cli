@@ -4,16 +4,15 @@ import { z } from 'zod';
 import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
-import { isAlreadySandboxWrapped } from '../../executors/toolExecutor';
 import { getErrorMessage } from '../../utils/errors';
-import { isDangerousBashCommand } from '../../permissions/readonlyCommands';
 import { logger } from '../../services/logger';
 import { filterEnvVars } from './secrets';
 import {
-  detectUnixFindOnWindows,
-  getWindowsCommandHint,
-  isCommandNotFoundOutput,
-} from '../BashTool/windows-compat';
+  applySandboxPreWrap,
+  checkDangerousCommand,
+  guardsWindowsFind,
+  handleNonZeroExit,
+} from '../shared/command-execution';
 
 const RunInputSchema = z.object({
   command: z.string().describe('Command to execute'),
@@ -38,9 +37,9 @@ export const tool = buildTool<RunInput, string>({
 
       // Windows guard: Unix `find` syntax resolves to FIND.EXE under cmd.exe
       // and fails with a cryptic error — fail fast with actionable guidance.
-      const findIncompat = detectUnixFindOnWindows(input.command);
-      if (findIncompat) {
-        return toolError(`[tool_execution_failed] Command not executed: ${findIncompat}`, {
+      const findGuard = guardsWindowsFind(input.command, process.platform);
+      if (findGuard.blocked) {
+        return toolError(findGuard.errorMessage, {
           command: input.command,
           platform: process.platform,
         });
@@ -55,33 +54,18 @@ export const tool = buildTool<RunInput, string>({
       } as Record<string, string>;
 
       // The ToolExecutor pre-wraps commands for 'Run' tool at the executor level
-      // (the authoritative sandbox enforcement point). Check for the executor's
-      // wrapping marker and HMAC signature to avoid double-wrapping.
-      const inputRecord = input as Record<string, unknown>;
-      const alreadyWrapped = isAlreadySandboxWrapped(inputRecord, 'Run');
+      // (the authoritative sandbox enforcement point). Shared helper verifies the
+      // executor's wrapping marker + HMAC signature to avoid double-wrapping and
+      // falls back to wrapping via the shared sandbox manager.
+      const wrap = applySandboxPreWrap({
+        command: input.command,
+        toolName: 'Run',
+        input: input as Record<string, unknown>,
+        sandbox: context.sandbox,
+        onWrapError: (err) => logger.tools.error('Suppressed error: ' + String(err)),
+      });
 
-      let wrappedCmd = input.command;
-      let sandboxed = false;
-      let sandboxBackend: string | undefined;
-
-      if (alreadyWrapped) {
-        // Executor already wrapped the command — use it directly
-        sandboxed = context.sandbox?.isAvailable() ?? false;
-        sandboxBackend = context.sandbox?.getBackendName();
-      } else if (context.sandbox) {
-        // Fallback: wrap via shared sandbox manager from ToolExecutor
-        try {
-          wrappedCmd = context.sandbox.wrapCommand(input.command, 'Run');
-          sandboxed = context.sandbox.isAvailable();
-          sandboxBackend = context.sandbox.getBackendName();
-        } catch (_err) {
-          logger.tools.error('Suppressed error: ' + String(_err));
-          // Sandbox denied — should have been caught by ToolExecutor
-          throw new Error('Run tool requires sandbox but sandbox is not available');
-        }
-      }
-
-      const result = await context.env.shell.exec(wrappedCmd, {
+      const result = await context.env.shell.exec(wrap.wrappedCmd, {
         cwd: workingDir,
         timeout,
         env,
@@ -90,10 +74,14 @@ export const tool = buildTool<RunInput, string>({
 
       if (result.exitCode !== 0) {
         const output = (result.stdout || result.stderr || '').trim();
-        const winHint = isCommandNotFoundOutput(output)
-          ? getWindowsCommandHint(input.command)
-          : null;
-        return toolError(`Command failed (exit ${result.exitCode}): ${output}${winHint ? `\n${winHint}` : ''}`, {
+        const failure = handleNonZeroExit({
+          exitCode: result.exitCode,
+          command: input.command,
+          scanText: output,
+          detail: output,
+          platform: process.platform,
+        });
+        return toolError(failure.message, {
           command: input.command,
           exitCode: result.exitCode,
         });
@@ -105,8 +93,8 @@ export const tool = buildTool<RunInput, string>({
           command: input.command,
           cwd: workingDir,
           exitCode: 0,
-          sandboxed,
-          sandboxBackend,
+          sandboxed: wrap.sandboxed,
+          sandboxBackend: wrap.sandboxBackend,
         },
       });
     } catch (error) {
@@ -117,13 +105,12 @@ export const tool = buildTool<RunInput, string>({
   },
 
   checkPermissions: (input, context): PermissionResult => {
-    const command = input.command.trim();
-
     // Block dangerous commands (bypass-resistant: handles var/$(...)/base64/|sh)
-    if (isDangerousBashCommand(command)) {
+    const dangerousVerdict = checkDangerousCommand(input.command);
+    if (dangerousVerdict.dangerous) {
       return {
         behavior: 'deny',
-        message: `Dangerous command blocked: ${command}`,
+        message: `Dangerous command blocked: ${dangerousVerdict.classifiedCommand}`,
       };
     }
 

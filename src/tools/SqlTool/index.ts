@@ -3,7 +3,8 @@
 import { z } from 'zod';
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
+import * as path from 'node:path';
 import { createRequire } from 'node:module';
 import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
@@ -98,9 +99,41 @@ export function rejectDangerousSql(query: string): string | null {
 }
 
 /**
+ * Best-effort realpath: returns the fully resolved path, or null when the
+ * path does not exist (or cannot be resolved). Used by resolveAllowed for
+ * symlink escape protection — a not-yet-created database file is acceptable.
+ */
+function tryRealpath(p: string): string | null {
+  try {
+    return realpathSync(p);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when `p` contains a literal '..' path segment (either separator),
+ * before any normalization.
+ */
+function hasDotDotSegment(p: string): boolean {
+  return p.split(/[\\/]/).includes('..');
+}
+
+/**
+ * Boundary-safe containment check: `candidate` lies within `base` only when it
+ * equals base or extends it across a real path separator (C2 hardening — plain
+ * prefix matching admitted siblings like `/data/dbs-backup` for base `/data/dbs`).
+ */
+function isWithin(candidate: string, base: string): boolean {
+  return candidate === base || candidate.startsWith(base + path.sep);
+}
+
+/**
  * Resolve an ad-hoc database path against the sql.allowedPaths whitelist.
  * Returns { path, readonly } if allowed, null if rejected.
  * (S1 hardening: AC-S1.1 — reject :memory: and non-whitelisted paths)
+ * (C2 hardening: normalize via path.resolve, fail-closed on '..' segments,
+ * segment-boundary whitelist matching, realpath symlink escape protection)
  */
 export function resolveAllowed(
   state: ReturnType<typeof getState>,
@@ -112,8 +145,30 @@ export function resolveAllowed(
   const allowed = sqlConfig.allowedPaths;
   // :memory: bypasses filesystem isolation — always reject for ad-hoc use
   if (database === ':memory:') return null;
-  const target = database.startsWith('/') ? database : `${cwd}/${database}`;
-  if (!allowed.some(p => target.startsWith(p))) return null;
+  // Fail-closed on the raw input: any '..' segment means traversal and is
+  // rejected outright, even if normalization would collapse it back inside
+  // the whitelist (e.g. /data/dbs/../dbs/x.db).
+  if (hasDotDotSegment(database)) return null;
+  // Normalize before comparing: absolute inputs kept as-is, relative joined with cwd
+  const target = path.resolve(database.startsWith('/') ? database : `${cwd}/${database}`);
+  // Defense-in-depth per spec sketch: reject '..' segments that survive normalization
+  if (target.split(path.sep).includes('..')) return null;
+  // Boundary matching: an entry matches only at a path-segment boundary
+  const bases = allowed.map(p => path.resolve(p));
+  const isAllowed = bases.some(base => isWithin(target, base));
+  if (!isAllowed) return null;
+  // Realpath escape protection (symlink defense): when the target exists, its
+  // resolved location must still fall under one of the whitelist entries'
+  // resolved locations. Both sides are real-pathed where possible so a
+  // whitelisted directory reached through a symlinked parent still matches,
+  // while a symlink pointing outside the whitelist is rejected. A missing
+  // target (database file not created yet) skips this check — steps above
+  // already bound it to the whitelist.
+  const realTarget = tryRealpath(target);
+  if (realTarget !== null) {
+    const escaped = !bases.some(base => isWithin(realTarget, tryRealpath(base) ?? base));
+    if (escaped) return null;
+  }
   return { path: target, readonly: sqlConfig.allowWrite !== true };
 }
 

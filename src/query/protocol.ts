@@ -192,11 +192,6 @@ export interface QueryEngineConfig {
     ask?: string[];
     allow?: string[];
   };
-  /** AGP Evolution hook — called after query completion if evolution is enabled */
-  evolution?: {
-    enabled: boolean;
-    onEvolve?: (sessionId: string) => Promise<void>;
-  };
   /** Auto-extend turn budget when active progress is detected */
   autoExtendTurns?: boolean;
   /** Hard ceiling for auto-extended turns; 0 or negative = unbounded (engine-local default 100) */

@@ -4,7 +4,7 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 
 ## v3.2 Highlights
 
-- 🧬 **Autogenesis Protocol (AGP)**: Self-evolving multi-agent system with SEPL pipeline (reflect→select→improve→evaluate→commit), version management, and audit logging
+- 🧬 **Evolution Infrastructure (AGP, reserved)**: global agent/solution registry, execution trace manager (evidence bundles for failure-bridging memory), and prompt adapter — the dormant SEPL self-evolution loop was removed in audit round3 T09
 - 🔒 **Sandbox Security**: Shell commands run in isolated sandboxes (Docker/Bubblewrap/seccomp) with network isolation, resource limits, and escape detection. **Hard-fails by default** if no sandbox backend is available — set `KC_SANDBOX_FAIL_IF_NO_SANDBOX=false` to opt out (NOT recommended for production). macOS requires Docker Desktop; Linux needs only `apt install bubblewrap`.
 - 🎨 **Redesigned UI**: ink/React terminal UI with sidebar (Tools/Files/Tasks/Memory), diff preview, command palette, focus-stack dialogs, theme system, multi-panel layout
 - 🔌 **LSP Integration**: Code completions, diagnostics, go-to-definition, find references, rename, quick fixes for 7 languages
@@ -23,7 +23,7 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 
 ## Features
 
-- **Modular Tools**: 23 built-in tools with two-phase execution (prepare/execute/finalize) — Bash, file I/O, file restore, search, Git, SQL, Docker, deployment, task management, sub-agent spawning, team orchestration, and LSP code intelligence
+- **Modular Tools**: 23 built-in tools with single-phase execution (`call` + permission check + plugin preToolUse/postToolUse hooks) — Bash, file I/O, file restore, search, Git, SQL, Docker, deployment, task management, sub-agent spawning, team orchestration, and LSP code intelligence
 - **Multi-LLM Support**: Anthropic Claude, OpenAI GPT, DeepSeek, Qwen (DashScope), GLM (Zhipu AI), Mimo, Kimi, Step, Google Gemini, OpenAI-compatible, and Ollama (local); 9 stream event types including thinking_delta
 - **Permission System**: 6-step deny-first security with bypass-immune safety checks, protected paths, auto-classifier, and plugin-contributed rules (Step 3.5)
 - **Sandbox Isolation**: Docker/Bubblewrap/seccomp backends with per-tool policies, seccomp profiles, and resource limits
@@ -39,13 +39,13 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 - **ExecutionEnv**: Swappable FileSystem/Shell abstraction; MockExecutionEnv for testing without real I/O
 - **Session Management**: Session persistence, archival, pruning, and recovery with configurable retention
 - **Interactive REPL**: Terminal UI with sidebar, diff preview, command palette, model selector, and steer mode
-- **Node.js Compatible**: Requires Node.js 20+ (no Bun required)
+- **Node.js Compatible**: Requires Node.js 22+ (no Bun required)
 
 ## Quick Start
 
 ### Prerequisites
 
-- Node.js 20 or higher
+- Node.js 22 or higher (required by ink 7; Node 20 reached end-of-life)
 - npm or yarn
 - API key for your chosen LLM provider
 - **Sandbox backend** (default: hard-fail without one):
@@ -56,7 +56,7 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 
 ### Installation
 
-**Prerequisites:** See [Prerequisites](#prerequisites) above — you need Node.js 20+, a sandbox backend, and at least one LLM provider's API key.
+**Prerequisites:** See [Prerequisites](#prerequisites) above — you need Node.js 22+, a sandbox backend, and at least one LLM provider's API key.
 
 ```bash
 # 1. Clone the repository
@@ -383,14 +383,12 @@ src/
 │   ├── promptCacheMetrics.ts       # Prompt cache hit/miss tracking
 │   ├── sessionManager.ts           # Session lifecycle (save, load, archive, prune, stats)
 │   ├── replSession.ts              # Non-UI REPL session persistence
-│   ├── idleDetection.ts            # Idle detection for consolidation triggering
-│   ├── consolidationScheduler.ts   # Scheduled memory consolidation
+│   ├── idleDetection.ts            # Idle detection for post-turn triggers
 │   ├── memoryConsolidation.ts      # Consolidation execution logic
 │   ├── memoryExtraction.ts         # Memory extraction from conversations
 │   ├── memory-extraction-guard.ts  # Guardrails for LLM memory extraction
 │   ├── memoryQuality.ts            # Memory quality assessment
 │   ├── extractionPrompts.ts        # LLM prompts for memory extraction
-│   ├── consolidationPrompts.ts     # LLM prompts for consolidation
 │   ├── operation-audit-log.ts      # High-risk operation audit logging
 │   ├── error-classifier.ts         # Error classification for retry decisions
 │   ├── behavioralAdapter.ts        # Behavioral adaptation based on patterns
@@ -419,33 +417,18 @@ src/
 │   ├── events.ts                   # AgentEvent, MultiAgentEvent, TokenUsage types
 │   └── types.ts                    # Re-export barrel
 │
-├── agp/                            # Autogenesis Protocol (self-evolving multi-agent)
+├── agp/                            # Evolution infrastructure (reserved; SEPL loop removed in audit round3 T09)
 │   ├── protocol.ts                 # AGP public types
 │   ├── registry.ts                 # Agent/solution registry
 │   ├── context-manager.ts          # Context management for evolution
 │   ├── version-manager.ts          # Version tracking and rollback
 │   ├── dynamic-manager.ts          # Dynamic agent management
-│   ├── contract-generator.ts       # Contract generation
-│   ├── trace-manager.ts            # Execution tracing
-│   ├── audit-log.ts                # Audit logging
-│   ├── serialization.ts            # State serialization
+│   ├── trace-manager.ts            # Execution tracing + evidence bundles
 │   ├── server-interface.ts         # Server interface
-│   ├── sepl/                       # Self-Evolving Pipeline
-│   │   ├── reflect.ts              # Reflection phase
-│   │   ├── select.ts               # Selection phase
-│   │   ├── improve.ts              # Improvement phase
-│   │   ├── evaluate.ts             # Evaluation phase
-│   │   ├── commit.ts               # Commit phase
-│   │   └── evolution-loop.ts       # Main evolution loop
-│   ├── strategies/
-│   │   ├── prompt-evolution.ts     # Prompt evolution strategy
-│   │   └── solution-evolution.ts   # Solution evolution strategy
+│   ├── sepl/
+│   │   └── protocol.ts             # Evidence-bundle type contract (used by trace manager & memory bridging)
 │   └── adapters/
-│       ├── agent-adapter.ts        # Agent adapter
-│       ├── env-adapter.ts          # Environment adapter
-│       ├── mem-adapter.ts          # Memory adapter
-│       ├── prompt-adapter.ts       # Prompt adapter
-│       └── tool-adapter.ts         # Tool adapter
+│       └── prompt-adapter.ts       # Prompt adapter
 │
 ├── tools/                          # 21 built-in tool implementations + registry
 │   ├── AgentTool/                  # Sub-agent spawning
@@ -667,12 +650,12 @@ npm run test:coverage # Run tests with coverage report
 - [Home](docs/repowiki/Home.md) — Overview, architecture diagram, quick start
 - [Architecture](docs/repowiki/Architecture.md) — Layer diagram, init sequence, data flow
 - [Query Engine](docs/repowiki/Query-Engine.md) — State machine, streaming, steering
-- [Tools System](docs/repowiki/Tools-System.md) — 23 tools, registry, two-phase execution
-- [API Clients](docs/repowiki/API-Clients.md) — 11 providers, prompt system
+- [Tools System](docs/repowiki/Tools-System.md) — 23 tools, registry, plugin hooks
+- [API Clients](docs/repowiki/API-Clients.md) — 11 provider endpoints / 3 client classes, prompt system
 - [Permission System](docs/repowiki/Permission-System.md) — 6-step deny-first, rule system
 - [Sandbox](docs/repowiki/Sandbox.md) — Isolation backends, HMAC signing, compaction
 - [Orchestrator](docs/repowiki/Orchestrator.md) — Multi-agent lifecycle, EventBus
-- [Memory System](docs/repowiki/Memory-System.md) — File-based memory, consolidation
+- [Memory System](docs/repowiki/Memory-System.md) — File-based memory, relevance search, auto-extraction
 - [Plugin System](docs/repowiki/Plugin-System.md) — 5 contribution types, hooks
 - [UI System](docs/repowiki/UI-System.md) — Layout, themes, focus-stack dialogs, event pipeline
 - [State Management](docs/repowiki/State-Management.md) — Observable store, SessionTree

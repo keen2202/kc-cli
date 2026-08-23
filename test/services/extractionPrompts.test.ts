@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildExtractionPrompt } from '../../src/services/extractionPrompts';
+import { buildExtractionPrompt } from '../../src/memory/extractionPrompts';
 
 describe('buildExtractionPrompt', () => {
   it('should build prompt without existing memories', () => {

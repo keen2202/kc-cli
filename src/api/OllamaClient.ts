@@ -22,68 +22,42 @@ export class OllamaClient extends BaseApiClient {
   }
 
   /**
-   * Send a chat completion request
+   * Send a chat completion request.
+   * Transport + error pipeline delegated to BaseApiClient.withChatErrorHandling;
+   * Ollama needs no API-key guard, bare headers and a custom catch-path
+   * context (the "is Ollama running?" hint), so those are passed explicitly.
    */
   async chat(config: LLMRequestConfig): Promise<LLMResponse> {
-    const requestBody = this.buildRequestBody({ ...config, stream: false });
-
-    try {
-      const response = await fetch(`${this.baseUrl}/api/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
+    return this.withChatErrorHandling(
+      'Ollama',
+      {
+        url: `${this.baseUrl}/api/chat`,
+        headers: { 'Content-Type': 'application/json' },
+        body: this.buildRequestBody({ ...config, stream: false }),
         signal: config.abortSignal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'Ollama API error', response);
-      }
-
-      const data = await response.json() as Record<string, unknown>;
-      return this.parseResponse(data);
-    } catch (error) {
-      this.handleApiError(error, 'Failed to call Ollama API. Make sure Ollama is running');
-    }
+      },
+      data => this.parseResponse(data),
+      'Failed to call Ollama API. Make sure Ollama is running',
+    );
   }
 
   /**
-   * Stream chat completion response
+   * Stream chat completion response.
+   * Transport + catch-yield-error-finally-cancel pipeline delegated to
+   * BaseApiClient.withStreamErrorHandling; the NDJSON line parser remains
+   * provider-specific.
    */
   async *streamChat(config: LLMRequestConfig): AsyncGenerator<LLMStreamEvent> {
-    const requestBody = this.buildRequestBody({ ...config, stream: true });
-
-    let response: Response | undefined;
-    try {
-      response = await fetch(`${this.baseUrl}/api/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
+    yield* this.withStreamErrorHandling(
+      'Ollama',
+      {
+        url: `${this.baseUrl}/api/chat`,
+        headers: { 'Content-Type': 'application/json' },
+        body: this.buildRequestBody({ ...config, stream: true }),
         signal: config.abortSignal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'Ollama API error', response);
-      }
-
-      if (!response.body) {
-        throw new Error('Response body is null');
-      }
-
-      yield* this.parseStreamResponse(response.body);
-    } catch (error) {
-      yield {
-        type: 'error',
-        error: error instanceof Error ? error : new Error(String(error)),
-      };
-    } finally {
-      await response?.body?.cancel();
-    }
+      },
+      body => this.parseStreamResponse(body),
+    );
   }
 
   /**
@@ -129,7 +103,8 @@ export class OllamaClient extends BaseApiClient {
       });
     }
 
-    messages.push(...this.formatMessages(config.messages));
+    // T18/M4 boundary: reclaim the concrete shapes (see protocol-decoupling test).
+    messages.push(...this.formatMessages(config.messages as ChatMessage[]));
     body.messages = messages;
 
     // Ollama options
@@ -140,7 +115,7 @@ export class OllamaClient extends BaseApiClient {
 
     // Tools (Ollama 0.1.30+ supports function calling)
     if (config.tools && config.tools.length > 0) {
-      body.tools = this.formatTools(config.tools);
+      body.tools = this.formatTools(config.tools as ToolDefinition[]);
     }
 
     return body;

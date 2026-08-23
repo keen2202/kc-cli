@@ -164,11 +164,9 @@ executors/    ──imports──► services/execution-env.ts (interface)
    └─ ToolExecutor.executeParallel(toolCalls)
       ├─ For each tool:
       │  ├─ plugin.preToolUse() hook
-      │  ├─ tool.prepare()
       │  ├─ permissionEngine.check()
       │  ├─ sandboxManager.wrapCommand() [if Bash/Run]
       │  ├─ tool.call()
-      │  ├─ tool.finalize()
       │  └─ plugin.postToolUse() hook
       └─ Budget check after each result
 7. State: executing → streaming (loop if tool results)

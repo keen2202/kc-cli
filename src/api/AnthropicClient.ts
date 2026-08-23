@@ -28,75 +28,46 @@ export class AnthropicClient extends BaseApiClient {
   }
 
   /**
-   * Send a chat completion request
+   * Send a chat completion request.
+   * Transport + error pipeline delegated to BaseApiClient.withChatErrorHandling;
+   * only payload building and response parsing are provider-specific here.
    */
   async chat(config: LLMRequestConfig): Promise<LLMResponse> {
     if (!this.apiKey) {
       throw new ApiError('Anthropic API key is required. Use /key to set.', 401);
     }
-    const requestBody = this.buildRequestBody({ ...config, stream: false });
-    const headers = this.buildHeaders();
-
-    try {
-      const response = await fetch(`${this.baseUrl}/v1/messages`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
+    return this.withChatErrorHandling(
+      'Anthropic',
+      {
+        url: `${this.baseUrl}/v1/messages`,
+        body: this.buildRequestBody({ ...config, stream: false }),
         signal: config.abortSignal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'Anthropic API error', response);
-      }
-
-      const data = await response.json() as Record<string, unknown>;
-      return this.parseResponse(data);
-    } catch (error) {
-      this.handleApiError(error, 'Failed to call Anthropic API');
-    }
+      },
+      data => this.parseResponse(data),
+    );
   }
 
   /**
-   * Stream chat completion response
+   * Stream chat completion response.
+   * Transport + catch-yield-error-finally-cancel pipeline delegated to
+   * BaseApiClient.withStreamErrorHandling; the SSE block parser remains
+   * provider-specific.
    */
   async *streamChat(config: LLMRequestConfig): AsyncGenerator<LLMStreamEvent> {
     if (!this.apiKey) {
       throw new ApiError('Anthropic API key is required. Use /key to set.', 401);
     }
-    const requestBody = this.buildRequestBody({ ...config, stream: true });
-    const headers = {
-      ...this.buildHeaders(),
-      'Accept': 'text/event-stream',
-    };
 
-    let response: Response | undefined;
-    try {
-      response = await fetch(`${this.baseUrl}/v1/messages`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(requestBody),
+    yield* this.withStreamErrorHandling(
+      'Anthropic',
+      {
+        url: `${this.baseUrl}/v1/messages`,
+        body: this.buildRequestBody({ ...config, stream: true }),
+        headers: { ...this.buildHeaders(), 'Accept': 'text/event-stream' },
         signal: config.abortSignal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        this.handleApiError(new Error(`HTTP ${response.status}: ${errorText}`), 'Anthropic API error', response);
-      }
-
-      if (!response.body) {
-        throw new Error('Response body is null');
-      }
-
-      yield* this.parseStreamResponse(response.body);
-    } catch (error) {
-      yield {
-        type: 'error',
-        error: error instanceof Error ? error : new Error(String(error)),
-      };
-    } finally {
-      await response?.body?.cancel();
-    }
+      },
+      body => this.parseStreamResponse(body),
+    );
   }
 
   /**
@@ -108,26 +79,20 @@ export class AnthropicClient extends BaseApiClient {
   }
 
   /**
-   * Get model information
+   * Get model information.
+   * Reads from capabilities.ts (single source of truth, audit round3 T16) —
+   * no local model table. `maxTokens` carries the per-model OUTPUT limit;
+   * context capacity is exposed separately as maxContextWindow.
    */
   getModelInfo() {
-    const modelInfo: Record<string, { maxTokens: number }> = {
-      'claude-3-5-sonnet-20241022': { maxTokens: 8192 },
-      'claude-3-5-haiku-20241022': { maxTokens: 8192 },
-      'claude-3-opus-20240229': { maxTokens: 4096 },
-      'claude-3-sonnet-20240229': { maxTokens: 4096 },
-      'claude-3-haiku-20240307': { maxTokens: 4096 },
-      'claude-sonnet-4-20250514': { maxTokens: 8192 },
-    };
-
-    const info = modelInfo[this.model] || { maxTokens: 8192 };
+    const caps = getCapabilities('anthropic', this.model);
 
     return {
       provider: 'anthropic',
       model: this.model,
-      maxTokens: info.maxTokens,
-      supportsStreaming: true,
-      supportsTools: true,
+      maxTokens: caps.maxOutputTokens,
+      supportsStreaming: caps.supportsStreaming,
+      supportsTools: caps.supportsToolUse,
     };
   }
 
@@ -154,12 +119,15 @@ export class AnthropicClient extends BaseApiClient {
     // Pass ephemeral content to be appended to the last user message
     const messages = config.messages.filter(m => m.role !== 'system');
     if (messages.length > 0) {
-      body.messages = this.formatMessages(messages, config.ephemeralContent);
+      // T18/M4 boundary: the protocol module ships opaque structural mirrors;
+      // this client's formatter works on the concrete conversation shapes that
+      // the engine passed in (runtime-guaranteed by construction).
+      body.messages = this.formatMessages(messages as ChatMessage[], config.ephemeralContent);
     }
 
     // Tools
     if (config.tools && config.tools.length > 0) {
-      body.tools = this.formatTools(config.tools);
+      body.tools = this.formatTools(config.tools as ToolDefinition[]);
       body.tool_choice = { type: 'auto' };
     }
 

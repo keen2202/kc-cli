@@ -62,19 +62,26 @@ export default defineConfig({
           functions: 65,
           lines: 65,
         },
-        // Newly tracked modules (previously coverage blind spots): temporary
-        // lower bar until dedicated tests are added; ratchet upward over time.
+        // Reserved/periphery modules. These floors are NOT the mechanism —
+        // scripts/coverage-ratchet.mjs enforces per-module ratchet baselines
+        // (scripts/coverage-baseline.json): regressions below baseline fail
+        // CI, modules exceeding baseline by >=1pp auto-raise it.
+        //
+        // agp floor = honest measurement after T09 removed the SEPL suites
+        // that previously inflated this number (audit round3: no more
+        // cosmetic thresholds); the ratchet is expected to lift it now that
+        // real regressions would be visible.
         'src/agp/**/*.ts': {
-          statements: 40,
-          branches: 35,
-          functions: 40,
-          lines: 40,
+          statements: 22,
+          branches: 17,
+          functions: 22,
+          lines: 23,
         },
         'src/im/**/*.ts': {
-          statements: 40,
-          branches: 35,
-          functions: 40,
-          lines: 40,
+          statements: 50,
+          branches: 50,
+          functions: 50,
+          lines: 50,
         },
         'src/commands/**/*.ts': {
           statements: 40,

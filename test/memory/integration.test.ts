@@ -18,6 +18,7 @@ import { findRelevantMemories } from '../../src/memory/relevanceSearch';
 import { extractMemoriesHybrid } from '../../src/memory/memoryExtraction';
 import type { MemoryManifestEntry, MemoryEntry, MemoryConfig } from '../../src/memory/types';
 import type { ChatMessage } from '../../src/types/message';
+import { logger } from '../../src/services/logger';
 
 const mockFindRelevant = vi.mocked(findRelevantMemories);
 // Integration now calls the hybrid orchestrator; bind the mock to it.
@@ -194,7 +195,7 @@ describe('MemoryIntegration', () => {
     });
 
     it('should handle errors gracefully and return empty string', async () => {
-      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const warnSpy = vi.spyOn(logger.memory, 'warn').mockImplementation(() => {});
 
       const integration = new MemoryIntegration({
         getMemoryManifest: async () => {
@@ -204,9 +205,9 @@ describe('MemoryIntegration', () => {
 
       const result = await integration.loadRelevantMemories('test query');
       expect(result).toBe('');
-      expect(consoleSpy).toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalled();
 
-      consoleSpy.mockRestore();
+      warnSpy.mockRestore();
     });
 
     it('should pass recentTools to findRelevantMemories', async () => {
@@ -310,7 +311,7 @@ describe('MemoryIntegration', () => {
     });
 
     it('should handle save errors gracefully', async () => {
-      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const warnSpy = vi.spyOn(logger.memory, 'warn').mockImplementation(() => {});
 
       const memory = makeMemoryEntry({ fileName: 'fail.md' });
       mockExtractMemories.mockResolvedValue([memory]);
@@ -325,8 +326,8 @@ describe('MemoryIntegration', () => {
         makeChatMessage('user', 'test'),
       ]);
 
-      expect(consoleSpy).toHaveBeenCalled();
-      consoleSpy.mockRestore();
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
     });
 
     it('should not call saveMemory when no memories extracted', async () => {
@@ -346,7 +347,7 @@ describe('MemoryIntegration', () => {
     });
 
     it('should handle extraction errors gracefully', async () => {
-      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const warnSpy = vi.spyOn(logger.memory, 'warn').mockImplementation(() => {});
 
       mockExtractMemories.mockRejectedValue(new Error('Extraction failed'));
 
@@ -358,8 +359,8 @@ describe('MemoryIntegration', () => {
         makeChatMessage('user', 'test'),
       ]);
 
-      expect(consoleSpy).toHaveBeenCalled();
-      consoleSpy.mockRestore();
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
     });
   });
 

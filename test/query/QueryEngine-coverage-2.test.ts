@@ -1,36 +1,43 @@
-﻿// QueryEngine Comprehensive Coverage Tests - Part 2
+// QueryEngine Comprehensive Coverage Tests - Part 2
 // Covers: message trimming, buildApiMessages, circuit breaker, event creation,
 // configuration variations, multiple submissions, edge cases, clear/reset,
-// state machine, behavioral adapter, getMessages, retry exhaustion, multi-turn
+// state machine, behavioral adapter, getMessages
+//
+// T04 (C4) de-watered: see ./helpers/coverage-harness.ts for the mock policy.
+// Zero-assertion drain-only cases were deleted in an earlier pass; the
+// unknown-state and tool-without-text edge cases now assert deterministic
+// behavior through the real executor.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// ── Hoisted variables (accessible from vi.mock factories) ──
+import {
+    resetHarness,
+  createTestEngine,
+  collectEvents,
+  setStream,
+  textEvents,
+  makeToolCall,
+  twoTurnStream,
+  makeTool,
+  ok as toolOk,
+  makeMockEnv,
+  getStreamFactory,
+  getTokenEstimate,
+  setCustomStreamChat,
+} from './helpers/coverage-harness';
 
-const { mockChatImpl, mockStreamChatRef } = vi.hoisted(() => {
-  const mockChatImpl = vi.fn(async () => ({
+// ── Inline module mocks (vitest 4: must be declared in the test file) ──
+const { mockChatImpl } = vi.hoisted(() => ({
+  mockChatImpl: vi.fn(async () => ({
     content: 'mock summary',
     usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-  }));
-
-  const mockStreamChatRef: { factory: () => AsyncGenerator<any> } = {
-    factory: (function* () {}) as any,
-  };
-
-  return { mockChatImpl, mockStreamChatRef };
-});
-
-const { mockTokenEstimateRef } = vi.hoisted(() => ({
-  mockTokenEstimateRef: { value: 1000 },
+  })),
 }));
-
-// ── Module Mocks ──
 
 vi.mock('../../src/api', () => ({
   createAPIClient: vi.fn(() => ({
-    streamChat: vi.fn(async function* () {
-      yield* mockStreamChatRef.factory();
-    }),
+    streamChat: vi.fn(async function* () { yield* getStreamFactory()(); }),
     chat: mockChatImpl,
   })),
   BaseApiClient: class {},
@@ -47,215 +54,36 @@ vi.mock('../../src/api', () => ({
 
 vi.mock('../../src/services/compaction/functional', () => ({
   shouldCompact: vi.fn(() => true),
-  microcompact: vi.fn((msgs: any) => ({
-    wasCompacted: false,
-    messages: msgs,
-    tokensSaved: 0,
-  })),
-  fullCompact: vi.fn(async (msgs: any) => ({
-    wasCompacted: false,
-    messages: msgs,
-    tokensSaved: 0,
-  })),
+  microcompact: vi.fn((msgs: any[]) => ({ wasCompacted: false, messages: msgs, tokensSaved: 0 })),
+  fullCompact: vi.fn(async (msgs: any[]) => ({ wasCompacted: false, messages: msgs, tokensSaved: 0 })),
   needsForceTruncation: vi.fn(() => false),
-  forceTruncate: vi.fn((msgs: any) => ({ messages: msgs, tokensSaved: 0, wasCompacted: false })),
+  forceTruncate: vi.fn((msgs: any[]) => ({ messages: msgs, tokensSaved: 0, wasCompacted: false })),
   MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES: 3,
 }));
 
 vi.mock('../../src/utils/tokenEstimation', () => ({
-  estimateMessageTokensArray: vi.fn(() => mockTokenEstimateRef.value),
+  estimateMessageTokensArray: vi.fn(() => getTokenEstimate()),
   estimateTokens: vi.fn((text: string) => Math.ceil(text.length / 4)),
-  estimateMessageTokens: vi.fn(() => mockTokenEstimateRef.value),
-}));
-
-vi.mock('../../src/permissions/engine', () => ({
-  hasPermissionsToUseTool: vi.fn(async () => ({
-    behavior: 'allow',
-    message: 'auto-allowed',
-  })),
-  buildPermissionContext: vi.fn(() => ({
-    mode: 'bypassPermissions',
-    cwd: '/tmp',
-    toolName: '',
-    input: {},
-    alwaysDenyRules: [],
-    alwaysAskRules: [],
-    alwaysAllowRules: [],
-    bypassPermissions: true,
-  })),
-}));
-
-vi.mock('../../src/services/sandbox', () => {
-  class MockSandboxManager {
-    isAvailable = vi.fn(() => false);
-    wrapCommand = vi.fn((cmd: string) => cmd);
-    getBackendName = vi.fn(() => 'noop');
-    shouldSandboxTool = vi.fn(() => 'run-unsandboxed');
-  }
-  return {
-    SandboxManager: MockSandboxManager,
-  };
-});
-
-vi.mock('../../src/services/sandbox-policy', () => ({
-  mergeSandboxPolicy: vi.fn((p: any) => p),
-  DEFAULT_SANDBOX_POLICY: {},
-  getToolPolicy: vi.fn(() => null),
-  shouldSandbox: vi.fn(() => 'run-unsandboxed'),
-}));
-
-vi.mock('../../src/services/sandbox-profiles', () => ({
-  BubblewrapSandbox: vi.fn().mockImplementation(() => ({
-    name: 'bubblewrap',
-    isAvailable: vi.fn(() => false),
-    wrapCommand: vi.fn((cmd: string) => cmd),
-  })),
-  SeccompSandbox: vi.fn().mockImplementation(() => ({
-    name: 'seccomp',
-    isAvailable: vi.fn(() => false),
-    wrapCommand: vi.fn((cmd: string) => cmd),
-  })),
-  NoopSandbox: vi.fn().mockImplementation(() => ({
-    name: 'noop',
-    isAvailable: vi.fn(() => false),
-    wrapCommand: vi.fn((cmd: string) => cmd),
-  })),
+  estimateMessageTokens: vi.fn(() => getTokenEstimate()),
 }));
 
 vi.mock('../../src/services/sandbox-probe', () => ({
-  SandboxProbe: vi.fn().mockImplementation(() => ({
-    runProbe: vi.fn(async () => ({ passed: true, issues: [] })),
-  })),
+  SandboxProbe: class MockSandboxProbe {
+    async verifyIsolation() {
+      return { passed: 4, total: 4, results: [] as unknown[], failures: [] as unknown[], overallPassed: true };
+    }
+  },
 }));
 
-vi.mock('../../src/services/sandbox-monitor', () => ({
-  SandboxMonitor: vi.fn().mockImplementation(() => ({
-    start: vi.fn(),
-    stop: vi.fn(),
-    getMetrics: vi.fn(() => ({})),
-  })),
-}));
-
-vi.mock('../../src/services/sandbox-images', () => ({
-  ImageManager: vi.fn().mockImplementation(() => ({
-    getBaseImage: vi.fn(() => null),
-  })),
-}));
-
-// ── Imports (after mocks) ──
-
-import { initializeState } from '../../src/bootstrap/state';
-import type { LLMProvider } from '../../src/api';
-import type { ChatMessage, ToolCall, AssistantMessage } from '../../src/types/message';
-import type { LLMStreamEvent } from '../../src/api/BaseApiClient';
-import { QueryEngine } from '../../src/query/QueryEngine';
+import type { ChatMessage } from '../../src/types/message';
 import { createAPIClient } from '../../src/api';
-
-// ── Helpers ──
-
-function textEvents(text: string): LLMStreamEvent[] {
-  return [{ type: 'text_delta', text }, { type: 'stop' }];
-}
-
-function textStream(text: string): AsyncGenerator<LLMStreamEvent> {
-  return (async function* () {
-    yield { type: 'text_delta', text };
-    yield { type: 'stop' };
-  })();
-}
-
-function toolStream(text: string, toolCalls: ToolCall[]): AsyncGenerator<LLMStreamEvent> {
-  return (async function* () {
-    yield { type: 'text_delta', text };
-    for (const tc of toolCalls) {
-      yield { type: 'tool_use', toolCall: tc };
-    }
-    yield { type: 'stop' };
-  })();
-}
-
-function makeStream(events: LLMStreamEvent[]): AsyncGenerator<LLMStreamEvent> {
-  return (async function* () {
-    for (const event of events) {
-      yield event;
-    }
-  })();
-}
-
-function makeToolCall(toolName: string, input: Record<string, unknown> = {}): ToolCall {
-  return {
-    id: `tc_${toolName}_${Math.random().toString(36).slice(2, 8)}`,
-    toolName,
-    input,
-    status: 'pending',
-  };
-}
-
-function setStream(events: LLMStreamEvent[]) {
-  mockStreamChatRef.factory = async function* () {
-    for (const event of events) {
-      yield event;
-    }
-  };
-}
-
-function setCustomStreamChat(factory: () => AsyncGenerator<LLMStreamEvent>) {
-  (createAPIClient as ReturnType<typeof vi.fn>).mockReturnValue({
-    streamChat: vi.fn(async function* () {
-      yield* factory();
-    }),
-    chat: mockChatImpl,
-  });
-}
-
-async function collectEvents(engine: QueryEngine, message: string) {
-  const events: any[] = [];
-  for await (const event of engine.submitMessage(message)) {
-    events.push(event);
-  }
-  return events;
-}
-
-// ── Tests ──
+import { QueryEngine } from '../../src/query/QueryEngine';
 
 describe('QueryEngine Coverage Part 2', () => {
   let engine: QueryEngine;
 
-  function createEngine(overrides: Record<string, any> = {}) {
-    return new QueryEngine(
-      {
-        model: 'test-model',
-        provider: 'openai' as LLMProvider,
-        apiKey: 'test-key',
-        maxTurns: 10,
-        maxBudgetUsd: null,
-        systemPrompt: 'You are helpful.',
-        planningPhase: { enabled: false },
-        patchGuarantee: { enabled: false },
-        ...overrides,
-      },
-      []
-    );
-  }
-
-  function resetCreateAPIClientMock() {
-    (createAPIClient as ReturnType<typeof vi.fn>).mockReturnValue({
-      streamChat: vi.fn(async function* () {
-        yield* mockStreamChatRef.factory();
-      }),
-      chat: mockChatImpl,
-    });
-  }
-
   beforeEach(() => {
-    initializeState({
-      cwd: '/tmp',
-      permissionMode: 'bypassPermissions' as any,
-    });
-    vi.clearAllMocks();
-    mockTokenEstimateRef.value = 1000;
-    resetCreateAPIClientMock();
-    setStream([]);
+    resetHarness();
   });
 
   afterEach(() => {
@@ -268,7 +96,7 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should trim messages when exceeding maxMessages limit', async () => {
       setStream(textEvents('ok'));
 
-      engine = createEngine({ maxMessages: 5 });
+      engine = createTestEngine({ maxMessages: 5 });
 
       const messages = (engine as any).messages as ChatMessage[];
       for (let i = 0; i < 20; i++) {
@@ -301,7 +129,7 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should preserve first user message as anchor during trimming', async () => {
       setStream(textEvents('ok'));
 
-      engine = createEngine({ maxMessages: 3 });
+      engine = createTestEngine({ maxMessages: 3 });
 
       const messages = (engine as any).messages as ChatMessage[];
       const firstUserMsg: ChatMessage = {
@@ -336,7 +164,7 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should preserve system messages as anchors during trimming', async () => {
       setStream(textEvents('ok'));
 
-      engine = createEngine({ maxMessages: 3 });
+      engine = createTestEngine({ maxMessages: 3 });
 
       const messages = (engine as any).messages as ChatMessage[];
       messages.push({
@@ -370,7 +198,7 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should return messages from active tree node (FUN-09)', async () => {
       setStream(textEvents('ok'));
 
-      engine = createEngine();
+      engine = createTestEngine();
 
       try {
         for await (const _ of engine.submitMessage('test')) {
@@ -384,84 +212,6 @@ describe('QueryEngine Coverage Part 2', () => {
       // 1 user (submitMessage) + 1 assistant (response) = 2
       expect(finalMessages.length).toBe(2);
     });
-
-    it('should invalidate cached token estimate after trimming', async () => {
-      setStream(textEvents('ok'));
-
-      engine = createEngine({ maxMessages: 3 });
-
-      const messages = (engine as any).messages as ChatMessage[];
-      for (let i = 0; i < 10; i++) {
-        messages.push({
-          id: `msg_${i}`,
-          role: 'user',
-          content: `Message ${i}`,
-          timestamp: Date.now(),
-        } as ChatMessage);
-      }
-
-      try {
-        for await (const _ of engine.submitMessage('test')) {
-          // drain
-        }
-      } catch {
-        // may throw
-      }
-    });
-
-    it('should trim from front when no anchor messages exist', async () => {
-      setStream(textEvents('ok'));
-
-      engine = createEngine({ maxMessages: 3 });
-
-      // Push only assistant messages (no user or system messages to act as anchors)
-      const messages = (engine as any).messages as ChatMessage[];
-      for (let i = 0; i < 10; i++) {
-        messages.push({
-          id: `asst_${i}`,
-          role: 'assistant',
-          content: `Response ${i}`,
-          timestamp: Date.now(),
-        } as ChatMessage);
-      }
-
-      try {
-        for await (const _ of engine.submitMessage('test')) {
-          // drain
-        }
-      } catch {
-        // may throw
-      }
-    });
-
-    it('should handle trim when anchors exceed non-anchor capacity', async () => {
-      setStream(textEvents('ok'));
-
-      engine = createEngine({ maxMessages: 5 });
-
-      // Push many system and user messages as anchors, plus a few non-anchor messages
-      const messages = (engine as any).messages as ChatMessage[];
-      messages.push({
-        id: 'sys1', role: 'system', content: 'System prompt', timestamp: Date.now(),
-      } as any);
-      for (let i = 0; i < 8; i++) {
-        messages.push({
-          id: `user_${i}`, role: 'user', content: `User ${i}`, timestamp: Date.now(),
-        } as ChatMessage);
-      }
-      // Only 1 non-anchor message
-      messages.push({
-        id: 'asst1', role: 'assistant', content: 'Response', timestamp: Date.now(),
-      } as ChatMessage);
-
-      try {
-        for await (const _ of engine.submitMessage('test')) {
-          // drain
-        }
-      } catch {
-        // may throw
-      }
-    });
   });
 
   // ── buildApiMessages ──
@@ -470,52 +220,14 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should build messages with system prompt', async () => {
       setStream(textEvents('ok'));
 
-      engine = createEngine({ systemPrompt: 'You are a test assistant.' });
+      engine = createTestEngine({ systemPrompt: 'You are a test assistant.' });
       await collectEvents(engine, 'hello');
 
-      const mockClient = (createAPIClient as ReturnType<typeof vi.fn>).mock.results[0]?.value;
-      if (mockClient) {
-        const streamChatCall = mockClient.streamChat.mock.calls[0]?.[0];
+      const builtClient = (createAPIClient as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+      if (builtClient) {
+        const streamChatCall = builtClient.streamChat.mock.calls[0]?.[0];
         expect(streamChatCall).toBeDefined();
         expect(Array.isArray(streamChatCall.messages)).toBe(true);
-      }
-    });
-
-    it('should format tool calls and tool results in assistant messages', async () => {
-      setStream(textEvents('ok'));
-
-      engine = createEngine();
-      const messages = (engine as any).messages as ChatMessage[];
-      messages.push({
-        id: 'asst1',
-        role: 'assistant',
-        content: 'Running tool...',
-        toolCalls: [{
-          id: 'tc1',
-          toolName: 'Bash',
-          input: { command: 'ls' },
-          status: 'completed',
-        }],
-        timestamp: Date.now(),
-      } as AssistantMessage);
-      messages.push({
-        id: 'tool1',
-        role: 'tool',
-        content: null,
-        toolResults: [{
-          toolCallId: 'tc1',
-          output: 'file1.txt',
-          isError: false,
-        }],
-        timestamp: Date.now(),
-      } as any);
-
-      try {
-        for await (const _ of engine.submitMessage('what files?')) {
-          // drain
-        }
-      } catch {
-        // may throw
       }
     });
   });
@@ -524,7 +236,7 @@ describe('QueryEngine Coverage Part 2', () => {
 
   describe('circuit breaker integration', () => {
     it('should block API calls when circuit breaker is open', async () => {
-      engine = createEngine();
+      engine = createTestEngine();
 
       const breakerRegistry = engine.getErrorHandler().getCircuitBreakers();
       const apiBreaker = breakerRegistry.getBreaker('api');
@@ -536,10 +248,10 @@ describe('QueryEngine Coverage Part 2', () => {
       expect(apiBreaker.canExecute()).toBe(false);
 
       // Set factory to throw a non-retryable error to trigger breaker check
-      mockStreamChatRef.factory = async function* () {
+      setCustomFactory(async function* () {
         yield { type: 'text_delta', text: 'partial' };
         throw new Error('auth error');
-      };
+      });
 
       const events = await collectEvents(engine, 'test');
 
@@ -551,7 +263,7 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should allow API calls when circuit breaker is closed', async () => {
       setStream(textEvents('ok'));
 
-      engine = createEngine();
+      engine = createTestEngine();
 
       const breakerRegistry = engine.getErrorHandler().getCircuitBreakers();
       const apiBreaker = breakerRegistry.getBreaker('api');
@@ -569,7 +281,7 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should create text delta events with correct structure', async () => {
       setStream(textEvents('test text'));
 
-      engine = createEngine();
+      engine = createTestEngine();
       const events = await collectEvents(engine, 'test');
 
       const textDelta = events.find(e => e.type === 'agent:text_delta');
@@ -581,7 +293,7 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should create turn complete events with message and usage', async () => {
       setStream(textEvents('response'));
 
-      engine = createEngine();
+      engine = createTestEngine();
       const events = await collectEvents(engine, 'test');
 
       const turnComplete = events.find(e => e.type === 'agent:turn_complete');
@@ -599,7 +311,7 @@ describe('QueryEngine Coverage Part 2', () => {
         { type: 'stop', usage: { inputTokens: 120, outputTokens: 30, totalTokens: 150 } },
       ]);
 
-      engine = createEngine();
+      engine = createTestEngine();
       const events = await collectEvents(engine, 'test');
 
       const turnComplete = events.find(e => e.type === 'agent:turn_complete');
@@ -613,7 +325,7 @@ describe('QueryEngine Coverage Part 2', () => {
         { type: 'stop', usage: { inputTokens: 10, outputTokens: 5 } } as any,
       ]);
 
-      engine = createEngine();
+      engine = createTestEngine();
       const events = await collectEvents(engine, 'test');
 
       const turnComplete = events.find(e => e.type === 'agent:turn_complete');
@@ -623,7 +335,7 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should create complete event at end of successful run', async () => {
       setStream(textEvents('done'));
 
-      engine = createEngine();
+      engine = createTestEngine();
       const events = await collectEvents(engine, 'test');
 
       const complete = events.find(e => e.type === 'agent:complete');
@@ -638,16 +350,12 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should work with ollama provider (no API key required)', async () => {
       setStream(textEvents('ollama response'));
 
-      engine = new QueryEngine(
-        {
-          model: 'llama3',
-          provider: 'ollama' as LLMProvider,
-          maxTurns: 5,
-          maxBudgetUsd: null,
-          planningPhase: { enabled: false },
-        },
-        []
-      );
+      engine = createTestEngine({
+        model: 'llama3',
+        provider: 'ollama',
+        apiKey: undefined,
+        maxTurns: 5,
+      });
 
       const events = await collectEvents(engine, 'test');
       expect(engine.getStateMachine().currentState).toBe('completed');
@@ -656,17 +364,11 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should work with anthropic provider', async () => {
       setStream(textEvents('claude response'));
 
-      engine = new QueryEngine(
-        {
-          model: 'claude-sonnet-4-20250514',
-          provider: 'anthropic' as LLMProvider,
-          apiKey: 'test-key',
-          maxTurns: 5,
-          maxBudgetUsd: null,
-          planningPhase: { enabled: false },
-        },
-        []
-      );
+      engine = createTestEngine({
+        model: 'claude-sonnet-4-20250514',
+        provider: 'anthropic',
+        maxTurns: 5,
+      });
 
       const events = await collectEvents(engine, 'test');
       expect(engine.getStateMachine().currentState).toBe('completed');
@@ -675,7 +377,7 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should work with maxBudgetUsd set', async () => {
       setStream(textEvents('ok'));
 
-      engine = createEngine({ maxBudgetUsd: 10.0 });
+      engine = createTestEngine({ maxBudgetUsd: 10.0 });
       const events = await collectEvents(engine, 'test');
 
       expect(engine.getStateMachine().currentState).toBe('completed');
@@ -684,7 +386,7 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should work with apiBaseUrl set', async () => {
       setStream(textEvents('ok'));
 
-      engine = createEngine({ apiBaseUrl: 'https://custom-api.example.com' });
+      engine = createTestEngine({ apiBaseUrl: 'https://custom-api.example.com' });
       const events = await collectEvents(engine, 'test');
 
       expect(engine.getStateMachine().currentState).toBe('completed');
@@ -693,7 +395,7 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should work with permission rules', async () => {
       setStream(textEvents('ok'));
 
-      engine = createEngine({
+      engine = createTestEngine({
         permissionRules: {
           deny: ['Sql'],
           allow: ['FileRead', 'Glob'],
@@ -712,7 +414,7 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should support multiple sequential submitMessage calls', async () => {
       setStream(textEvents('Response'));
 
-      engine = createEngine();
+      engine = createTestEngine();
 
       const events1 = await collectEvents(engine, 'first message');
       expect(engine.getStateMachine().currentState).toBe('completed');
@@ -725,25 +427,10 @@ describe('QueryEngine Coverage Part 2', () => {
       expect(messages.filter(m => m.role === 'user').length).toBe(2);
     });
 
-    it('should return immediately when already in terminal state', async () => {
-      setStream(textEvents('Response'));
-
-      engine = createEngine();
-
-      // First submission completes normally
-      await collectEvents(engine, 'first message');
-      expect(engine.getStateMachine().currentState).toBe('completed');
-
-      // Second submission without reset - should return immediately
-      const events2 = await collectEvents(engine, 'second message');
-      // The generator should complete without yielding any events
-      // because the state machine is already terminal
-    });
-
     it('should accumulate conversation history across submissions', async () => {
       setStream(textEvents('Reply'));
 
-      engine = createEngine();
+      engine = createTestEngine();
 
       await collectEvents(engine, 'msg1');
       engine.getStateMachine().reset();
@@ -766,7 +453,7 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should handle empty user message', async () => {
       setStream(textEvents('ok'));
 
-      engine = createEngine();
+      engine = createTestEngine();
       const events = await collectEvents(engine, '');
 
       expect(engine.getStateMachine().currentState).toBe('completed');
@@ -775,31 +462,37 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should handle very long user message', async () => {
       setStream(textEvents('ok'));
 
-      engine = createEngine();
+      engine = createTestEngine();
       const longMessage = 'x'.repeat(100_000);
       const events = await collectEvents(engine, longMessage);
 
       expect(engine.getStateMachine().currentState).toBe('completed');
     });
 
-    it('should handle stream with tool_use but no text', async () => {
-      const tc = makeToolCall('Bash', { command: 'echo hi' });
-
-      let callCount = 0;
-      setCustomStreamChat(() => {
-        callCount++;
-        if (callCount === 1) {
-          return makeStream([
-            { type: 'tool_use', toolCall: tc },
-            { type: 'stop' },
-          ]);
-        }
-        return textStream('done');
+    it('should handle stream with tool_use but no text (executed over MockExecutionEnv)', async () => {
+      const { env, fs } = makeMockEnv();
+      const echo = makeTool('Echo', async () => {
+        await env.fs.writeFile('/out/no-text.txt', 'done');
+        return toolOk('echo:no-text-case');
       });
 
-      engine = createEngine();
+      twoTurnStream(
+        (async function* () {
+          yield { type: 'tool_use', toolCall: makeToolCall('Echo', {}) };
+          yield { type: 'stop' };
+        })(),
+        'done',
+      );
+
+      engine = createTestEngine({}, [echo as any]);
       const events = await collectEvents(engine, 'test');
 
+      // The tool actually ran despite the absent text preamble.
+      const completed = events.filter(e => e.type === 'agent:tool_completed');
+      expect(completed.length).toBeGreaterThanOrEqual(1);
+      expect((completed[0] as any).result.output).toBe('echo:no-text-case');
+      expect(await env.fs.readFile('/out/no-text.txt')).toBe('done');
+      expect(fs.listFiles()).toContain('/out/no-text.txt');
       expect(engine.getStateMachine().currentState).toBe('completed');
     });
 
@@ -809,7 +502,7 @@ describe('QueryEngine Coverage Part 2', () => {
         { type: 'stop' },
       ]);
 
-      engine = createEngine();
+      engine = createTestEngine();
       const events = await collectEvents(engine, 'test');
 
       expect(engine.getStateMachine().currentState).toBe('completed');
@@ -822,7 +515,7 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should clear messages and reset state machine', async () => {
       setStream(textEvents('ok'));
 
-      engine = createEngine();
+      engine = createTestEngine();
       await collectEvents(engine, 'test');
 
       expect(engine.getMessages().length).toBeGreaterThan(0);
@@ -837,7 +530,7 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should allow new submission after clear', async () => {
       setStream(textEvents('ok'));
 
-      engine = createEngine();
+      engine = createTestEngine();
 
       await collectEvents(engine, 'first');
       expect(engine.getStateMachine().currentState).toBe('completed');
@@ -857,7 +550,7 @@ describe('QueryEngine Coverage Part 2', () => {
       const transitions: string[] = [];
       setStream(textEvents('ok'));
 
-      engine = createEngine();
+      engine = createTestEngine();
 
       const store = engine.getStateStore();
       store.subscribe((state) => {
@@ -872,22 +565,24 @@ describe('QueryEngine Coverage Part 2', () => {
       expect(transitions).toContain('completed');
     });
 
-    it('should handle unknown state gracefully', async () => {
+    it('should self-heal from a corrupted state name instead of wedging the engine', async () => {
       setStream(textEvents('ok'));
 
-      engine = createEngine();
+      engine = createTestEngine();
 
+      // Force the private state name into an impossible value. The real
+      // contract: resetForNewQuery() force-resets any non-idle state before
+      // the loop, so a corrupted name can never wedge the engine — the turn
+      // completes normally with zero error events.
       const machine = engine.getStateMachine();
       (machine as any).currentStateName = 'unknown_state';
 
-      try {
-        for await (const event of engine.submitMessage('test')) {
-          // drain
-        }
-        // If it doesn't throw, it may have transitioned to error
-      } catch (error) {
-        expect((error as Error).message).toContain('Unknown state');
-      }
+      const events = await collectEvents(engine, 'test');
+
+      expect(events.filter(e => e.type === 'agent:error')).toHaveLength(0);
+      expect(events.filter(e => e.type === 'agent:complete')).toHaveLength(1);
+      expect(machine.currentState).toBe('completed');
+      expect(machine.isTerminal()).toBe(true);
     });
   });
 
@@ -897,7 +592,7 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should include level adaptation in system prompt for beginner users', async () => {
       setStream(textEvents('ok'));
 
-      engine = createEngine({ systemPrompt: 'Base prompt.' });
+      engine = createTestEngine({ systemPrompt: 'Base prompt.' });
 
       const profile = (engine as any).userProfile;
       expect(profile.getLevel()).toBe('beginner');
@@ -909,7 +604,7 @@ describe('QueryEngine Coverage Part 2', () => {
     it('should not add adaptation for advanced users', async () => {
       setStream(textEvents('ok'));
 
-      engine = createEngine({ systemPrompt: 'Base prompt.' });
+      engine = createTestEngine({ systemPrompt: 'Base prompt.' });
 
       const profile = (engine as any).userProfile;
       profile.updateLevel('advanced');
@@ -924,7 +619,7 @@ describe('QueryEngine Coverage Part 2', () => {
   describe('getMessages', () => {
     it('should return a copy of messages', async () => {
       setStream(textEvents('test'));
-      engine = createEngine();
+      engine = createTestEngine();
       await collectEvents(engine, 'hello');
 
       const msgs1 = engine.getMessages();
@@ -935,5 +630,9 @@ describe('QueryEngine Coverage Part 2', () => {
       expect(engine.getMessages()).toEqual(engine.getMessages());
     });
   });
-
 });
+
+/** Swap the raw stream factory (local shorthand over the shared hoisted ref). */
+function setCustomFactory(factory: () => AsyncGenerator<any>) {
+  setCustomStreamChat(factory);
+}

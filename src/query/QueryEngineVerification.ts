@@ -39,8 +39,11 @@ export type TypeCheckResult = {
 /**
  * Validate that a test command doesn't contain shell injection patterns.
  * Only allows known test runners with sanitized arguments.
+ *
+ * Module-private (audit round3 T11): no external importers; consumed by
+ * verifyBeforeExit below. Un-exported rather than deleted for that caller.
  */
-export function isTestCommandSafe(command: string): boolean {
+function isTestCommandSafe(command: string): boolean {
   // Reject shell metacharacters that enable command chaining, I/O redirection,
   // or escape sequences (SEC-06)
   if (/[;&|`$(){}$\n\r<>\\]/.test(command.replace('{test_names}', ''))) {
@@ -52,8 +55,12 @@ export function isTestCommandSafe(command: string): boolean {
   return allowedRunners.some(runner => trimmed.startsWith(runner));
 }
 
-/** Validate test names contain only safe characters (SEC-06). */
-export function isValidTestName(name: string): boolean {
+/** Validate test names contain only safe characters (SEC-06).
+ *
+ * Module-private (audit round3 T11): no external importers; consumed by
+ * verifyBeforeExit below. Un-exported rather than deleted for that caller.
+ */
+function isValidTestName(name: string): boolean {
   return /^[a-zA-Z0-9_\-./:]+$/.test(name);
 }
 

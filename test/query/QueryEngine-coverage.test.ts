@@ -1,34 +1,44 @@
-﻿// QueryEngine Comprehensive Coverage Tests - Part 1
+// QueryEngine Comprehensive Coverage Tests - Part 1
 // Covers: submitMessage full lifecycle, compacting phase, abort handling
+//
+// T04 (C4) de-watered: the permissions engine and the sandbox decision layer
+// run REAL via ./helpers/coverage-harness.ts (only the host-spawning escape
+// probe is stubbed inline below — no call-count assertions are made on it).
+// Assertions are behavior-level: emitted events, state-machine transitions,
+// message history and MockExecutionEnv outcomes. Compaction/tokenEstimation
+// remain preset-driven stubs (non-security-critical inputs); cases that only
+// re-asserted stub call counts were deleted in this pass.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// ── Hoisted variables (accessible from vi.mock factories) ──
+import {
+    resetHarness,
+  createTestEngine,
+  collectEvents,
+  setStream,
+  setTokenEstimate,
+  textEvents,
+  toolStream,
+  makeToolCall,
+  twoTurnStream,
+  makeTool,
+  ok as toolOk,
+  makeMockEnv,
+  getStreamFactory,
+  getTokenEstimate,
+} from './helpers/coverage-harness';
 
-const { mockChatImpl, mockStreamChatRef } = vi.hoisted(() => {
-  const mockChatImpl = vi.fn(async () => ({
+// ── Inline module mocks (vitest 4: must be declared in the test file) ──
+const { mockChatImpl } = vi.hoisted(() => ({
+  mockChatImpl: vi.fn(async () => ({
     content: 'mock summary',
     usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-  }));
-
-  const mockStreamChatRef: { factory: () => AsyncGenerator<any> } = {
-    factory: (function* () {}) as any,
-  };
-
-  return { mockChatImpl, mockStreamChatRef };
-});
-
-const { mockTokenEstimateRef } = vi.hoisted(() => ({
-  mockTokenEstimateRef: { value: 1000 },
+  })),
 }));
-
-// ── Module Mocks ──
 
 vi.mock('../../src/api', () => ({
   createAPIClient: vi.fn(() => ({
-    streamChat: vi.fn(async function* () {
-      yield* mockStreamChatRef.factory();
-    }),
+    streamChat: vi.fn(async function* () { yield* getStreamFactory()(); }),
     chat: mockChatImpl,
   })),
   BaseApiClient: class {},
@@ -45,166 +55,35 @@ vi.mock('../../src/api', () => ({
 
 vi.mock('../../src/services/compaction/functional', () => ({
   shouldCompact: vi.fn(() => true),
-  microcompact: vi.fn((msgs: any) => ({
-    wasCompacted: false,
-    messages: msgs,
-    tokensSaved: 0,
-  })),
-  fullCompact: vi.fn(async (msgs: any) => ({
-    wasCompacted: false,
-    messages: msgs,
-    tokensSaved: 0,
-  })),
+  microcompact: vi.fn((msgs: any[]) => ({ wasCompacted: false, messages: msgs, tokensSaved: 0 })),
+  fullCompact: vi.fn(async (msgs: any[]) => ({ wasCompacted: false, messages: msgs, tokensSaved: 0 })),
   needsForceTruncation: vi.fn(() => false),
-  forceTruncate: vi.fn((msgs: any) => ({ messages: msgs, tokensSaved: 0, wasCompacted: false })),
+  forceTruncate: vi.fn((msgs: any[]) => ({ messages: msgs, tokensSaved: 0, wasCompacted: false })),
   MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES: 3,
 }));
 
 vi.mock('../../src/utils/tokenEstimation', () => ({
-  estimateMessageTokensArray: vi.fn(() => mockTokenEstimateRef.value),
+  estimateMessageTokensArray: vi.fn(() => getTokenEstimate()),
   estimateTokens: vi.fn((text: string) => Math.ceil(text.length / 4)),
-  estimateMessageTokens: vi.fn(() => mockTokenEstimateRef.value),
-}));
-
-vi.mock('../../src/permissions/engine', () => ({
-  hasPermissionsToUseTool: vi.fn(async () => ({
-    behavior: 'allow',
-    message: 'auto-allowed',
-  })),
-  buildPermissionContext: vi.fn(() => ({
-    mode: 'bypassPermissions',
-    cwd: '/tmp',
-    toolName: '',
-    input: {},
-    alwaysDenyRules: [],
-    alwaysAskRules: [],
-    alwaysAllowRules: [],
-    bypassPermissions: true,
-  })),
-}));
-
-vi.mock('../../src/services/sandbox', () => {
-  class MockSandboxManager {
-    isAvailable = vi.fn(() => false);
-    wrapCommand = vi.fn((cmd: string) => cmd);
-    getBackendName = vi.fn(() => 'noop');
-    shouldSandboxTool = vi.fn(() => 'run-unsandboxed');
-  }
-  return { SandboxManager: MockSandboxManager };
-});
-
-vi.mock('../../src/services/sandbox-policy', () => ({
-  mergeSandboxPolicy: vi.fn((p: any) => p),
-  DEFAULT_SANDBOX_POLICY: {},
-  getToolPolicy: vi.fn(() => null),
-  shouldSandbox: vi.fn(() => 'run-unsandboxed'),
-}));
-
-vi.mock('../../src/services/sandbox-profiles', () => ({
-  BubblewrapSandbox: vi.fn().mockImplementation(() => ({
-    name: 'bubblewrap', isAvailable: vi.fn(() => false), wrapCommand: vi.fn((cmd: string) => cmd),
-  })),
-  SeccompSandbox: vi.fn().mockImplementation(() => ({
-    name: 'seccomp', isAvailable: vi.fn(() => false), wrapCommand: vi.fn((cmd: string) => cmd),
-  })),
-  NoopSandbox: vi.fn().mockImplementation(() => ({
-    name: 'noop', isAvailable: vi.fn(() => false), wrapCommand: vi.fn((cmd: string) => cmd),
-  })),
+  estimateMessageTokens: vi.fn(() => getTokenEstimate()),
 }));
 
 vi.mock('../../src/services/sandbox-probe', () => ({
-  SandboxProbe: vi.fn().mockImplementation(() => ({
-    runProbe: vi.fn(async () => ({ passed: true, issues: [] })),
-  })),
+  SandboxProbe: class MockSandboxProbe {
+    async verifyIsolation() {
+      return { passed: 4, total: 4, results: [] as unknown[], failures: [] as unknown[], overallPassed: true };
+    }
+  },
 }));
 
-vi.mock('../../src/services/sandbox-monitor', () => ({
-  SandboxMonitor: vi.fn().mockImplementation(() => ({
-    start: vi.fn(), stop: vi.fn(), getMetrics: vi.fn(() => ({})),
-  })),
-}));
-
-vi.mock('../../src/services/sandbox-images', () => ({
-  ImageManager: vi.fn().mockImplementation(() => ({
-    getBaseImage: vi.fn(() => null),
-  })),
-}));
-
-// ── Imports (after mocks) ──
-
-import { initializeState } from '../../src/bootstrap/state';
-import type { LLMProvider } from '../../src/api';
-import type { ChatMessage, ToolCall } from '../../src/types/message';
-import type { LLMStreamEvent } from '../../src/api/BaseApiClient';
-import { QueryEngine } from '../../src/query/QueryEngine';
-import { createAPIClient } from '../../src/api';
+// Preset-driven compaction stubs (non-security-critical inputs).
 import {
   shouldCompact,
-  microcompact,
   fullCompact,
+  microcompact,
   MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES,
 } from '../../src/services/compaction/functional';
-import { estimateMessageTokensArray } from '../../src/utils/tokenEstimation';
-
-// ── Helpers ──
-
-function textEvents(text: string): LLMStreamEvent[] {
-  return [{ type: 'text_delta', text }, { type: 'stop' }];
-}
-
-function toolEvents(text: string, toolCalls: ToolCall[]): LLMStreamEvent[] {
-  const events: LLMStreamEvent[] = [{ type: 'text_delta', text }];
-  for (const tc of toolCalls) {
-    events.push({ type: 'tool_use', toolCall: tc });
-  }
-  events.push({ type: 'stop' });
-  return events;
-}
-
-function textStream(text: string): AsyncGenerator<LLMStreamEvent> {
-  return (async function* () {
-    yield { type: 'text_delta', text };
-    yield { type: 'stop' };
-  })();
-}
-
-function toolStream(text: string, toolCalls: ToolCall[]): AsyncGenerator<LLMStreamEvent> {
-  return (async function* () {
-    yield { type: 'text_delta', text };
-    for (const tc of toolCalls) {
-      yield { type: 'tool_use', toolCall: tc };
-    }
-    yield { type: 'stop' };
-  })();
-}
-
-function makeToolCall(toolName: string, input: Record<string, unknown> = {}): ToolCall {
-  return {
-    id: `tc_${toolName}_${Math.random().toString(36).slice(2, 8)}`,
-    toolName, input, status: 'pending',
-  };
-}
-
-function setStream(events: LLMStreamEvent[]) {
-  mockStreamChatRef.factory = async function* () {
-    for (const event of events) { yield event; }
-  };
-}
-
-function setCustomStreamChat(factory: () => AsyncGenerator<LLMStreamEvent>) {
-  (createAPIClient as ReturnType<typeof vi.fn>).mockReturnValue({
-    streamChat: vi.fn(async function* () { yield* factory(); }),
-    chat: mockChatImpl,
-  });
-}
-
-async function collectEvents(engine: QueryEngine, message: string) {
-  const events: any[] = [];
-  for await (const event of engine.submitMessage(message)) {
-    events.push(event);
-  }
-  return events;
-}
+import { QueryEngine } from '../../src/query/QueryEngine';
 
 /**
  * Poll until `fullCompact` mock has been called at least once, or timeout.
@@ -221,41 +100,13 @@ async function waitForAsyncCompaction(timeoutMs = 1000): Promise<void> {
   }
 }
 
-// ── Tests ──
+const COMPACTION_THRESHOLD = 200_000 - 20_000 - 13_000;
 
 describe('QueryEngine Coverage Part 1', () => {
   let engine: QueryEngine;
 
-  function createEngine(overrides: Record<string, any> = {}) {
-    return new QueryEngine(
-      {
-        model: 'test-model',
-        provider: 'openai' as LLMProvider,
-        apiKey: 'test-key',
-        maxTurns: 10,
-        maxBudgetUsd: null,
-        systemPrompt: 'You are helpful.',
-        planningPhase: { enabled: false },
-        patchGuarantee: { enabled: false },
-        ...overrides,
-      },
-      []
-    );
-  }
-
-  function resetCreateAPIClientMock() {
-    (createAPIClient as ReturnType<typeof vi.fn>).mockReturnValue({
-      streamChat: vi.fn(async function* () { yield* mockStreamChatRef.factory(); }),
-      chat: mockChatImpl,
-    });
-  }
-
   beforeEach(() => {
-    initializeState({ cwd: '/tmp', permissionMode: 'bypassPermissions' as any });
-    vi.clearAllMocks();
-    mockTokenEstimateRef.value = 1000;
-    resetCreateAPIClientMock();
-    setStream([]);
+    resetHarness();
   });
 
   afterEach(() => {
@@ -267,7 +118,7 @@ describe('QueryEngine Coverage Part 1', () => {
   describe('submitMessage full lifecycle', () => {
     it('should complete idle->compact->stream->decide->complete loop with no tool calls', async () => {
       setStream([{ type: 'text_delta', text: 'Hello, I can help with that.' }, { type: 'stop' }]);
-      engine = createEngine();
+      engine = createTestEngine();
       const events = await collectEvents(engine, 'help me');
 
       const textEvts = events.filter(e => e.type === 'agent:text_delta');
@@ -283,28 +134,36 @@ describe('QueryEngine Coverage Part 1', () => {
       expect(messages.some(m => m.role === 'assistant' && m.content === 'Hello, I can help with that.')).toBe(true);
     });
 
-    it('should complete full lifecycle with tool calls', async () => {
-      const toolCall = makeToolCall('Bash', { command: 'ls' });
-      const firstStream = toolStream('Let me check that.', [toolCall]);
-      const secondStream = textStream('The directory has files.');
-
-      let callCount = 0;
-      setCustomStreamChat(() => {
-        callCount++;
-        return callCount === 1 ? firstStream : secondStream;
+    it('should complete full lifecycle with tool calls executed through the real executor', async () => {
+      const { env, fs } = makeMockEnv();
+      const echo = makeTool('Echo', async (input) => {
+        const body = `echo:${String((input as Record<string, unknown>).text)}`;
+        await env.fs.writeFile('/out/lifecycle.txt', body);
+        return toolOk(body);
       });
 
-      engine = createEngine();
+      twoTurnStream(
+        toolStream('Let me check that.', [makeToolCall('Echo', { text: 'ls' })]),
+        'The directory has files.',
+      );
+
+      engine = createTestEngine({}, [echo as any]);
       const events = await collectEvents(engine, 'list files');
 
-      expect(events.filter(e => e.type === 'agent:tool_started').length).toBeGreaterThanOrEqual(1);
+      // Behavior outcomes: the registered tool actually ran over MockExecutionEnv.
+      const completed = events.filter(e => e.type === 'agent:tool_completed');
+      expect(completed.length).toBeGreaterThanOrEqual(1);
+      expect((completed[0] as any).result.output).toBe('echo:ls');
+      expect(await env.fs.readFile('/out/lifecycle.txt')).toBe('echo:ls');
+      expect(fs.listFiles()).toContain('/out/lifecycle.txt');
+
       expect(events.filter(e => e.type === 'agent:complete').length).toBe(1);
       expect(engine.getStateMachine().currentState).toBe('completed');
     });
 
     it('should emit turn_complete event after streaming', async () => {
       setStream(textEvents('Response text'));
-      engine = createEngine();
+      engine = createTestEngine();
       const events = await collectEvents(engine, 'test');
 
       const turnComplete = events.filter(e => e.type === 'agent:turn_complete');
@@ -319,17 +178,16 @@ describe('QueryEngine Coverage Part 1', () => {
   describe('compacting phase', () => {
     it('should skip compaction when tokens are below threshold', async () => {
       (shouldCompact as ReturnType<typeof vi.fn>).mockReturnValueOnce(false);
-      mockTokenEstimateRef.value = 1000;
+      setTokenEstimate(1000);
       setStream(textEvents('ok'));
-      engine = createEngine();
+      engine = createTestEngine();
       await collectEvents(engine, 'test');
       // P6: no synchronous compaction functions called when shouldCompact returns false
       expect(fullCompact).not.toHaveBeenCalled();
     });
 
     it('should trigger async compaction when tokens exceed threshold', async () => {
-      const threshold = 200_000 - 20_000 - 13_000;
-      mockTokenEstimateRef.value = threshold + 1000;
+      setTokenEstimate(COMPACTION_THRESHOLD + 1000);
       setStream(textEvents('ok'));
 
       (fullCompact as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -338,7 +196,7 @@ describe('QueryEngine Coverage Part 1', () => {
         tokensSaved: 5000,
       });
 
-      engine = createEngine();
+      engine = createTestEngine();
       await collectEvents(engine, 'test');
       // P6: compaction is fire-and-forget; wait for async to fire
       await waitForAsyncCompaction();
@@ -347,8 +205,7 @@ describe('QueryEngine Coverage Part 1', () => {
     });
 
     it('should not block the turn when compaction runs async', async () => {
-      const threshold = 200_000 - 20_000 - 13_000;
-      mockTokenEstimateRef.value = threshold + 1000;
+      setTokenEstimate(COMPACTION_THRESHOLD + 1000);
       setStream(textEvents('ok'));
 
       let compactResolved = false;
@@ -358,7 +215,7 @@ describe('QueryEngine Coverage Part 1', () => {
         return { wasCompacted: false, messages: [], tokensSaved: 0 };
       });
 
-      engine = createEngine();
+      engine = createTestEngine();
       await collectEvents(engine, 'test');
 
       // Turn completed without waiting for the 50ms compaction to finish
@@ -370,43 +227,13 @@ describe('QueryEngine Coverage Part 1', () => {
       expect(compactResolved).toBe(true);
     });
 
-    it('should do full compaction async and drain result', async () => {
-      const threshold = 200_000 - 20_000 - 13_000;
-      mockTokenEstimateRef.value = threshold + 1000;
-      setStream(textEvents('ok'));
-
-      const compactedMessages: ChatMessage[] = [
-        { id: '1', role: 'user', content: 'test', timestamp: Date.now() },
-      ];
-      (fullCompact as ReturnType<typeof vi.fn>).mockResolvedValue({
-        wasCompacted: true, messages: compactedMessages, tokensSaved: 50000,
-      });
-
-      engine = createEngine();
-      await collectEvents(engine, 'test');
-      // P6: wait for async compaction to complete
-      await waitForAsyncCompaction();
-
-      expect(fullCompact).toHaveBeenCalled();
-    });
-
-    it('should use cached token estimate', async () => {
-      const threshold = 200_000 - 20_000 - 13_000;
-      mockTokenEstimateRef.value = threshold + 1000;
-      setStream(textEvents('ok'));
-      engine = createEngine({ contextWindow: 200_000 });
-      await collectEvents(engine, 'test');
-      expect(estimateMessageTokensArray).toHaveBeenCalled();
-    });
-
     it('should disable compaction after max consecutive failures', async () => {
-      const threshold = 200_000 - 20_000 - 13_000;
-      mockTokenEstimateRef.value = threshold + 1000;
+      setTokenEstimate(COMPACTION_THRESHOLD + 1000);
 
       (fullCompact as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('API error'));
 
       setStream(textEvents('ok'));
-      engine = createEngine();
+      engine = createTestEngine();
 
       for (let i = 0; i < MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES + 2; i++) {
         await collectEvents(engine, `msg ${i}`);
@@ -424,45 +251,18 @@ describe('QueryEngine Coverage Part 1', () => {
       expect(fullCompact).not.toHaveBeenCalled();
     });
 
-    it('should validate state before compaction', async () => {
-      const threshold = 200_000 - 20_000 - 13_000;
-      mockTokenEstimateRef.value = threshold + 1000;
-      setStream(textEvents('ok'));
-      engine = createEngine({ contextWindow: 200_000 });
-
-      const messages = (engine as any).messages as ChatMessage[];
-      messages.push({
-        id: 'tool1', role: 'tool', content: null,
-        toolResults: [{ toolCallId: 'orphan_id', output: 'some output', isError: false }],
-        timestamp: Date.now(),
-      } as any);
-
-      try { for await (const _ of engine.submitMessage('test')) { /* drain */ } } catch {}
-    });
-
     it('should handle compaction error without crashing', async () => {
-      const threshold = 200_000 - 20_000 - 13_000;
-      mockTokenEstimateRef.value = threshold + 1000;
+      setTokenEstimate(COMPACTION_THRESHOLD + 1000);
       setStream(textEvents('ok'));
 
       (fullCompact as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('permanent auth failure'));
 
-      engine = createEngine({ contextWindow: 200_000 });
+      engine = createTestEngine({ contextWindow: 200_000 });
       // Turn should complete successfully even when async compaction fails
       await collectEvents(engine, 'test');
       // Wait for async compaction to fire and fail
       await waitForAsyncCompaction();
       expect(fullCompact).toHaveBeenCalled();
-    });
-
-    it('should use custom context window from config', async () => {
-      mockTokenEstimateRef.value = 18_000;
-      setStream(textEvents('ok'));
-
-      engine = createEngine({ contextWindow: 50_000 });
-      await collectEvents(engine, 'test');
-      // Custom context window should be used in shouldCompact check
-      expect(shouldCompact).toHaveBeenCalled();
     });
   });
 
@@ -470,15 +270,14 @@ describe('QueryEngine Coverage Part 1', () => {
 
   describe('abort handling', () => {
     it('should not start streaming when pre-aborted', async () => {
-      engine = createEngine();
+      engine = createTestEngine();
       engine.abort('cancelled before start');
       const events = await collectEvents(engine, 'test');
       expect(engine.getStateMachine().isTerminal()).toBe(true);
     });
 
     it('should stop during compacting phase when aborted', async () => {
-      const threshold = 200_000 - 20_000 - 13_000;
-      mockTokenEstimateRef.value = threshold + 1000;
+      setTokenEstimate(COMPACTION_THRESHOLD + 1000);
 
       (microcompact as ReturnType<typeof vi.fn>).mockImplementation(async () => {
         engine.abort('cancelled during compaction');
@@ -486,13 +285,13 @@ describe('QueryEngine Coverage Part 1', () => {
       });
 
       setStream(textEvents('should not reach'));
-      engine = createEngine({ contextWindow: 200_000 });
+      engine = createTestEngine({ contextWindow: 200_000 });
       const events = await collectEvents(engine, 'test');
       expect(engine.getStateMachine().isTerminal()).toBe(true);
     });
 
     it('should report isAborted correctly', async () => {
-      engine = createEngine();
+      engine = createTestEngine();
       expect(engine.isAborted()).toBe(false);
       engine.abort('test reason');
       expect(engine.isAborted()).toBe(true);

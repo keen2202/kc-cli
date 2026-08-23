@@ -26,8 +26,14 @@ export class PluginManager {
         if (plugin) {
           this.plugins.set(plugin.name, { plugin, status: 'loaded' });
         }
-      } catch {
-        // Silently skip failed plugins
+      } catch (err) {
+        // A broken plugin must not break bootstrap, but it is no longer
+        // silent: warn so the misconfiguration is discoverable. The plugin is
+        // still skipped (same behavior as before — not added to the map).
+        logger.plugins.warn('[plugins] Failed to load plugin — skipping it', {
+          dir,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
   }
@@ -67,8 +73,15 @@ export class PluginManager {
           loaded.plugin.onShutdown?.(),
           new Promise(resolve => setTimeout(resolve, 5000)),
         ]);
-      } catch {
-        // Ignore shutdown errors
+      } catch (err) {
+        // Teardown path: a plugin's onShutdown failing (or timing out at the
+        // 5s race) must never block or fail process shutdown — every other
+        // plugin still gets its shutdown attempt via Promise.allSettled.
+        // Best-effort is safe here; debug-log for observability only.
+        logger.plugins.debug('[plugins] Plugin shutdown failed (ignored during teardown)', {
+          plugin: loaded.plugin.name,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     });
     await Promise.allSettled(shutdowns);

@@ -4,6 +4,9 @@
 
 import { createHash } from 'node:crypto';
 import type { ToolDefinition } from '../tools/protocol';
+// T17: strategy values are read from the capability registry (single source).
+// No cycle: api/capabilities → services/cache only; nothing imports back here.
+import { getCapabilities } from '../api/capabilities';
 
 /**
  * Provider-specific cache strategy.
@@ -214,24 +217,13 @@ export class CachePrefixService {
 
 /**
  * Build the cache strategy for a given provider.
+ *
+ * T17: the provider branch is gone. The authoritative per-provider value is
+ * `PROVIDER_CAPABILITIES[provider].prefixCachingStrategy` (T16 registry,
+ * falling back to DEFAULT_CAPABILITIES = 'none' for unlisted providers), which
+ * matches the historical switch for every provider, including unknown ids.
+ * Adding a provider therefore never requires touching this file.
  */
 export function buildCacheStrategy(provider: string): CacheStrategy {
-  switch (provider) {
-    case 'anthropic':
-      return 'explicit-breakpoints';
-    case 'deepseek':
-      return 'auto-prefix';
-    case 'openai':
-      return 'prompt-cache';
-    case 'qwen':
-    case 'glm':
-    case 'mimo':
-    case 'kimi':
-    case 'step':
-    case 'gemini':
-    case 'ollama':
-    case 'openai-compatible':
-    default:
-      return 'none';
-  }
+  return getCapabilities(provider).prefixCachingStrategy;
 }

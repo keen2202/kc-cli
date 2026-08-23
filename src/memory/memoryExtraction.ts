@@ -1,4 +1,4 @@
-﻿// Memory extraction service - background extraction with cursor-based throttling
+// Memory extraction service - background extraction with cursor-based throttling
 
 import { createHash } from 'crypto';
 import type { ChatMessage } from '../query/protocol';
@@ -180,19 +180,19 @@ export async function executeMemoryExtraction(context: PostTurnHookContext): Pro
           await memoryService!.addMemory(projectHash!, memory);
           savedCount++;
         } catch (err) {
-          console.error('[MemoryExtraction] Failed to save memory:', err);
+          logger.memory.warn('[MemoryExtraction] Failed to save memory', { error: String(err) });
         }
       }
 
       state.totalMemoriesExtracted += savedCount;
-      console.log(`[MemoryExtraction] Extracted and saved ${savedCount} memories`);
+      logger.memory.info('[MemoryExtraction] Extracted and saved memories', { savedCount });
     }
 
     // Advance cursor
     state.lastExtractionCursor = context.messages.length;
     state.totalExtractions++;
   } catch (err) {
-    console.error('[MemoryExtraction] Extraction failed:', err);
+    logger.memory.warn('[MemoryExtraction] Extraction failed', { error: String(err) });
   } finally {
     state.inProgress = false;
 
@@ -204,7 +204,7 @@ export async function executeMemoryExtraction(context: PostTurnHookContext): Pro
       state.turnsSinceLastExtraction = turnThrottle;
       // Fire-and-forget with error boundary
       executeMemoryExtraction(trailingContext).catch(err => {
-        console.error('[MemoryExtraction] Trailing extraction failed:', err);
+        logger.memory.warn('[MemoryExtraction] Trailing extraction failed', { error: String(err) });
       });
     }
   }

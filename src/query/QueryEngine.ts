@@ -57,6 +57,33 @@ import { computeSurfaceRuntime, buildConditionalInjection } from '../api/prompts
 export type { QueryEngineConfig } from './protocol';
 
 /**
+ * T24 phase 1: optional dependency-injection surface for QueryEngine.
+ * Every collaborator previously hard-instantiated (`new X(...)`) can be
+ * substituted by tests; each parameter defaults to exactly the instantiation
+ * the constructor performed before this change, so the no-deps construction
+ * path is behavior-identical.
+ */
+export interface QueryEngineDeps {
+  stateStore: ObservableStateStore;
+  stateMachine: AgentStateMachine;
+  conversation: ConversationState;
+  compaction: CompactionHandler;
+  memory: MemoryHandler;
+  errorHandler: ErrorHandler;
+  toolExecutor: ToolExecutor;
+  userProfile: UserProfileService;
+  budgetEnforcer: BudgetEnforcer;
+  cacheMetrics: PromptCacheMetrics;
+  cachePrefix: CachePrefixService;
+  fileContentCache: FileContentCache;
+  importanceTagger: ImportanceTagger;
+  fileJournal: FileOperationJournal;
+  decision: DecisionGates;
+  planningHandler: PlanningPhaseHandler;
+  runtimeControl: RuntimeControlHandler;
+}
+
+/**
  * Query Engine with explicit state machine pattern.
  * Manages the full query lifecycle through distinct phases:
  * idle → compacting → streaming → deciding → executing → (loop or complete)
@@ -87,8 +114,8 @@ export class QueryEngine {
   private config: QueryEngineConfig;
   private abortController: AbortController;
 
-  // Cache metrics tracking
-  private cacheMetrics = new PromptCacheMetrics();
+  // Cache metrics tracking (T24 phase 1: injectable, defaults preserved)
+  private cacheMetrics: PromptCacheMetrics;
 
   // Cache prefix service for byte-stable prompt prefixes
   private cachePrefix: CachePrefixService;
@@ -104,7 +131,8 @@ export class QueryEngine {
   // mutated by the execution / turn-control sub-modules via this shared tracker.
   private progress: ProgressTracker = { lastModifiedTurn: 0, lastProgressTurn: 0 };
   // T3 (H3): session-scoped undo journal, consumed by the FileRestore tool.
-  private fileJournal: FileOperationJournal = new FileOperationJournal();
+  // (T24 phase 1: injectable, defaults preserved)
+  private fileJournal: FileOperationJournal;
 
   // Area 3: Context efficiency components
   private fileContentCache: FileContentCache;
@@ -118,7 +146,8 @@ export class QueryEngine {
   // Area 2: Patch Guarantee — exit gates (zero-patch / verification /
   // type-check retry budgets + T7/M2 gate reports) live in the DecisionGates
   // sub-module (QueryEngineDecision.ts).
-  private decision = new DecisionGates();
+  // (T24 phase 1: injectable, defaults preserved)
+  private decision: DecisionGates;
 
   // Conversational-query exemption: greetings/small talk skip the SWE-bench
   // machinery (phase steers, anti-abandonment, patch guarantee) so a plain
@@ -131,9 +160,16 @@ export class QueryEngine {
   // harness-evolution T2 (H2): cross-turn runtime control policy handler
   private runtimeControl: RuntimeControlHandler;
 
-  constructor(config: QueryEngineConfig, tools: ToolDefinition[]) {
+  constructor(config: QueryEngineConfig, tools: ToolDefinition[], deps?: Partial<QueryEngineDeps>) {
+    const d = deps ?? {};
     this.config = config;
     this.abortController = new AbortController();
+
+    // T24 phase 1: these three were field initializers before; hoisted here
+    // verbatim (same defaults, nothing reads them earlier in construction).
+    this.cacheMetrics = d.cacheMetrics ?? new PromptCacheMetrics();
+    this.fileJournal = d.fileJournal ?? new FileOperationJournal();
+    this.decision = d.decision ?? new DecisionGates();
 
     // Initialize API client
     this.apiClient = createAPIClient({
@@ -145,7 +181,7 @@ export class QueryEngine {
 
     // Initialize budget enforcer. Hoisted above the sub-modules so the
     // memory LLM-extraction tier can share this same enforcer (GR6).
-    this.budgetEnforcer = new BudgetEnforcer({
+    this.budgetEnforcer = d.budgetEnforcer ?? new BudgetEnforcer({
       sessionTokenLimit: config.maxBudgetUsd
         ? Math.ceil(config.maxBudgetUsd / 0.00001) // rough token-per-dollar estimate
         : DEFAULT_BUDGET_CONFIG.sessionTokenLimit,
@@ -153,10 +189,10 @@ export class QueryEngine {
     });
 
     // Initialize sub-modules
-    this.conversation = new ConversationState({
+    this.conversation = d.conversation ?? new ConversationState({
       maxMessages: config.maxMessages,
     });
-    this.compaction = new CompactionHandler();
+    this.compaction = d.compaction ?? new CompactionHandler();
     // Memory integration: default-inject the engine's own API client and
     // budget enforcer so the hybrid LLM-extraction tier (spec:
     // memory-llm-extraction-hardening) can actually fire when
@@ -165,15 +201,15 @@ export class QueryEngine {
     // post-turn hooks — GR5 recursion isolation is preserved). Explicitly
     // provided values in config.memory (including an explicit null) win
     // over these defaults.
-    this.memory = new MemoryHandler({
+    this.memory = d.memory ?? new MemoryHandler({
       llmClient: this.apiClient,
       budget: this.budgetEnforcer,
       ...config.memory,
     });
-    this.errorHandler = new ErrorHandler();
+    this.errorHandler = d.errorHandler ?? new ErrorHandler();
 
     // Initialize state store
-    this.stateStore = new ObservableStateStore(createInitialState({
+    this.stateStore = d.stateStore ?? new ObservableStateStore(createInitialState({
       model: config.model,
       provider: config.provider,
       maxTurns: config.maxTurns,
@@ -181,11 +217,11 @@ export class QueryEngine {
     }));
 
     // Initialize state machine
-    this.stateMachine = new AgentStateMachine(this.stateStore);
+    this.stateMachine = d.stateMachine ?? new AgentStateMachine(this.stateStore);
 
     // Initialize tool executor with permission config from user settings
     const rules = config.permissionRules || {};
-    this.toolExecutor = new ToolExecutor(tools, getState().cwd, {
+    this.toolExecutor = d.toolExecutor ?? new ToolExecutor(tools, getState().cwd, {
       alwaysDenyRules: rules.deny || [],
       alwaysAskRules: rules.ask || [],
       alwaysAllowRules: rules.allow || [],
@@ -197,25 +233,25 @@ export class QueryEngine {
     this.toolExecutor.setNoninteractiveAskPolicy(config.noninteractiveAskPolicy ?? 'deny');
 
     // Initialize user profile (level-based adaptation)
-    this.userProfile = new UserProfileService();
+    this.userProfile = d.userProfile ?? new UserProfileService();
 
     // Initialize cache prefix service
-    this.cachePrefix = new CachePrefixService(
+    this.cachePrefix = d.cachePrefix ?? new CachePrefixService(
       config.provider,
       buildCacheStrategy(config.provider),
     );
 
     // Initialize context efficiency components
-    this.fileContentCache = new FileContentCache(
+    this.fileContentCache = d.fileContentCache ?? new FileContentCache(
       config.contextEfficiency?.dedupCacheSize ?? 500
     );
-    this.importanceTagger = new ImportanceTagger();
+    this.importanceTagger = d.importanceTagger ?? new ImportanceTagger();
 
     // Initialize planning phase handler
-    this.planningHandler = new PlanningPhaseHandler(config.planningPhase || {});
+    this.planningHandler = d.planningHandler ?? new PlanningPhaseHandler(config.planningPhase || {});
 
     // harness-evolution T2 (H2): runtime control policy (default disabled)
-    this.runtimeControl = new RuntimeControlHandler(config.runtimeControl);
+    this.runtimeControl = d.runtimeControl ?? new RuntimeControlHandler(config.runtimeControl);
 
     // Link planning handler to tool executor for defense-in-depth filtering
     this.toolExecutor.setToolBlockCheck((toolName: string) => {
@@ -534,80 +570,22 @@ export class QueryEngine {
             // default the query completes normally with the model's text
             // answer; SWE-bench runs opt into the hard failure via
             // patchGuarantee.failOnZeroPatch.
-            if (!hasTools && this.decision.zeroPatchRetries > 0 && this.modifiedFiles.size === 0) {
-              const maxRetries = this.config.patchGuarantee?.maxZeroPatchRetries ?? 3;
-              if (this.decision.zeroPatchRetries >= maxRetries) {
-                if (this.config.patchGuarantee?.failOnZeroPatch) {
-                  const err = new KCError(
-                    'model_no_patch',
-                    'Agent exited without modifying any files after exhausting zero-patch retries',
-                    { zeroPatchRetries: this.decision.zeroPatchRetries }
-                  );
-                  yield {
-                    type: 'agent:error',
-                    error: err,
-                    recoverable: false,
-                    timestamp: Date.now(),
-                  } as AgentEvent;
-                } else {
-                  logger.query.warn(
-                    `[QueryEngine] Zero-patch retries exhausted (${this.decision.zeroPatchRetries}) — completing without patch (failOnZeroPatch disabled)`
-                  );
-                }
-              }
-            }
+            // (T24 phase 1: block extracted to zeroPatchExhaustedEvent().)
+            const zeroPatchError = this.zeroPatchExhaustedEvent(hasTools);
+            if (zeroPatchError) yield zeroPatchError;
 
             if (hasTools) {
               this.stateMachine.transitionTo('executing');
             } else {
               // Turn complete — drain followUpQueue before finishing
-              const followUps = this.drainFollowUpQueue();
-              if (followUps.length > 0) {
-                for (const msg of followUps) {
-                  this.conversation.addMessage(msg);
-                }
-                // Reset state machine to continue processing
-                this.stateMachine.forceTransitionTo('streaming');
-                break;
-              }
+              // (T24 phase 1: block extracted to drainFollowUpsIntoConversation().)
+              if (this.drainFollowUpsIntoConversation()) break;
               this.stateMachine.transitionTo('completed');
-              // AGP Evolution hook: trigger self-evolution after completion
-              if (this.config.evolution?.enabled && this.config.evolution.onEvolve) {
-                try {
-                  this.stateStore.set({
-                    evolutionState: {
-                      active: true,
-                      iteration: 0,
-                      committedChanges: 0,
-                      rolledBackChanges: 0,
-                    },
-                  } as any);
-                  this.stateMachine.transitionTo('evolving');
-                  await this.config.evolution.onEvolve(this.stateStore.get().sessionId);
-                  this.stateStore.set({
-                    evolutionState: {
-                      active: false,
-                      iteration: 0,
-                      lastEvolutionAt: Date.now(),
-                      committedChanges: 0,
-                      rolledBackChanges: 0,
-                    },
-                  } as any);
-                } catch {
-                  // Evolution failure is non-fatal
-                }
-                // Restore state machine back to completed after evolution
-                this.stateMachine.transitionTo('completed');
-              }
               // Dispatch post-turn hooks (fire-and-forget): plugin postTurn
               // hooks and the T8 failure-signature → memory bridging hook run
               // off this path; hook errors never affect query completion.
-              void executePostTurnHooks({
-                messages: this.conversation.getMessages(),
-                systemPrompt: this.config.systemPrompt ?? '',
-                state: this.stateStore.get(),
-                querySource: 'query-engine',
-              });
+              // (T24 phase 1: dispatch extracted to dispatchPostTurnHooks().)
+              this.dispatchPostTurnHooks();
               yield this.createCompleteEvent(turnCount);
             }
             break;
@@ -616,13 +594,8 @@ export class QueryEngine {
             yield* this.executingPhase();
             if (!this.stateMachine.isTerminal()) {
               // Drain steerQueue after execution before going back to streaming
-              const steered = this.drainSteerQueue();
-              if (steered.length > 0) {
-                for (const msg of steered) {
-                  this.conversation.addMessage(msg);
-                  yield { type: 'agent:steered', message: msg, timestamp: Date.now() };
-                }
-              }
+              // (T24 phase 1: block extracted to drainSteersIntoConversation().)
+              yield* this.drainSteersIntoConversation();
               this.stateMachine.transitionTo('streaming');
             }
             break;
@@ -638,6 +611,93 @@ export class QueryEngine {
     } catch (error) {
       this.stateMachine.forceTransitionTo('error');
       yield this.errorHandler.createErrorEvent(error);
+    }
+  }
+
+  // ── Extracted state-machine business blocks (T24 phase 1) ──
+  // These were inline bodies inside the submitMessage() switch; extracted
+  // verbatim (same conditions, same ordering, same side effects) to slim the
+  // state machine without changing observable behavior.
+
+  /**
+   * Area 2: Zero-patch exhaustion gate (deciding-phase exit check).
+   *
+   * Zero-patch exhaustion error (strict mode only). By default the query
+   * completes normally with the model's text answer; SWE-bench runs opt into
+   * the hard failure via patchGuarantee.failOnZeroPatch.
+   *
+   * @returns the terminal `agent:error` event to emit when zero-patch retries
+   * are exhausted under failOnZeroPatch, otherwise null. The soft-path warn
+   * log fires exactly where it did inline.
+   */
+  private zeroPatchExhaustedEvent(hasTools: boolean): AgentEvent | null {
+    if (!(!hasTools && this.decision.zeroPatchRetries > 0 && this.modifiedFiles.size === 0)) {
+      return null;
+    }
+    const maxRetries = this.config.patchGuarantee?.maxZeroPatchRetries ?? 3;
+    if (this.decision.zeroPatchRetries < maxRetries) {
+      return null;
+    }
+    if (this.config.patchGuarantee?.failOnZeroPatch) {
+      const err = new KCError(
+        'model_no_patch',
+        'Agent exited without modifying any files after exhausting zero-patch retries',
+        { zeroPatchRetries: this.decision.zeroPatchRetries }
+      );
+      return {
+        type: 'agent:error',
+        error: err,
+        recoverable: false,
+        timestamp: Date.now(),
+      } as AgentEvent;
+    }
+    logger.query.warn(
+      `[QueryEngine] Zero-patch retries exhausted (${this.decision.zeroPatchRetries}) — completing without patch (failOnZeroPatch disabled)`
+    );
+    return null;
+  }
+
+  /**
+   * Dispatch post-turn hooks (fire-and-forget): plugin postTurn hooks and the
+   * T8 failure-signature → memory bridging hook run off this path; hook errors
+   * never affect query completion.
+   */
+  private dispatchPostTurnHooks(): void {
+    void executePostTurnHooks({
+      messages: this.conversation.getMessages(),
+      systemPrompt: this.config.systemPrompt ?? '',
+      state: this.stateStore.get(),
+      querySource: 'query-engine',
+    });
+  }
+
+  /**
+   * Turn complete — drain followUpQueue into the conversation and reset the
+   * state machine so the queued messages start a new implicit turn.
+   *
+   * @returns true when follow-ups were drained (caller must `break` to re-enter
+   * the loop at 'streaming'), false when the queue was empty.
+   */
+  private drainFollowUpsIntoConversation(): boolean {
+    const followUps = this.drainFollowUpQueue();
+    if (followUps.length === 0) return false;
+    for (const msg of followUps) {
+      this.conversation.addMessage(msg);
+    }
+    // Reset state machine to continue processing
+    this.stateMachine.forceTransitionTo('streaming');
+    return true;
+  }
+
+  /**
+   * Drain steerQueue after execution and inject each steered message into the
+   * conversation, emitting one `agent:steered` event per message.
+   */
+  private *drainSteersIntoConversation(): Generator<AgentEvent> {
+    const steered = this.drainSteerQueue();
+    for (const msg of steered) {
+      this.conversation.addMessage(msg);
+      yield { type: 'agent:steered', message: msg, timestamp: Date.now() };
     }
   }
 

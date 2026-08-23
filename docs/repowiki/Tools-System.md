@@ -1,6 +1,6 @@
 # Tools System
 
-23 registered tools with two-phase execution, lazy loading, and plugin extensibility.
+23 registered tools with single-phase execution (`call` + permission check + plugin hooks), lazy loading, and plugin extensibility.
 
 ## Tool Registry
 
@@ -37,10 +37,8 @@ interface ToolDefinition {
   inputSchema: ZodSchema;
   outputSchema?: ZodSchema;
 
-  // Two-phase execution
-  prepare?(input, context): Promise<PrepareResult>;
+  // Execution (single-phase: call + permission check + plugin hooks)
   call(input, context, onProgress?): Promise<ToolResult>;
-  finalize?(input, result, context): Promise<ToolResult>;
 
   // Permission
   checkPermissions?(input, context): Promise<PermissionResult>;
@@ -56,15 +54,12 @@ interface ToolDefinition {
 }
 ```
 
-### Two-Phase Execution
+### Execution Model
 
-```
-prepare()  → Can modify input, skip execution, or return early result
-call()     → Main execution logic
-finalize() → Can transform or augment the result
-```
-
-Example: FileWriteTool's `prepare()` checks if the file exists and the content is different. If content is identical, it returns an early "no change" result without writing.
+A tool runs in a single `call()` phase. Input-side and result-side transformations are
+the exclusive domain of plugin hooks (`preToolUse` / `postToolUse`) — there are no
+per-tool `prepare`/`finalize` hooks (removed in audit-remediation-round3 T01; the
+executor never probes for them).
 
 ## Tool Factory (buildTool)
 
@@ -85,17 +80,13 @@ Full pipeline for one tool call:
 1. Find tool in registry
 2. plugin.preToolUse(toolName, input) hook
    └─ Can modify input or block (return null)
-3. tool.prepare(input, context)
-   └─ Can skip execution or return early
-4. permissionEngine.check(tool, input)
+3. permissionEngine.check(tool, input)
    └─ deny-first evaluation
-5. sandboxManager.wrapCommand() [if Bash/Run]
+4. sandboxManager.wrapCommand() [if Bash/Run]
    └─ HMAC-signed isolation wrapper
-6. tool.call(input, context, onProgress)
+5. tool.call(input, context, onProgress)
    └─ With timeout enforcement
-7. tool.finalize(input, result, context)
-   └─ Can transform result
-8. plugin.postToolUse(toolName, input, result) hook
+6. plugin.postToolUse(toolName, input, result) hook
    └─ Can override result
 ```
 

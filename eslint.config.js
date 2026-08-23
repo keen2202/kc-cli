@@ -59,6 +59,29 @@ export default tseslint.config(
     },
   },
   {
+    // T21 (audit round3 M5): console.log on hot paths corrupts the ink TUI —
+    // post-turn hooks (src/memory) and query/executors code writing to stdout
+    // tear the live render. Route diagnostics through the structured logger
+    // (stderr JSON lines) instead: logger.query / logger.memory from
+    // src/services/logger.ts. main.ts and src/commands are legitimate
+    // REPL/CLI output and are intentionally outside this override.
+    files: [
+      'src/query/**/*.{ts,tsx}',
+      'src/memory/**/*.{ts,tsx}',
+      'src/executors/**/*.{ts,tsx}',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "CallExpression[callee.object.name='console'][callee.property.name='log']",
+          message:
+            'console.log is banned under src/query|src/memory|src/executors (ink TUI corruption risk on stdout) — use logger.query/logger.memory from src/services/logger.',
+        },
+      ],
+    },
+  },
+  {
     // Co-located tests may use looser typing.
     files: ['src/**/*.test.{ts,tsx}'],
     rules: {

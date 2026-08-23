@@ -5,6 +5,7 @@ import * as path from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import type { LSPDiagnostic, LSPHover, LSPLocation, LanguageId } from './types';
 import { getCacheManager } from '../services/cache';
+import { logger } from '../services/logger';
 
 interface LSPMessage {
   jsonrpc: '2.0';
@@ -228,7 +229,16 @@ export class LSPClientManager {
     this.servers.forEach((server) => {
       try {
         server.process.kill('SIGTERM');
-      } catch { /* process may already be dead */ }
+      } catch (err) {
+        // Teardown path: the server process may already have exited, in which
+        // case kill() throws ESRCH. Nothing needs cleaning up then — the exit
+        // handler already rejected pending requests and dropped the server —
+        // so this is a safe best-effort; debug-log for observability only.
+        logger.lsp.debug('[LSP] SIGTERM during teardown failed (process likely already dead)', {
+          languageId: server.languageId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     });
     this.servers.clear();
     this.diagnosticCache.clear();
@@ -282,7 +292,16 @@ export class LSPClientManager {
       try {
         const message: LSPMessage = JSON.parse(messageStr);
         this.handleMessage(server, message);
-      } catch { /* skip malformed messages */ }
+      } catch (err) {
+        // Data-path failure: a complete Content-Length frame from the language
+        // server failed to parse. The client stays alive (a single corrupt
+        // frame must not kill the session) but the corruption is surfaced.
+        logger.lsp.warn('[LSP] Dropping malformed JSON-RPC message', {
+          languageId: server.languageId,
+          error: err instanceof Error ? err.message : String(err),
+          bytes: messageStr.length,
+        });
+      }
     }
   }
 

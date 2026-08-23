@@ -7,7 +7,6 @@ import type {
   ToolResult,
   ToolCallProgress,
 } from './tools/protocol';
-import type { PermissionResult } from './permissions/protocol';
 import { withToolErrorHandling } from './utils/errorHandling';
 
 /**
@@ -40,31 +39,6 @@ export function buildTool<Input, Output, Progress = unknown>(
       behavior: 'passthrough' as const,
       message: 'No permission check defined',
     })),
-  };
-}
-
-/**
- * Default permission check - allows read-only tools, asks for others
- */
-export function defaultPermissionCheck(
-  input: Record<string, unknown>,
-  context: ToolUseContext,
-  isReadOnly: boolean
-): PermissionResult {
-  if (isReadOnly) {
-    return {
-      behavior: 'allow',
-      updatedInput: input,
-      decisionReason: {
-        type: 'readonly',
-        reason: 'Read-only operation is safe',
-      },
-    };
-  }
-
-  return {
-    behavior: 'ask',
-    message: 'This operation requires permission',
   };
 }
 

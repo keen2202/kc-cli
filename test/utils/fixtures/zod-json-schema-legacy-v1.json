@@ -1,0 +1,664 @@
+{
+  "$comment": "T22 fixture: outputs of the pre-migration handwritten src/utils/zodToJsonSchema.ts for every TOOL_MANIFEST tool input schema. Captured 2026-08-23 under zod@3.23.8 BEFORE the rewrite; the handwritten implementation has been deleted — this file and the embedded legacy converter in zodToJsonSchema-migration.test.ts are its only remaining form.",
+  "capturedWith": {
+    "zod": "3.23.8",
+    "toolCount": 23
+  },
+  "schemas": {
+    "Bash": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "The bash command to execute"
+        },
+        "timeout": {
+          "type": "number",
+          "default": 30
+        },
+        "background": {
+          "type": "boolean",
+          "default": false
+        },
+        "workingDir": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "command"
+      ]
+    },
+    "FileRead": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File path to read"
+        },
+        "range": {
+          "type": "object",
+          "properties": {
+            "start": {
+              "type": "number"
+            },
+            "end": {
+              "type": "number"
+            }
+          }
+        },
+        "maxSize": {
+          "type": "number",
+          "default": 100000
+        }
+      },
+      "required": [
+        "path"
+      ]
+    },
+    "FileWrite": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File path to write"
+        },
+        "content": {
+          "type": "string",
+          "description": "Content to write"
+        },
+        "append": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ]
+    },
+    "WebSearch": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Search query"
+        },
+        "numResults": {
+          "type": "number",
+          "default": 10
+        },
+        "includeDomains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "excludeDomains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "FileEdit": {
+      "type": "object",
+      "properties": {
+        "file_path": {
+          "type": "string",
+          "description": "Path to file to edit"
+        },
+        "edits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "old_string": {
+                "type": "string",
+                "description": "Text to find"
+              },
+              "new_string": {
+                "type": "string",
+                "description": "Text to replace with"
+              },
+              "replace_all": {
+                "type": "boolean",
+                "default": false
+              }
+            },
+            "required": [
+              "old_string",
+              "new_string"
+            ]
+          },
+          "minItems": 1
+        },
+        "dry_run": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "file_path",
+        "edits"
+      ]
+    },
+    "FileRestore": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "undo-last",
+            "restore",
+            "list"
+          ]
+        },
+        "file": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    },
+    "Grep": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Regex pattern to search for"
+        },
+        "path": {
+          "type": "string",
+          "default": "."
+        },
+        "case_sensitive": {
+          "type": "boolean",
+          "default": false
+        },
+        "max_results": {
+          "type": "number",
+          "default": 100
+        },
+        "file_pattern": {
+          "type": "string"
+        },
+        "context_lines": {
+          "type": "number",
+          "default": 0
+        }
+      },
+      "required": [
+        "pattern"
+      ]
+    },
+    "Glob": {
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Glob pattern (e.g., \"**/*.ts\", \"src/**/*.tsx\")"
+        },
+        "path": {
+          "type": "string",
+          "default": "."
+        },
+        "ignore": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "max_results": {
+          "type": "number",
+          "default": 1000
+        }
+      },
+      "required": [
+        "pattern"
+      ]
+    },
+    "WebFetch": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL to fetch"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "DELETE",
+            "PATCH",
+            "HEAD"
+          ],
+          "default": "GET"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "body": {
+          "type": "string"
+        },
+        "max_size": {
+          "type": "number",
+          "default": 100000
+        },
+        "timeout": {
+          "type": "number",
+          "default": 30
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
+    "Git": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Git command to execute (without \"git\" prefix)"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "timeout": {
+          "type": "number",
+          "default": 60
+        }
+      },
+      "required": [
+        "command"
+      ]
+    },
+    "Run": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Command to execute"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "timeout": {
+          "type": "number",
+          "default": 60
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "shell": {
+          "type": "string",
+          "default": "bash"
+        }
+      },
+      "required": [
+        "command"
+      ]
+    },
+    "Sql": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "SQL query to execute"
+        },
+        "database": {
+          "type": "string",
+          "description": "Database connection name or path to SQLite file"
+        },
+        "params": {
+          "type": "array",
+          "items": {}
+        },
+        "timeout": {
+          "type": "number",
+          "default": 30
+        }
+      },
+      "required": [
+        "query",
+        "database"
+      ]
+    },
+    "Docker": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Docker command (without \"docker\" prefix)"
+        },
+        "timeout": {
+          "type": "number",
+          "default": 60
+        }
+      },
+      "required": [
+        "command"
+      ]
+    },
+    "Monitor": {
+      "type": "object",
+      "properties": {
+        "metric": {
+          "type": "string",
+          "enum": [
+            "cpu",
+            "memory",
+            "disk",
+            "processes",
+            "network",
+            "all"
+          ],
+          "default": "all"
+        }
+      }
+    },
+    "Config": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "get",
+            "set",
+            "list",
+            "delete"
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "user",
+            "project",
+            "session"
+          ],
+          "default": "session"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    },
+    "TodoWrite": {
+      "type": "object",
+      "properties": {
+        "todos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string",
+                "description": "Todo item content"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "in_progress",
+                  "completed"
+                ],
+                "default": "pending"
+              },
+              "priority": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "default": "medium"
+              }
+            },
+            "required": [
+              "content"
+            ]
+          }
+        }
+      },
+      "required": [
+        "todos"
+      ]
+    },
+    "TaskCreate": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Command to execute"
+        },
+        "description": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "background": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "command"
+      ]
+    },
+    "TaskGet": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string"
+        },
+        "status_filter": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "running",
+            "completed",
+            "failed"
+          ]
+        }
+      }
+    },
+    "AskUser": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "type": "string",
+          "description": "Question to ask the user"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "default_answer": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ]
+    },
+    "Agent": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "description": "Instructions for the sub-agent"
+        },
+        "description": {
+          "type": "string"
+        },
+        "timeout": {
+          "type": "number",
+          "default": 300
+        },
+        "agent_type": {
+          "type": "string"
+        },
+        "background": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "prompt"
+      ]
+    },
+    "Deploy": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "type": "string",
+          "enum": [
+            "local",
+            "docker",
+            "vercel",
+            "netlify",
+            "ssh",
+            "custom"
+          ]
+        },
+        "command": {
+          "type": "string"
+        },
+        "environment": {
+          "type": "string",
+          "enum": [
+            "development",
+            "staging",
+            "production"
+          ],
+          "default": "production"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "target"
+      ]
+    },
+    "TeamCreate": {
+      "type": "object",
+      "properties": {
+        "agents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Unique name for this sub-agent"
+              },
+              "agent_type": {
+                "type": "string"
+              },
+              "prompt": {
+                "type": "string",
+                "description": "Task instruction for this agent"
+              },
+              "tools_allow": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "tools_deny": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "max_turns": {
+                "type": "number"
+              },
+              "timeout": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "name",
+              "prompt"
+            ]
+          }
+        },
+        "wait_for_all": {
+          "type": "boolean",
+          "default": false
+        },
+        "timeout": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "agents"
+      ]
+    },
+    "LSP": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "diagnostics",
+            "hover",
+            "definition"
+          ]
+        },
+        "filePath": {
+          "type": "string",
+          "description": "Path to the file"
+        },
+        "line": {
+          "type": "number"
+        },
+        "character": {
+          "type": "number"
+        },
+        "content": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "all",
+            "errors",
+            "warnings"
+          ],
+          "default": "all"
+        }
+      },
+      "required": [
+        "action",
+        "filePath"
+      ]
+    }
+  }
+}

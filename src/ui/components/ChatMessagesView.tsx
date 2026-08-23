@@ -38,7 +38,10 @@ function pushBody(out: string[], text: string, width: number): void {
 }
 
 /**
- * Render one chat message into terminal rows (pure; exported for tests).
+ * Render one chat message into terminal rows (pure).
+ *
+ * Module-private (audit round3 T11): the "exported for tests" claim was stale
+ * — no test imports it; both call sites below are in this file.
  *
  * Every turn opens with a role marker so a user question is unmistakable and
  * clearly set apart from the assistant's reply; the message body is then
@@ -46,7 +49,7 @@ function pushBody(out: string[], text: string, width: number): void {
  * cards all align on a single column. A trailing blank row separates
  * consecutive messages.
  */
-export function renderMessageLines(
+function renderMessageLines(
   message: ChatMessage,
   thinkingChain: ThinkingChain | undefined,
   tokens: ThemeTokens,

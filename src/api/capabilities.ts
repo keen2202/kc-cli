@@ -70,6 +70,109 @@ const DEFAULT_CAPABILITIES: ProviderCapabilities = {
   prefixCachingStrategy: 'none',
 };
 
+// ── Provider / model registry (single source of truth, audit round3 T16) ────
+//
+// This module is the ONLY place that declares provider/model capacity data.
+// The duplicates that used to live in api/index.ts (PROVIDER_MODELS table)
+// and in AnthropicClient/OpenAICompatibleClient getModelInfo() hardcoded
+// tables were removed and now read from here. Do not reintroduce local
+// copies — extend the tables below instead (guarded by
+// capabilities-consistency.test.ts).
+
+/**
+ * Providers understood by the API client factory.
+ * Derived from the PROVIDER_SPECS table (T17) — the id set is owned there;
+ * this alias keeps the historical name used across the codebase.
+ */
+import type { ProviderId } from './provider-specs';
+export type LLMProvider = ProviderId;
+
+export interface ProviderModelInfo {
+  default: string;
+  supported: string[];
+}
+
+/**
+ * Default/supported model names per provider (identity data, not capacity).
+ * Capacity numbers live in PROVIDER_CAPABILITIES + MODEL_OVERRIDES below.
+ */
+export const PROVIDER_MODELS: Record<LLMProvider, ProviderModelInfo> = {
+  'anthropic': {
+    default: 'claude-sonnet-4-20250514',
+    supported: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-opus-20240229', 'mimo-v2.5-pro'],
+  },
+  'openai': {
+    default: 'gpt-4o',
+    supported: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+  },
+  'deepseek': {
+    default: 'deepseek-v4-pro',
+    supported: ['deepseek-v4-pro', 'deepseek-v4-flash'],
+  },
+  'qwen': {
+    default: 'qwen-plus',
+    supported: ['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-long'],
+  },
+  'glm': {
+    default: 'glm-4-plus',
+    supported: ['glm-4', 'glm-4-plus', 'glm-4-flash', 'glm-4-air'],
+  },
+  'mimo': {
+    default: 'mimo-v2.5-pro',
+    supported: ['mimo-v2.5-pro', 'mimo-v2.5', 'mimo-v2-flash'],
+  },
+  'kimi': {
+    default: 'kimi-k2.6',
+    supported: ['kimi-k2.6', 'kimi-k2.5', 'kimi-k2', 'kimi-k2-thinking', 'moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'],
+  },
+  'step': {
+    default: 'step-3.7-flash',
+    supported: ['step-3.7-flash', 'step-3.5-flash', 'step-2-16k', 'step-1-8k', 'step-1-32k', 'step-1-128k'],
+  },
+  'gemini': {
+    default: 'gemini-2.5-pro',
+    supported: [
+      'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite',
+      'gemini-2.0-flash', 'gemini-2.0-flash-lite',
+      'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite',
+      'gemini-3.5-flash',
+    ],
+  },
+  'openai-compatible': {
+    default: '',
+    supported: [],
+  },
+  'ollama': {
+    default: 'llama3',
+    supported: [],
+  },
+};
+
+/**
+ * Resolve a requested model name against a provider's supported list,
+ * falling back to the provider default with a console warning.
+ */
+export function resolveModel(provider: LLMProvider, requestedModel: string): string {
+  const info = PROVIDER_MODELS[provider];
+  if (!info) return requestedModel;
+
+  // Open-ended providers accept any model
+  if (info.supported.length === 0) {
+    return requestedModel || info.default;
+  }
+
+  // Model is valid for this provider
+  if (info.supported.includes(requestedModel)) {
+    return requestedModel;
+  }
+
+  // Fall back to provider default
+  if (requestedModel !== info.default) {
+    console.warn(`Model '${requestedModel}' not supported by ${provider}, using '${info.default}'`);
+  }
+  return info.default;
+}
+
 /**
  * Provider-level capabilities. Model-specific overrides can be applied on top.
  */
@@ -198,8 +301,10 @@ export const PROVIDER_CAPABILITIES: Record<string, ProviderCapabilities> = {
 /**
  * Model-specific capability overrides.
  * Key format: "provider/model"
+ * Exported for the T16 consistency test (capabilities-consistency.test.ts),
+ * which walks PROVIDER_MODELS ∩ MODEL_OVERRIDES to guard against drift.
  */
-const MODEL_OVERRIDES: Record<string, Partial<ProviderCapabilities>> = {
+export const MODEL_OVERRIDES: Record<string, Partial<ProviderCapabilities>> = {
   // Anthropic models
   'anthropic/claude-sonnet-4-20250514': {
     maxContextWindow: 200_000,
@@ -221,12 +326,30 @@ const MODEL_OVERRIDES: Record<string, Partial<ProviderCapabilities>> = {
     maxOutputTokens: 4_096,
     supportsExtendedThinking: false,
   },
+  // Absorbed from AnthropicClient's duplicate getModelInfo table (T16):
+  // claude-3 generation sonnet/haiku cap output at 4096 (vs 8192 for 3.5+).
+  'anthropic/claude-3-sonnet-20240229': {
+    maxContextWindow: 200_000,
+    maxOutputTokens: 4_096,
+    supportsExtendedThinking: false,
+  },
+  'anthropic/claude-3-haiku-20240307': {
+    maxContextWindow: 200_000,
+    maxOutputTokens: 4_096,
+    supportsExtendedThinking: false,
+  },
 
   // OpenAI models
   'openai/gpt-4o': {
     maxContextWindow: 128_000,
     maxOutputTokens: 16_384,
     supportsStructuredOutput: true,
+  },
+  // Absorbed from OpenAICompatibleClient's duplicate getModelInfo table (T16):
+  // classic gpt-4 has an 8K context, distinct from gpt-4-turbo/4o at 128K.
+  'openai/gpt-4': {
+    maxContextWindow: 8_192,
+    maxOutputTokens: 8_192,
   },
   'openai/gpt-4o-mini': {
     maxContextWindow: 128_000,
@@ -245,6 +368,13 @@ const MODEL_OVERRIDES: Record<string, Partial<ProviderCapabilities>> = {
   },
 
   // DeepSeek models
+  // Adjudication (audit round3 T16): maxContextWindow is canonical at
+  // 128_000. The 131_072 value that lived in OpenAICompatibleClient.getModelInfo
+  // was a binary reinterpretation (128×1024) of DeepSeek's documented "128K"
+  // context length, added ad hoc (commit ccac398) after this table existed
+  // (commit ff52cc5). Every other 128K-class row in this table uses decimal
+  // 128_000, so the lone binary multiple was the drift. Do not change without
+  // updating capabilities-consistency.test.ts.
   'deepseek/deepseek-v4-pro': {
     maxContextWindow: 128_000,
     maxOutputTokens: 8_192,
@@ -265,6 +395,12 @@ const MODEL_OVERRIDES: Record<string, Partial<ProviderCapabilities>> = {
   },
   'qwen/qwen-turbo': {
     maxContextWindow: 128_000,
+    maxOutputTokens: 8_192,
+  },
+  // Absorbed from OpenAICompatibleClient's duplicate getModelInfo table (T16);
+  // qwen-long is a long-context retrieval model, distinct from the 128K rows.
+  'qwen/qwen-long': {
+    maxContextWindow: 1_000_000,
     maxOutputTokens: 8_192,
   },
 
@@ -365,22 +501,8 @@ export function hasCapability(provider: string, capability: keyof ProviderCapabi
 }
 
 /**
- * Get the recommended temperature for a provider/model.
- */
-export function getRecommendedTemperature(provider: string, model?: string): number {
-  return getCapabilities(provider, model).recommendedTemperature;
-}
-
-/**
  * Get the max context window for a provider/model.
  */
 export function getMaxContextWindow(provider: string, model?: string): number {
   return getCapabilities(provider, model).maxContextWindow;
-}
-
-/**
- * Get the prompt caching strategy for a provider/model.
- */
-export function getCachingStrategy(provider: string, model?: string): CacheStrategy {
-  return getCapabilities(provider, model).prefixCachingStrategy;
 }

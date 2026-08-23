@@ -1,26 +1,40 @@
-﻿// QueryEngine Comprehensive Coverage Tests - Part 3
+// QueryEngine Comprehensive Coverage Tests - Part 3
 // Covers: streaming phase (basic), deciding phase
+//
+// T04 (C4) de-watered: see ./helpers/coverage-harness.ts for the mock policy.
+// Tool-streaming cases now register a real tool whose side effects land in a
+// MockExecutionEnv; assertions check executed outcomes, not event counts alone.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockChatImpl, mockStreamChatRef } = vi.hoisted(() => {
-  const mockChatImpl = vi.fn(async () => ({
+import {
+    resetHarness,
+  createTestEngine,
+  collectEvents,
+  setStream,
+  textEvents,
+  makeToolCall,
+  twoTurnStream,
+  makeTool,
+  ok as toolOk,
+  makeMockEnv,
+  getStreamFactory,
+  getTokenEstimate,
+  setCustomStreamChat,
+} from './helpers/coverage-harness';
+
+// ── Inline module mocks (vitest 4: must be declared in the test file) ──
+const { mockChatImpl } = vi.hoisted(() => ({
+  mockChatImpl: vi.fn(async () => ({
     content: 'mock summary',
     usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-  }));
-  const mockStreamChatRef: { factory: () => AsyncGenerator<any> } = {
-    factory: (function* () {}) as any,
-  };
-  return { mockChatImpl, mockStreamChatRef };
-});
-
-const { mockTokenEstimateRef } = vi.hoisted(() => ({
-  mockTokenEstimateRef: { value: 1000 },
+  })),
 }));
 
 vi.mock('../../src/api', () => ({
   createAPIClient: vi.fn(() => ({
-    streamChat: vi.fn(async function* () { yield* mockStreamChatRef.factory(); }),
+    streamChat: vi.fn(async function* () { yield* getStreamFactory()(); }),
     chat: mockChatImpl,
   })),
   BaseApiClient: class {},
@@ -28,147 +42,43 @@ vi.mock('../../src/api', () => ({
     statusCode?: number;
     responseHeaders?: Record<string, string>;
     constructor(msg: string, code?: number, headers?: Record<string, string>) {
-      super(msg); this.statusCode = code; this.responseHeaders = headers;
+      super(msg);
+      this.statusCode = code;
+      this.responseHeaders = headers;
     }
   },
 }));
 
 vi.mock('../../src/services/compaction/functional', () => ({
   shouldCompact: vi.fn(() => true),
-  microcompact: vi.fn((msgs: any) => ({ wasCompacted: false, messages: msgs, tokensSaved: 0 })),
-  fullCompact: vi.fn(async (msgs: any) => ({ wasCompacted: false, messages: msgs, tokensSaved: 0 })),
+  microcompact: vi.fn((msgs: any[]) => ({ wasCompacted: false, messages: msgs, tokensSaved: 0 })),
+  fullCompact: vi.fn(async (msgs: any[]) => ({ wasCompacted: false, messages: msgs, tokensSaved: 0 })),
   needsForceTruncation: vi.fn(() => false),
-  forceTruncate: vi.fn((msgs: any) => ({ messages: msgs, tokensSaved: 0, wasCompacted: false })),
+  forceTruncate: vi.fn((msgs: any[]) => ({ messages: msgs, tokensSaved: 0, wasCompacted: false })),
   MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES: 3,
 }));
 
 vi.mock('../../src/utils/tokenEstimation', () => ({
-  estimateMessageTokensArray: vi.fn(() => mockTokenEstimateRef.value),
+  estimateMessageTokensArray: vi.fn(() => getTokenEstimate()),
   estimateTokens: vi.fn((text: string) => Math.ceil(text.length / 4)),
-  estimateMessageTokens: vi.fn(() => mockTokenEstimateRef.value),
-}));
-
-vi.mock('../../src/permissions/engine', () => ({
-  hasPermissionsToUseTool: vi.fn(async () => ({ behavior: 'allow', message: 'auto-allowed' })),
-  buildPermissionContext: vi.fn(() => ({
-    mode: 'bypassPermissions',
-    cwd: '/tmp',
-    toolName: '',
-    input: {},
-    alwaysDenyRules: [],
-    alwaysAskRules: [],
-    alwaysAllowRules: [],
-    bypassPermissions: true,
-  })),
-}));
-
-vi.mock('../../src/services/sandbox', () => {
-  class MockSandboxManager {
-    isAvailable = vi.fn(() => false);
-    wrapCommand = vi.fn((cmd: string) => cmd);
-    getBackendName = vi.fn(() => 'noop');
-    shouldSandboxTool = vi.fn(() => 'run-unsandboxed');
-  }
-  return { SandboxManager: MockSandboxManager };
-});
-
-vi.mock('../../src/services/sandbox-policy', () => ({
-  mergeSandboxPolicy: vi.fn((p: any) => p), DEFAULT_SANDBOX_POLICY: {},
-  getToolPolicy: vi.fn(() => null), shouldSandbox: vi.fn(() => 'run-unsandboxed'),
-}));
-
-vi.mock('../../src/services/sandbox-profiles', () => ({
-  BubblewrapSandbox: vi.fn().mockImplementation(() => ({ name: 'bubblewrap', isAvailable: vi.fn(() => false), wrapCommand: vi.fn((c: string) => c) })),
-  SeccompSandbox: vi.fn().mockImplementation(() => ({ name: 'seccomp', isAvailable: vi.fn(() => false), wrapCommand: vi.fn((c: string) => c) })),
-  NoopSandbox: vi.fn().mockImplementation(() => ({ name: 'noop', isAvailable: vi.fn(() => false), wrapCommand: vi.fn((c: string) => c) })),
+  estimateMessageTokens: vi.fn(() => getTokenEstimate()),
 }));
 
 vi.mock('../../src/services/sandbox-probe', () => ({
-  SandboxProbe: vi.fn().mockImplementation(() => ({ runProbe: vi.fn(async () => ({ passed: true, issues: [] })) })),
+  SandboxProbe: class MockSandboxProbe {
+    async verifyIsolation() {
+      return { passed: 4, total: 4, results: [] as unknown[], failures: [] as unknown[], overallPassed: true };
+    }
+  },
 }));
 
-vi.mock('../../src/services/sandbox-monitor', () => ({
-  SandboxMonitor: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn(), getMetrics: vi.fn(() => ({})) })),
-}));
-
-vi.mock('../../src/services/sandbox-images', () => ({
-  ImageManager: vi.fn().mockImplementation(() => ({ getBaseImage: vi.fn(() => null) })),
-}));
-
-import { initializeState } from '../../src/bootstrap/state';
-import type { LLMProvider } from '../../src/api';
-import type { ToolCall } from '../../src/types/message';
-import type { LLMStreamEvent } from '../../src/api/BaseApiClient';
 import { QueryEngine } from '../../src/query/QueryEngine';
-import { createAPIClient } from '../../src/api';
-
-function textEvents(text: string): LLMStreamEvent[] {
-  return [{ type: 'text_delta', text }, { type: 'stop' }];
-}
-
-function toolEvents(text: string, toolCalls: ToolCall[]): LLMStreamEvent[] {
-  const events: LLMStreamEvent[] = [{ type: 'text_delta', text }];
-  for (const tc of toolCalls) { events.push({ type: 'tool_use', toolCall: tc }); }
-  events.push({ type: 'stop' });
-  return events;
-}
-
-function makeToolCall(toolName: string, input: Record<string, unknown> = {}): ToolCall {
-  return { id: `tc_${toolName}_${Math.random().toString(36).slice(2, 8)}`, toolName, input, status: 'pending' };
-}
-
-function setStream(events: LLMStreamEvent[]) {
-  mockStreamChatRef.factory = async function* () { for (const event of events) { yield event; } };
-}
-
-function textStream(text: string): AsyncGenerator<LLMStreamEvent> {
-  return (async function* () { yield { type: 'text_delta', text }; yield { type: 'stop' }; })();
-}
-
-function toolStream(text: string, toolCalls: ToolCall[]): AsyncGenerator<LLMStreamEvent> {
-  return (async function* () {
-    yield { type: 'text_delta', text };
-    for (const tc of toolCalls) { yield { type: 'tool_use', toolCall: tc }; }
-    yield { type: 'stop' };
-  })();
-}
-
-function setCustomStreamChat(factory: () => AsyncGenerator<LLMStreamEvent>) {
-  (createAPIClient as ReturnType<typeof vi.fn>).mockReturnValue({
-    streamChat: vi.fn(async function* () { yield* factory(); }),
-    chat: mockChatImpl,
-  });
-}
-
-async function collectEvents(engine: QueryEngine, message: string) {
-  const events: any[] = [];
-  for await (const event of engine.submitMessage(message)) { events.push(event); }
-  return events;
-}
 
 describe('QueryEngine Coverage Part 3', () => {
   let engine: QueryEngine;
 
-  function createEngine(overrides: Record<string, any> = {}) {
-    return new QueryEngine(
-      { model: 'test-model', provider: 'openai' as LLMProvider, apiKey: 'test-key', maxTurns: 10, maxBudgetUsd: null, systemPrompt: 'You are helpful.', planningPhase: { enabled: false }, patchGuarantee: { enabled: false }, ...overrides },
-      []
-    );
-  }
-
-  function resetCreateAPIClientMock() {
-    (createAPIClient as ReturnType<typeof vi.fn>).mockReturnValue({
-      streamChat: vi.fn(async function* () { yield* mockStreamChatRef.factory(); }),
-      chat: mockChatImpl,
-    });
-  }
-
   beforeEach(() => {
-    initializeState({ cwd: '/tmp', permissionMode: 'bypassPermissions' as any });
-    vi.clearAllMocks();
-    mockTokenEstimateRef.value = 1000;
-    resetCreateAPIClientMock();
-    setStream([]);
+    resetHarness();
   });
 
   describe('streaming phase', () => {
@@ -180,7 +90,7 @@ describe('QueryEngine Coverage Part 3', () => {
         { type: 'stop' },
       ]);
 
-      engine = createEngine();
+      engine = createTestEngine();
       const events = await collectEvents(engine, 'test');
 
       const textDeltas = events.filter(e => e.type === 'agent:text_delta');
@@ -193,28 +103,37 @@ describe('QueryEngine Coverage Part 3', () => {
     it('should handle error events during streaming', async () => {
       setStream([{ type: 'error', error: new Error('API error') }]);
 
-      engine = createEngine();
+      engine = createTestEngine();
       const events = await collectEvents(engine, 'test');
 
       const errEvents = events.filter(e => e.type === 'agent:error');
       expect(errEvents.length).toBeGreaterThan(0);
     });
 
-    it('should handle tool_use events during streaming', async () => {
-      const tc = makeToolCall('FileRead', { path: '/tmp/test.txt' });
+    it('should execute tool_use events against MockExecutionEnv and return file content', async () => {
+      const { env } = makeMockEnv();
+      await env.fs.writeFile('/tmp/test.txt', 'FILE-BODY-42');
 
-      let callCount = 0;
-      setCustomStreamChat(() => {
-        callCount++;
-        if (callCount === 1) { return toolStream('Reading file...', [tc]); }
-        return textStream('Done reading.');
+      const reader = makeTool('FileRead', async (input) => {
+        const content = await env.fs.readFile(String((input as Record<string, unknown>).path));
+        return toolOk(content);
       });
 
-      engine = createEngine();
+      twoTurnStream(
+        (async function* () {
+          yield { type: 'tool_use', toolCall: makeToolCall('FileRead', { path: '/tmp/test.txt' }) };
+          yield { type: 'stop' };
+        })(),
+        'Done reading.',
+      );
+
+      engine = createTestEngine({}, [reader as any]);
       const events = await collectEvents(engine, 'test');
 
-      const toolStarted = events.filter(e => e.type === 'agent:tool_started');
-      expect(toolStarted.length).toBeGreaterThanOrEqual(1);
+      // Outcome: the read really happened through the mock filesystem.
+      const completed = events.filter(e => e.type === 'agent:tool_completed');
+      expect(completed.length).toBeGreaterThanOrEqual(1);
+      expect((completed[0] as any).result.output).toBe('FILE-BODY-42');
     });
   });
 
@@ -222,28 +141,52 @@ describe('QueryEngine Coverage Part 3', () => {
     it('should decide no tools when assistant has no tool calls', async () => {
       setStream(textEvents('Just text, no tools.'));
 
-      engine = createEngine();
+      engine = createTestEngine();
       const events = await collectEvents(engine, 'test');
 
       const completeEvents = events.filter(e => e.type === 'agent:complete');
       expect(completeEvents.length).toBe(1);
+      expect(events.filter(e => e.type.startsWith('agent:tool_'))).toHaveLength(0);
     });
 
-    it('should decide tools when assistant has tool calls', async () => {
-      const tc = makeToolCall('Bash', { command: 'echo hello' });
+    it('should decide tools when assistant has tool calls (executed for real)', async () => {
+      const { env, fs } = makeMockEnv();
 
       let callCount = 0;
-      setCustomStreamChat(() => {
+      setCustomFactory(() => {
         callCount++;
-        if (callCount === 1) { return toolStream('Running command...', [tc]); }
-        return textStream('Done.');
+        if (callCount === 1) {
+          return (async function* () {
+            yield { type: 'text_delta', text: 'Running command...' };
+            yield { type: 'tool_use', toolCall: makeToolCall('Echo', { command: 'echo hello' }) };
+            yield { type: 'stop' };
+          })();
+        }
+        return (async function* () {
+          yield { type: 'text_delta', text: 'Done.' };
+          yield { type: 'stop' };
+        })();
       });
 
-      engine = createEngine();
+      const echo = makeTool('Echo', async () => {
+        await env.fs.writeFile('/out/decided.txt', 'echo-ran');
+        return toolOk('hello-from-echo');
+      });
+
+      engine = createTestEngine({}, [echo as any]);
       const events = await collectEvents(engine, 'test');
 
-      const toolStarted = events.filter(e => e.type === 'agent:tool_started');
-      expect(toolStarted.length).toBeGreaterThanOrEqual(1);
+      // Decision produced execution: the tool body ran over the mock env.
+      const completed = events.filter(e => e.type === 'agent:tool_completed');
+      expect(completed.length).toBe(1);
+      expect((completed[0] as any).result.output).toBe('hello-from-echo');
+      expect(fs.listFiles()).toContain('/out/decided.txt');
+      expect(await env.fs.readFile('/out/decided.txt')).toBe('echo-ran');
     });
   });
 });
+
+/** Swap the raw stream factory (local shorthand over the shared hoisted ref). */
+function setCustomFactory(factory: () => AsyncGenerator<any>) {
+  setCustomStreamChat(factory);
+}

@@ -18,27 +18,25 @@ import { MockLLMClient, withTextResponse, withToolUseConversation, withMultiTurn
 import { EventBus } from '../../src/orchestrator/event-bus';
 import { ResultAggregator } from '../../src/orchestrator/result-aggregator';
 
-// Conditional tool imports — skip tests if modules can't be loaded
-let BashTool: any;
-let FileReadTool: any;
-let FileWriteTool: any;
-let GrepTool: any;
-let SandboxManager: any;
-let MemoryIntegration: any;
+// Core module imports — STATIC on purpose (audit round3 T03 "soft-skip ban"):
+// if any of these modules fails to load, collection fails loudly instead of
+// silently skipping the whole suite. The previous `try { await import() }`
+// pattern masked real breakage as `describe.skip`. The skipIf guards below
+// remain as explicit, reporter-visible documentation of the environmental
+// dependency (they evaluate to false only if an export is genuinely absent).
+import { tool as BashTool } from '../../src/tools/BashTool/index';
+import { tool as FileReadTool } from '../../src/tools/FileReadTool/index';
+import { tool as FileWriteTool } from '../../src/tools/FileWriteTool/index';
+import { tool as GrepTool } from '../../src/tools/GrepTool/index';
+import { SandboxManager } from '../../src/services/sandbox';
+import { MemoryIntegration } from '../../src/memory/integration';
 
-try { BashTool = (await import('../../src/tools/BashTool/index')).tool; } catch {}
-try { FileReadTool = (await import('../../src/tools/FileReadTool/index')).tool; } catch {}
-try { FileWriteTool = (await import('../../src/tools/FileWriteTool/index')).tool; } catch {}
-try { GrepTool = (await import('../../src/tools/GrepTool/index')).tool; } catch {}
-try { SandboxManager = (await import('../../src/services/sandbox')).SandboxManager; } catch {}
-try { MemoryIntegration = (await import('../../src/memory/integration')).MemoryIntegration; } catch {}
-
-const describeIfBash = BashTool ? describe : describe.skip;
-const describeIfFileRead = FileReadTool ? describe : describe.skip;
-const describeIfFileWrite = FileWriteTool ? describe : describe.skip;
-const describeIfGrep = GrepTool ? describe : describe.skip;
-const describeIfSandbox = SandboxManager ? describe : describe.skip;
-const describeIfMemory = MemoryIntegration ? describe : describe.skip;
+const describeIfBash = describe.skipIf(!BashTool);
+const describeIfFileRead = describe.skipIf(!FileReadTool);
+const describeIfFileWrite = describe.skipIf(!FileWriteTool);
+const describeIfGrep = describe.skipIf(!GrepTool);
+const describeIfSandbox = describe.skipIf(!SandboxManager);
+const describeIfMemory = describe.skipIf(!MemoryIntegration);
 
 function makeTestEnv(): any {
   return {
@@ -283,17 +281,24 @@ describe('Full Workflow Integration', () => {
   });
 
   describeIfSandbox('Sandbox + Tool Coordination', () => {
-    it('should run sandboxed bash command', () => {
+    // Explicit skip (T03): backend availability is probed once at module load.
+    const sandboxExecutable = SandboxManager
+      ? new SandboxManager({
+          workDir: os.tmpdir(),
+          enabled: true,
+          backend: 'bubblewrap',
+          failIfNoSandbox: false,
+        }).isAvailable()
+      : false;
+
+    it.skipIf(!sandboxExecutable)('should run sandboxed bash command', () => {
       const manager = new SandboxManager({
         workDir: tmpDir,
         enabled: true,
         backend: 'bubblewrap',
       });
 
-      if (!manager.isAvailable()) {
-        console.log('  ⏭ Skipping: no sandbox backend available');
-        return;
-      }
+      expect(manager.isAvailable()).toBe(true);
 
       const wrapped = manager.wrapCommand('echo "sandboxed"', 'Bash');
       expect(typeof wrapped).toBe('string');

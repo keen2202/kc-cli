@@ -4,17 +4,17 @@ import type {
   IMMessage,
   IMContent,
   IMBridgeConfig,
+  IMQueryEngineLike,
   IMSession,
   IMNotificationTarget,
   EngineFactory,
   IMPlatform,
 } from './protocol';
 import type { AgentEvent } from '../state/types';
-import type { QueryEngine } from '../query/QueryEngine';
 
 interface IMSessionState {
   session: IMSession;
-  engine: QueryEngine;
+  engine: IMQueryEngineLike;
   processing: boolean;
   messageQueue: IMMessage[];
 }
@@ -215,7 +215,7 @@ export class IMBridge {
       status: 'active',
     };
 
-    let engine: QueryEngine;
+    let engine: IMQueryEngineLike;
     try {
       engine = await this.engineFactory();
     } catch (err) {

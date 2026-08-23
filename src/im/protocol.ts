@@ -1,4 +1,6 @@
-import type { QueryEngine } from '../query/QueryEngine';
+// T18/M4 (audit round3): the IM protocol no longer references the concrete
+// QueryEngine class. Consumers depend on the structural surface below; the
+// real engine satisfies it by construction.
 
 export type IMPlatform = 'feishu' | 'wecom' | 'dingtalk';
 
@@ -83,4 +85,19 @@ export interface IMNotificationTarget {
   channelType: 'user' | 'group';
 }
 
-export type EngineFactory = () => Promise<QueryEngine>;
+/**
+ * Structural surface of the query engine that the IM bridge consumes
+ * (T18/M4 decoupling — no import of the QueryEngine concrete class).
+ */
+export interface IMQueryEngineLike {
+  submitMessage(userMessage: string): AsyncGenerator<IMEngineEvent, void, unknown>;
+  abort(reason?: string): void;
+}
+
+/** Structural event view: consumers narrow on `type` plus their own fields. */
+export interface IMEngineEvent {
+  type: string;
+  [key: string]: unknown;
+}
+
+export type EngineFactory = () => Promise<IMQueryEngineLike>;

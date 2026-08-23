@@ -452,7 +452,7 @@ describe('Token Estimation', () => {
 
 describe('Compaction Service', () => {
   it('should not compact few messages', async () => {
-    const { microcompact } = await import('../src/services/compaction.js');
+    const { microcompact } = await import('../src/services/compaction/functional.js');
 
     const messages = [
       { id: '1', role: 'user' as const, content: 'Hello', timestamp: Date.now() },
@@ -464,7 +464,7 @@ describe('Compaction Service', () => {
   });
 
   it('should compact many messages with tool results', async () => {
-    const { microcompact } = await import('../src/services/compaction.js');
+    const { microcompact } = await import('../src/services/compaction/functional.js');
 
     const messages: any[] = [];
     for (let i = 0; i < 10; i++) {
@@ -488,7 +488,7 @@ describe('Compaction Service', () => {
   });
 
   it('should report tokens saved', async () => {
-    const { microcompact } = await import('../src/services/compaction.js');
+    const { microcompact } = await import('../src/services/compaction/functional.js');
 
     const messages: any[] = [];
     for (let i = 0; i < 15; i++) {
@@ -514,7 +514,7 @@ describe('Compaction Service', () => {
   });
 
   it('should preserve user messages during compaction', async () => {
-    const { microcompact } = await import('../src/services/compaction.js');
+    const { microcompact } = await import('../src/services/compaction/functional.js');
 
     const messages: any[] = [];
     for (let i = 0; i < 10; i++) {
@@ -542,7 +542,7 @@ describe('Compaction Service', () => {
   });
 
   it('should handle compaction with keepRecent parameter', async () => {
-    const { microcompact } = await import('../src/services/compaction.js');
+    const { microcompact } = await import('../src/services/compaction/functional.js');
 
     const messages: any[] = [];
     for (let i = 0; i < 20; i++) {
@@ -567,7 +567,7 @@ describe('Compaction Service', () => {
   });
 
   it('should handle fullCompact with fallback when API fails', async () => {
-    const { fullCompact } = await import('../src/services/compaction.js');
+    const { fullCompact } = await import('../src/services/compaction/functional.js');
 
     const messages: any[] = [];
     for (let i = 0; i < 20; i++) {
@@ -595,7 +595,7 @@ describe('Compaction Service', () => {
   });
 
   it('should not compact when messages are too few', async () => {
-    const { fullCompact } = await import('../src/services/compaction.js');
+    const { fullCompact } = await import('../src/services/compaction/functional.js');
 
     const messages: any[] = [
       { id: '1', role: 'user', content: 'Hello', timestamp: Date.now() },
@@ -613,7 +613,7 @@ describe('Compaction Service', () => {
   });
 
   it('shouldCompact should return false when under threshold', async () => {
-    const { shouldCompact } = await import('../src/services/compaction.js');
+    const { shouldCompact } = await import('../src/services/compaction/functional.js');
 
     const messages: any[] = [
       { id: '1', role: 'user', content: 'Hi', timestamp: Date.now() },
@@ -624,7 +624,7 @@ describe('Compaction Service', () => {
   });
 
   it('shouldCompact should return false after max failures', async () => {
-    const { shouldCompact, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES } = await import('../src/services/compaction.js');
+    const { shouldCompact, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES } = await import('../src/services/compaction/functional.js');
 
     const result = shouldCompact(
       [],
