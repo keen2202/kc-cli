@@ -9,6 +9,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Box, Text, measureElement, type DOMElement } from 'ink';
 import { useTerminalSize } from '../hooks/useTerminalSize';
+import { computeOpenCodeLayout, getFrameHeight } from '../layout';
 import { useTheme } from '../hooks/useTheme';
 import type { ThemeColors } from '../theme';
 import type {
@@ -100,8 +101,13 @@ export function SidebarPanel({ data }: SidebarPanelProps) {
       setMeasured({ rows, cols });
     }
   });
-  const rows = measured?.rows ?? Math.max(4, termHeight - 12);
-  const cols = measured?.cols ?? Math.min(40, Math.max(20, Math.floor(termWidth / 4)));
+  // Policy-derived fallback for the first frame (mirrors the Layout slot:
+  // frame minus header/status strips and the session-info block).
+  const frameHeight = getFrameHeight(termHeight);
+  const policy = computeOpenCodeLayout(termWidth, frameHeight);
+  const rows = measured?.rows
+    ?? Math.max(2, frameHeight - policy.headerHeight - policy.statusBarHeight - 10);
+  const cols = measured?.cols ?? Math.max(20, policy.rightPanelWidth - 2);
 
   // Budget how many items each section may show so the panel never overflows
   // its allotment. Four section headers + borders consume ~9 rows; the

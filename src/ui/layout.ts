@@ -67,6 +67,14 @@ export interface OpenCodeLayout {
   breakpoint: BreakpointName;
   /** Active density derived from the breakpoint. */
   density: Density;
+  /** True on short frames: strips degrade to single-line compact rendering. */
+  compactVertical: boolean;
+  /** Row budget for in-flow overlays (palette/file picker/permission dialog) —
+   *  anything taller would push the frame past the terminal and re-trigger
+   *  ink's full-repaint path. */
+  overlayMaxRows: number;
+  /** Width budget for overlays on narrow terminals. */
+  overlayMaxWidth: number;
 }
 
 // Right panel: narrower on the standard breakpoint (80-119 cols) so the chat
@@ -77,6 +85,29 @@ const EDITOR_MIN_HEIGHT = 3;
 const EDITOR_MAX_HEIGHT = 15;
 const HEADER_HEIGHT = 1;
 const STATUS_BAR_HEIGHT = 1;
+// Below this frame height the header row is dropped (its model/mode info is
+// non-essential) so the chat/editor keep usable space on short terminals.
+const MIN_ROWS_FOR_HEADER = 12;
+// Below this frame height strips (error bar, operation summary) degrade to
+// compact single-line rendering and the session info panel collapses.
+const COMPACT_VERTICAL_MAX_ROWS = 14;
+// Minimum main-area rows (chat + editor) reserved when budgeting overlays.
+const MIN_MAIN_ROWS_FOR_OVERLAY = 5;
+// Minimum rows/width any overlay may occupy even on tiny terminals.
+const OVERLAY_MIN_ROWS = 6;
+const OVERLAY_MIN_WIDTH = 20;
+
+/**
+ * The frame renders one row short of the terminal: when ink's output height
+ * reaches the full terminal height it falls back to clearTerminal + full
+ * repaint on every frame (visible flicker). Staying at height-1 keeps the
+ * incremental diff renderer active. Every consumer that derives a height
+ * budget from the terminal size MUST go through this so the arithmetic has a
+ * single home (the old Editor/Layout off-by-one came from two call sites).
+ */
+export function getFrameHeight(height: number): number {
+  return Math.max(1, height - 1);
+}
 
 /**
  * Compute the layout POLICY for the given terminal dimensions: breakpoint,
@@ -91,7 +122,9 @@ export function computeOpenCodeLayout(
   height: number,
 ): OpenCodeLayout {
   const bp = getBreakpoint(width);
-  const headerVisible = bp.headerVisible;
+  const compactVertical = height < COMPACT_VERTICAL_MAX_ROWS;
+  // On very short frames the header yields its row to the main area.
+  const headerVisible = bp.headerVisible && height >= MIN_ROWS_FOR_HEADER;
   const sidebarVisible = bp.sidebarVisible;
   const headerHeight = headerVisible ? HEADER_HEIGHT : 0;
   const statusBarHeight = STATUS_BAR_HEIGHT;
@@ -108,6 +141,14 @@ export function computeOpenCodeLayout(
   );
   editorHeight = Math.max(1, Math.min(editorHeight, Math.max(1, available - 2)));
 
+  // Overlay budgets: in-flow overlays sit below the status bar inside the
+  // fixed-height frame, so their height is whatever the main area can spare.
+  const overlayMaxRows = Math.max(
+    OVERLAY_MIN_ROWS,
+    height - headerHeight - statusBarHeight - MIN_MAIN_ROWS_FOR_OVERLAY,
+  );
+  const overlayMaxWidth = Math.max(OVERLAY_MIN_WIDTH, width - 2);
+
   return {
     terminalWidth: width,
     terminalHeight: height,
@@ -119,6 +160,9 @@ export function computeOpenCodeLayout(
     headerVisible,
     breakpoint: bp.name,
     density: bp.density,
+    compactVertical,
+    overlayMaxRows,
+    overlayMaxWidth,
   };
 }
 

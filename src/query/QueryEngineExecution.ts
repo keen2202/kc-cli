@@ -57,12 +57,48 @@ export async function* executeToolCalls(deps: ExecutionDeps): AsyncGenerator<Str
     return true;
   });
 
-  const results = await deps.toolExecutor.executeParallel(
+  // Stream per-tool completion events as each tool settles (UI shows the
+  // individual card finishing while the rest of the batch still runs). The
+  // callback cannot yield, so events queue up and the generator drains them;
+  // conversation/journal bookkeeping below still runs afterwards in the
+  // original call order.
+  const streamedEvents = new Set<string>();
+  const pendingEvents: AgentEvent[] = [];
+  let notify: (() => void) | null = null;
+  const onSettled = (toolCallId: string, result: ToolResult | Error): void => {
+    const toolCall = toolCalls.find(tc => tc.id === toolCallId);
+    if (!toolCall) return;
+    streamedEvents.add(toolCallId);
+    pendingEvents.push(
+      result instanceof Error
+        ? toolFailedEvent(toolCall, result)
+        : result.isError
+          ? toolFailedEvent(toolCall, new Error(result.output))
+          : toolCompletedEvent(toolCall, result as ToolResult),
+    );
+    notify?.();
+  };
+
+  const resultsPromise = deps.toolExecutor.executeParallel(
     executableCalls,
-    deps.toolContext
+    deps.toolContext,
+    onSettled,
   );
-  for (const [id, rejected] of rejectedResults) {
-    results.set(id, rejected);
+  let executionDone = false;
+  resultsPromise.then(() => { executionDone = true; notify?.(); })
+    .catch(() => { executionDone = true; notify?.(); });
+  while (!executionDone || pendingEvents.length > 0) {
+    if (pendingEvents.length > 0) {
+      yield pendingEvents.shift()!;
+      continue;
+    }
+    await new Promise<void>((resolve) => { notify = resolve; });
+  }
+  notify = null;
+
+  const results = await resultsPromise;
+  for (const [toolCallId, rejected] of rejectedResults) {
+    results.set(toolCallId, rejected);
   }
 
   for (const [toolCallId, result] of results) {
@@ -99,12 +135,16 @@ export async function* executeToolCalls(deps: ExecutionDeps): AsyncGenerator<Str
       }
     }
 
-    if (result instanceof Error) {
-      yield toolFailedEvent(toolCall, result);
-    } else if (result.isError) {
-      yield toolFailedEvent(toolCall, new Error(result.output));
-    } else {
-      yield toolCompletedEvent(toolCall, result as ToolResult);
+    // Completion/failure events were already streamed per tool as they
+    // settled; only leftovers (hard-rejected synthetic errors) emit here.
+    if (!streamedEvents.has(toolCallId)) {
+      if (result instanceof Error) {
+        yield toolFailedEvent(toolCall, result);
+      } else if (result.isError) {
+        yield toolFailedEvent(toolCall, new Error(result.output));
+      } else {
+        yield toolCompletedEvent(toolCall, result as ToolResult);
+      }
     }
 
     // harness-evolution T2 (H2): repeated-failure context is appended to the

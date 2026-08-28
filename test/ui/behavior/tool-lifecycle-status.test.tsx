@@ -103,4 +103,45 @@ describe('tool lifecycle + live status (behavior)', () => {
     await h.type('second message');
     await h.waitForText('second message', 5000);
   });
+
+  it('finalizes parallel same-name tool calls by id, not by name', async () => {
+    // Two same-named tools start together; B completes while A is still
+    // running. Name-based matching would close A's card with B's output.
+    const engine = new FakeQueryEngine();
+    engine.scriptEvents([
+      {
+        type: 'agent:tool_started',
+        toolCall: { id: 'a1', toolName: 'Grep', input: { pattern: 'alpha' } },
+        timestamp: Date.now(),
+      },
+      {
+        type: 'agent:tool_started',
+        toolCall: { id: 'b2', toolName: 'Grep', input: { pattern: 'beta' } },
+        timestamp: Date.now(),
+      },
+      {
+        type: 'agent:tool_completed',
+        toolCall: { id: 'b2', toolName: 'Grep' },
+        result: { output: 'beta-result' },
+        isError: false,
+        timestamp: Date.now(),
+      },
+    ]);
+    engine.holdNextTurn(); // keep A in flight while the mid-turn state is observed
+    h = await renderApp({ width: 100, height: 40, engine });
+
+    await h.type('go');
+    await h.press(KEYS.enter);
+    await h.waitForText('beta-result', 5000);
+
+    const frame = h.plainFrame();
+    // B's card completed with ITS output…
+    expect(frame).toContain('beta-result');
+    // …while A's card is still the only running one (still alive, no output).
+    expect(frame).toContain('running');
+    expect(frame).not.toContain('alpha-result');
+
+    engine.releaseGate();
+    await h.waitFor(() => engine.completedTurns === 1, 5000, 'turn to complete');
+  });
 });

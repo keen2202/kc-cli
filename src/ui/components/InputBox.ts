@@ -101,6 +101,27 @@ export function insertNewline(state: InputState): InputState {
   return insertChar(state, '\n');
 }
 
+/**
+ * Insert a (possibly multi-line) string at the cursor. CRLF/CR are normalized
+ * to LF: terminals deliver clipboard newlines as \r inside bracketed paste.
+ */
+export function insertText(state: InputState, text: string): InputState {
+  const normalized = text.replace(/\r\n?/g, '\n');
+  const joined =
+    state.text.slice(0, state.cursorPos) + normalized + state.text.slice(state.cursorPos);
+  return { ...state, text: joined, cursorPos: state.cursorPos + normalized.length };
+}
+
+/** True when the caret sits on the first logical line (↑ falls back to history recall). */
+export function isCursorOnFirstLine(state: InputState): boolean {
+  return !state.text.slice(0, state.cursorPos).includes('\n');
+}
+
+/** True when the caret sits on the last logical line (↓ falls back to history recall). */
+export function isCursorOnLastLine(state: InputState): boolean {
+  return !state.text.slice(state.cursorPos).includes('\n');
+}
+
 export function moveCursorLeft(state: InputState): InputState {
   if (state.cursorPos <= 0) return state;
   return { ...state, cursorPos: state.cursorPos - 1 };

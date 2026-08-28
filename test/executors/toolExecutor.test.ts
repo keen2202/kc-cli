@@ -181,6 +181,45 @@ describe('ToolExecutor', () => {
       );
       expect(results.size).toBe(2);
     });
+
+    it('fires onSettled once per tool with its result or error', async () => {
+      const ok = makeTool({ name: 'OkTool' });
+      const bad = makeTool({ name: 'BadTool', call: vi.fn().mockRejectedValue(new Error('boom')) });
+      const executor = new ToolExecutor([ok, bad], '/tmp');
+      const settled: Array<[string, 'ok' | 'error']> = [];
+      const results = await executor.executeParallel(
+        [
+          makeToolCall({ id: 'tc-ok', toolName: 'OkTool' }),
+          makeToolCall({ id: 'tc-bad', toolName: 'BadTool' }),
+        ],
+        makeContext(),
+        (id, result) => settled.push([id, result instanceof Error ? 'error' : 'ok']),
+      );
+      expect(results.size).toBe(2);
+      expect(settled).toContainEqual(['tc-ok', 'ok']);
+      expect(settled).toContainEqual(['tc-bad', 'error']);
+    });
+
+    it('fires onSettled after each sequential tool completes', async () => {
+      const order: string[] = [];
+      const tool = makeTool({
+        name: 'SeqTool',
+        isConcurrencySafe: () => false,
+        call: vi.fn().mockImplementation(async () => {
+          order.push('call');
+          return { toolCallId: 'x', output: 'ok', isError: false };
+        }),
+      });
+      const executor = new ToolExecutor([tool], '/tmp');
+      const settledIds: string[] = [];
+      await executor.executeParallel(
+        [makeToolCall({ id: 's1' }), makeToolCall({ id: 's2' })],
+        makeContext(),
+        (id) => settledIds.push(id),
+      );
+      expect(settledIds).toEqual(['s1', 's2']);
+      expect(order).toHaveLength(2);
+    });
   });
 
   describe('batchPermissionCheck', () => {

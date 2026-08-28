@@ -674,10 +674,15 @@ export class ToolExecutor {
   /**
    * Execute multiple tool calls in parallel
    * Respects concurrency safety flags per tool
+   *
+   * `onSettled` (optional) fires as each individual tool settles — concurrent
+   * tools report on completion, sequential ones one by one. Callers use it to
+   * surface per-tool progress while the batch is still running.
    */
   async executeParallel(
     toolCalls: ToolCall[],
-    context: ToolUseContext
+    context: ToolUseContext,
+    onSettled?: (toolCallId: string, result: ToolResult | Error) => void,
   ): Promise<Map<string, ToolResult | Error>> {
     const results = new Map<string, ToolResult | Error>();
 
@@ -707,11 +712,14 @@ export class ToolExecutor {
       const promises = concurrentTools.map(async (toolCall) => {
         try {
           const result = await this.executeSingle(toolCall, enrichedContext);
+          onSettled?.(toolCall.id, result);
           return { toolCallId: toolCall.id, result };
         } catch (error) {
+          const err = error instanceof Error ? error : new Error(String(error));
+          onSettled?.(toolCall.id, err);
           return {
             toolCallId: toolCall.id,
-            error: error instanceof Error ? error : new Error(String(error)),
+            error: err,
           };
         }
       });
@@ -733,12 +741,12 @@ export class ToolExecutor {
     for (const toolCall of sequentialTools) {
       try {
         const result = await this.executeSingle(toolCall, enrichedContext);
+        onSettled?.(toolCall.id, result);
         results.set(toolCall.id, result);
       } catch (error) {
-        results.set(
-          toolCall.id,
-          error instanceof Error ? error : new Error(String(error))
-        );
+        const err = error instanceof Error ? error : new Error(String(error));
+        onSettled?.(toolCall.id, err);
+        results.set(toolCall.id, err);
       }
     }
 

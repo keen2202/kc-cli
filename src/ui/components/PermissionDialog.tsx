@@ -26,9 +26,12 @@ interface PermissionDialogProps {
   request: PermissionRequest;
   /** Optional close hook; the dialog always resolves onDecide first. */
   onClose?: () => void;
+  /** Row budget from the layout policy — detail/diff sections are windowed
+   *  so the dialog never grows past a short terminal. */
+  maxRows?: number;
 }
 
-export function PermissionDialog({ request, onClose }: PermissionDialogProps) {
+export function PermissionDialog({ request, onClose, maxRows }: PermissionDialogProps) {
   const { colors } = useTheme();
 
   // Every decision path resolves onDecide exactly once so the awaiting
@@ -73,8 +76,16 @@ export function PermissionDialog({ request, onClose }: PermissionDialogProps) {
 
   // Full operation detail, capped to keep the dialog within a sane height; the
   // expanded view exists precisely so the user can read the complete command /
-  // arguments (not just the one-line summary) before authorizing.
-  const DETAIL_MAX_LINES = 16;
+  // arguments (not just the one-line summary) before authorizing. The cap
+  // shrinks further on short terminals (layout policy row budget).
+  const DETAIL_MAX_LINES_DEFAULT = 16;
+  const CHROME_ROWS = 9;
+  const detailBudget = Math.max(
+    2,
+    maxRows !== undefined ? maxRows - CHROME_ROWS : DETAIL_MAX_LINES_DEFAULT,
+  );
+  const DETAIL_MAX_LINES = Math.min(DETAIL_MAX_LINES_DEFAULT, detailBudget);
+  const DIFF_MAX_LINES = Math.max(3, Math.min(20, detailBudget));
   const detailLines = request.details
     ? request.details.replace(/\r\n/g, '\n').split('\n')
     : [];
@@ -112,7 +123,7 @@ export function PermissionDialog({ request, onClose }: PermissionDialogProps) {
       ) : null}
       {hasDiffs ? (
         <Box marginTop={1}>
-          <DiffPreview diffs={fileDiffs} showActions={false} maxLines={20} />
+          <DiffPreview diffs={fileDiffs} showActions={false} maxLines={DIFF_MAX_LINES} />
         </Box>
       ) : null}
       <Box marginTop={1}>

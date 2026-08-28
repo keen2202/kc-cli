@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useCallback, useEffect, useRef } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, usePaste } from 'ink';
 import { ThemeProvider, useTheme } from '../hooks/useTheme';
 import { DEFAULT_THEME } from '../theme';
 import { useStreamingEvents } from '../hooks/useStreamingEvents';
@@ -16,7 +16,7 @@ import { OperationSummary, synthesizeOperation, operationsFromTools } from './Op
 import { CommandPalette, type CommandItem } from './CommandPalette';
 import { FilePicker } from '../dialogs/FilePicker';
 import { useTerminalSize } from '../hooks/useTerminalSize';
-import { getBreakpoint } from '../layout';
+import { getBreakpoint, computeOpenCodeLayout, getFrameHeight } from '../layout';
 import { UIEventBus } from '../event-bus';
 import { createDefaultKeybindings } from '../keybinding-manager';
 import { getCapabilities } from '../../api/capabilities';
@@ -30,8 +30,13 @@ import {
   insertChar,
   deleteBefore,
   insertNewline,
+  insertText,
+  isCursorOnFirstLine,
+  isCursorOnLastLine,
   moveCursorLeft,
   moveCursorRight,
+  moveCursorUp,
+  moveCursorDown,
   moveToLineStart,
   deleteWordBefore,
   deleteToLineStart,
@@ -72,14 +77,27 @@ interface ErrorBarProps {
   onDismiss: (index: number) => void;
 }
 
-function ErrorBar({ errors }: ErrorBarProps) {
+function ErrorBar({ errors, compact }: ErrorBarProps & { compact?: boolean }) {
   const { colors } = useTheme();
   if (errors.length === 0) return null;
 
   // Show the most recent error. The bar owns its own height bound: one
   // truncated message row inside the border, so its natural height is fixed
-  // and Yoga can measure it (no reserved slot in layout.ts).
+  // and Yoga can measure it (no reserved slot in layout.ts). On short frames
+  // (compactVertical) the border is dropped to a bare single-line strip.
   const latest = errors[errors.length - 1];
+
+  if (compact) {
+    return (
+      <Box flexDirection="row" paddingLeft={1} paddingRight={1}>
+        <Text wrap="truncate-end">
+          <Text color={colors.error}>⚠ Error: </Text>
+          {latest}
+          <Text dimColor>  [Esc to dismiss]</Text>
+        </Text>
+      </Box>
+    );
+  }
 
   return (
     <Box
@@ -186,6 +204,14 @@ function toKeypressEvent(input: string, key: any): KeypressEvent {
   if (input === '\u001B[Z' || input === '[Z') {
     return { name: 'tab', ctrl: false, meta: false, shift: true, isPrintable: false };
   }
+  // Ctrl+J arrives as a bare linefeed (legacy terminals) or ctrl+'j' (kitty
+  // protocol). Normalize both to one canonical key so the editor can offer a
+  // multi-line newline chord that works regardless of terminal support for
+  // Shift+Enter. ink reports neither as printable today, so this only
+  // replaces a silent no-op — no existing binding conflicts.
+  if (input === '\n' || (key.ctrl && input === 'j')) {
+    return { name: 'linefeed', ctrl: false, meta: false, shift: false, isPrintable: false };
+  }
   const flags = key as Record<string, unknown>;
   let name: string | undefined;
   for (const [flag, mapped] of KEY_FLAG_NAMES) {
@@ -241,6 +267,11 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
 
   // Input state
   const [inputState, setInputState] = useState<InputState>(createInputState());
+  // Mirror for handlers whose memo deps don't include cursorPos (only
+  // inputState.text): the up/down caret movement must always see the live
+  // cursor position, not the one captured when the handler was created.
+  const inputStateRef = useRef<InputState>(inputState);
+  inputStateRef.current = inputState;
   const [turnCount, setTurnCount] = useState(0);
   const [sessionStartTime] = useState(() => Date.now());
   const [mode, setMode] = useState<'idle' | 'streaming' | 'overlay' | 'steer'>('idle');
@@ -772,35 +803,32 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
     setShowFilePicker(false);
   }, []);
 
+  // History recall reads the current history/index through the handler
+  // closure (recreated each render; the focus-layer proxies stay fresh) —
+  // the previous form nested setState calls inside updater functions, and
+  // React 19 silently drops side effects scheduled from within updaters.
   const historyPrev = useCallback(() => {
-    setSubmittedHistory((hist) => {
-      if (hist.length === 0) return hist;
-      setHistoryIndex((idx) => {
-        const next = idx === null ? hist.length - 1 : Math.max(0, idx - 1);
-        const text = hist[next] ?? '';
-        setInputState((prev) => ({ ...prev, text, cursorPos: text.length }));
-        return next;
-      });
-      return hist;
-    });
-  }, []);
+    const hist = submittedHistory;
+    if (hist.length === 0) return;
+    const next = historyIndex === null ? hist.length - 1 : Math.max(0, historyIndex - 1);
+    const text = hist[next] ?? '';
+    setInputState((prev) => ({ ...prev, text, cursorPos: text.length }));
+    setHistoryIndex(next);
+  }, [submittedHistory, historyIndex]);
 
   const historyNext = useCallback(() => {
-    setSubmittedHistory((hist) => {
-      setHistoryIndex((idx) => {
-        if (idx === null) return null;
-        const next = idx + 1;
-        if (next >= hist.length) {
-          setInputState((prev) => ({ ...prev, text: '', cursorPos: 0 }));
-          return null;
-        }
-        const text = hist[next] ?? '';
-        setInputState((prev) => ({ ...prev, text, cursorPos: text.length }));
-        return next;
-      });
-      return hist;
-    });
-  }, []);
+    const hist = submittedHistory;
+    if (historyIndex === null) return;
+    const next = historyIndex + 1;
+    if (next >= hist.length) {
+      setInputState((prev) => ({ ...prev, text: '', cursorPos: 0 }));
+      setHistoryIndex(null);
+      return;
+    }
+    const text = hist[next] ?? '';
+    setInputState((prev) => ({ ...prev, text, cursorPos: text.length }));
+    setHistoryIndex(next);
+  }, [submittedHistory, historyIndex]);
 
   // Command palette entries: slash commands + UI actions.
   const paletteCommands = useMemo<CommandItem[]>(() => [
@@ -901,9 +929,25 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
       km.setContext('input');
     }
 
-    // ↑/↓ recall input history only. Chat scrolling lives on ←/→ (empty
-    // input) and PgUp/PgDn, so one key never fires two unrelated actions.
+    // ↑/↓ move the caret between lines in a multi-line buffer; history recall
+    // only fires at the first/last line boundary, so single-line behavior is
+    // unchanged. Chat scrolling lives on ←/→ (empty input) and PgUp/PgDn, so
+    // one key never fires two unrelated actions.
     if (!event.ctrl && !event.meta && (event.name === 'up' || event.name === 'down')) {
+      if (inputState.text.includes('\n')) {
+        // Read the caret through the ref: handleEditorKey's memo deps track
+        // inputState.text, so a caret-only move doesn't recreate the closure.
+        const live = inputStateRef.current;
+        if (event.name === 'up' && !isCursorOnFirstLine(live)) {
+          setInputState((prev) => moveCursorUp(prev, 0));
+          return true;
+        }
+        if (event.name === 'down' && !isCursorOnLastLine(live)) {
+          setInputState((prev) => moveCursorDown(prev, 0));
+          return true;
+        }
+        // At the boundary: fall through to history recall below.
+      }
       const command = keybindingManager.resolve(event);
       if (command) dispatchCommand(command);
       return true;
@@ -951,7 +995,12 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
       return true;
     }
 
-    // Text input — check Shift+Enter before plain Enter.
+    // Text input — newline chords before plain Enter. Ctrl+J (linefeed) works
+    // in every terminal; Shift+Enter needs the kitty keyboard protocol.
+    if (event.name === 'linefeed') {
+      setInputState((prev) => insertNewline(prev));
+      return true;
+    }
     if (event.name === 'return' && event.shift) {
       setInputState((prev) => insertNewline(prev));
       return true;
@@ -1110,6 +1159,15 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
     focusStack.handleKey(toKeypressEvent(input, key));
   });
 
+  // Bracketed paste is a separate ink channel: multi-line clipboard content
+  // lands in the buffer as one insertion instead of tripping useInput's
+  // Enter-submit / control-char drops. Gated to the editor layer so pasting
+  // while an overlay owns the keyboard doesn't silently edit the buffer.
+  usePaste((text: string) => {
+    if (focusStack.top() !== 'editor') return;
+    setInputState((prev) => insertText(prev, text));
+  });
+
   const hasError = activeErrors.length > 0;
 
   // Token ceiling for the session gauge: the active provider/model's real
@@ -1121,9 +1179,12 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
 
   // Operation summary strip above the editor. Interactive mode shows the
   // pending tool as a confirm affordance; auto/goal show what is running live
-  // (auto-approved, no confirmation). Steps/expected collapse on compact widths.
-  const { width: termWidth } = useTerminalSize();
-  const operationCompact = getBreakpoint(termWidth).density === 'compact';
+  // (auto-approved, no confirmation). Steps/expected collapse on compact widths
+  // and on short frames (compactVertical).
+  const { width: termWidth, height: termHeight } = useTerminalSize();
+  const layoutPolicy = computeOpenCodeLayout(termWidth, getFrameHeight(termHeight));
+  const operationCompact =
+    getBreakpoint(termWidth).density === 'compact' || layoutPolicy.compactVertical;
   const operationSummaryNode = useMemo(() => {
     if (permissionRequest && executionMode === 'interactive') {
       const op = synthesizeOperation(
@@ -1182,7 +1243,9 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
         sidebarHidden={sidebarHidden}
         headerBar={<HeaderBar provider={provider} model={model} uiMode={uiMode} />}
         errorBar={
-          hasError ? <ErrorBar errors={activeErrors} onDismiss={dismissError} /> : null
+          hasError ? (
+            <ErrorBar errors={activeErrors} onDismiss={dismissError} compact={layoutPolicy.compactVertical} />
+          ) : null
         }
         operationSummary={operationSummaryNode}
         chatPanel={
@@ -1230,11 +1293,26 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
         }
         overlay={
           showDiffDetail && permissionRequest ? (
-            <PermissionDialog request={permissionRequest} onClose={() => setShowDiffDetail(false)} />
+            <PermissionDialog
+              request={permissionRequest}
+              onClose={() => setShowDiffDetail(false)}
+              maxRows={layoutPolicy.overlayMaxRows}
+            />
           ) : showPalette ? (
-            <CommandPalette commands={paletteCommands} onClose={() => setShowPalette(false)} />
+            <CommandPalette
+              commands={paletteCommands}
+              onClose={() => setShowPalette(false)}
+              maxRows={layoutPolicy.overlayMaxRows}
+              maxWidth={layoutPolicy.overlayMaxWidth}
+            />
           ) : showFilePicker ? (
-            <FilePicker files={fileItems} onSelect={onFileSelect} onCancel={() => setShowFilePicker(false)} />
+            <FilePicker
+              files={fileItems}
+              onSelect={onFileSelect}
+              onCancel={() => setShowFilePicker(false)}
+              maxRows={layoutPolicy.overlayMaxRows}
+              maxWidth={layoutPolicy.overlayMaxWidth}
+            />
           ) : showExitConfirm ? (
             <ExitConfirmDialog
               onConfirm={() => { setShowExitConfirm(false); process.exit(0); }}

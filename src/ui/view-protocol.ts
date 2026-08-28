@@ -20,6 +20,8 @@ export interface SidebarFile {
 }
 
 export interface SidebarTool {
+  /** Engine tool-call id — correlates completion with the right entry under parallel same-name calls. */
+  id?: string;
   name: string;
   status: 'running' | 'completed' | 'failed' | 'pending';
   duration?: string;
@@ -96,8 +98,13 @@ export function summarizeToolInput(input: unknown, maxLen = 40): string | undefi
 }
 
 export interface ToolCallData {
+  /** Engine tool-call id — correlates completion with the right card under parallel same-name calls. */
+  id?: string;
   toolName: string;
+  /** One-line display summary of the input (collapsed card / sidebar). */
   input?: string;
+  /** Full raw input args, rendered by the expanded card (Ctrl+O). */
+  rawInput?: Record<string, unknown>;
   output?: string;
   status: 'running' | 'completed' | 'failed';
   startTime?: number;

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { computeOpenCodeLayout, getBreakpoint, truncate, abbreviateModel } from '../../src/ui/layout';
+import { computeOpenCodeLayout, getBreakpoint, getFrameHeight, truncate, abbreviateModel } from '../../src/ui/layout';
 
 const HEIGHTS = [10, 13, 24, 50];
 const WIDTHS = [40, 80, 120];
@@ -67,6 +67,41 @@ describe('computeOpenCodeLayout', () => {
     expect(computeOpenCodeLayout(80, 24).breakpoint).toBe('standard');
     expect(computeOpenCodeLayout(80, 24).sidebarVisible).toBe(true);
     expect(computeOpenCodeLayout(120, 24).density).toBe('wide');
+  });
+});
+
+describe('getFrameHeight', () => {
+  it('renders one row short of the terminal (incremental-diff path)', () => {
+    expect(getFrameHeight(24)).toBe(23);
+    expect(getFrameHeight(2)).toBe(1);
+    expect(getFrameHeight(1)).toBe(1);
+    expect(getFrameHeight(0)).toBe(1);
+  });
+});
+
+describe('small-window height policy', () => {
+  it('drops the header on very short frames to spare a chat row', () => {
+    expect(computeOpenCodeLayout(80, 11).headerVisible).toBe(false);
+    expect(computeOpenCodeLayout(80, 11).headerHeight).toBe(0);
+    expect(computeOpenCodeLayout(80, 12).headerVisible).toBe(true);
+  });
+
+  it('flags compactVertical below the short-frame threshold', () => {
+    expect(computeOpenCodeLayout(80, 13).compactVertical).toBe(true);
+    expect(computeOpenCodeLayout(80, 14).compactVertical).toBe(false);
+    // Width-driven fields are untouched by the height flag.
+    expect(computeOpenCodeLayout(80, 13).sidebarVisible).toBe(true);
+  });
+
+  it('budgets overlays so the frame never outgrows the terminal', () => {
+    for (const [width, height] of [[80, 10], [60, 14], [100, 24], [40, 8]] as const) {
+      const l = computeOpenCodeLayout(width, getFrameHeight(height));
+      expect(l.overlayMaxRows).toBeGreaterThanOrEqual(6);
+      // Overlay + reserved main area must fit inside the frame.
+      expect(l.overlayMaxRows).toBeLessThanOrEqual(height - 1);
+      expect(l.overlayMaxWidth).toBeGreaterThanOrEqual(20);
+      expect(l.overlayMaxWidth).toBeLessThanOrEqual(width);
+    }
   });
 });
 

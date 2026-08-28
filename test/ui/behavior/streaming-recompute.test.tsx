@@ -58,4 +58,38 @@ describe('streaming recompute guard (behavior)', () => {
     engine.releaseGate();
     await h.waitFor(() => engine.completedTurns === 2, 5000, 'second turn to complete');
   });
+
+  it('streaming tail flushes do not re-flatten history', async () => {
+    const engine = new FakeQueryEngine();
+
+    // Turn 1 completes and becomes history.
+    engine.scriptEvents([
+      { type: 'text_delta', text: 'first answer' },
+      { type: 'turn_complete' },
+    ]);
+    h = await renderApp({ width: 100, height: 30, engine });
+    await h.type('one');
+    await h.press(KEYS.enter);
+    await h.waitFor(() => engine.completedTurns === 1, 5000, 'first turn to complete');
+    await h.waitForText('first answer');
+    // Let the post-turn flush settle before snapshotting.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    const flattensBefore = chatViewRenderStats.historyFlattenCount;
+
+    // Turn 2: the user append grows history exactly once; the streamed tail
+    // only mutates the newest message. Each delta flush used to hand ChatView
+    // a fresh messages array identity and re-wrap the ENTIRE transcript.
+    engine.scriptEvents([
+      { type: 'text_delta', text: ' working still' },
+      { type: 'text_delta', text: ' more tail' },
+      { type: 'turn_complete' },
+    ]);
+    await h.type('two');
+    await h.press(KEYS.enter);
+    await h.waitFor(() => engine.completedTurns === 2, 5000, 'second turn to complete');
+    await h.waitForText('more tail');
+
+    expect(chatViewRenderStats.historyFlattenCount).toBe(flattensBefore + 1);
+  });
 });

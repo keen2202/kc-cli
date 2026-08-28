@@ -173,6 +173,62 @@ describe('ToolCallCard — renderToolCallCard', () => {
     expect(result).toContain('src/index.ts');
   });
 
+  it('hides raw input args when collapsed but shows them expanded', () => {
+    const tc: ToolCallData = {
+      toolName: 'Bash',
+      input: 'echo hi',
+      rawInput: { command: 'echo hi', timeout: 5000 },
+      status: 'completed',
+      startTime: 1000,
+      endTime: 2000,
+    };
+    const collapsed = renderToolCallCard(tc);
+    expect(collapsed).not.toContain('args:');
+    expect(collapsed).not.toContain('timeout');
+
+    const expanded = renderToolCallCard(tc, undefined, { expanded: true });
+    expect(expanded).toContain('args:');
+    expect(expanded).toContain('command: echo hi');
+    expect(expanded).toContain('timeout: 5000');
+  });
+
+  it('single-lines and caps long argument values in the expanded args block', () => {
+    const tc: ToolCallData = {
+      toolName: 'Write',
+      rawInput: { content: 'l1\nl2\nl3', note: 'x'.repeat(500) },
+      status: 'completed',
+    };
+    const expanded = renderToolCallCard(tc, undefined, { expanded: true });
+    expect(expanded).toContain('content: l1\\nl2\\nl3');
+    expect(expanded).toContain('note: ' + 'x'.repeat(199) + '…');
+    expect(expanded).not.toContain('x'.repeat(300));
+  });
+
+  it('shows the full multi-line error when expanded (no 200-char slice)', () => {
+    const longError = 'E'.repeat(300) + '\nsecond line';
+    const tc: ToolCallData = {
+      toolName: 'FailingTool',
+      status: 'failed',
+      output: longError,
+    };
+    const collapsed = renderToolCallCard(tc);
+    expect(collapsed).toContain('...');
+    const expanded = renderToolCallCard(tc, undefined, { expanded: true });
+    expect(expanded).toContain('second line');
+    expect(expanded).toContain('E'.repeat(300));
+  });
+
+  it('hints Ctrl+O for details when only raw args are hidden', () => {
+    const tc: ToolCallData = {
+      toolName: 'Bash',
+      input: 'echo hi',
+      rawInput: { command: 'echo hi' },
+      status: 'completed',
+    };
+    const result = renderToolCallCard(tc);
+    expect(result).toContain('Ctrl+O for details');
+  });
+
   it('does not show output for running tools', () => {
     const tc: ToolCallData = {
       toolName: 'Tool',

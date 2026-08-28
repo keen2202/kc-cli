@@ -10,6 +10,7 @@ import { renderMarkdown } from './MarkdownRenderer';
 import { useTheme } from '../hooks/useTheme';
 import { useTerminalSize } from '../hooks/useTerminalSize';
 import { useNowTick } from '../hooks/useNowTick';
+import { computeOpenCodeLayout, getFrameHeight } from '../layout';
 
 // ── Line-accurate rendering ──
 //
@@ -107,10 +108,36 @@ interface ChatRowData {
 
 /**
  * Test-only probe: counts how many times the history (all messages except the
- * last) is re-flattened. The streaming clock tick must NOT re-flatten history
- * — guarded by test/ui/behavior/streaming-recompute.test.tsx.
+ * last) is re-flattened, and how often the panel renders at all. Streaming
+ * delta flushes must NOT re-flatten history — guarded by
+ * test/ui/behavior/streaming-recompute.test.tsx.
  */
-export const chatViewRenderStats = { historyFlattenCount: 0 };
+export const chatViewRenderStats = { historyFlattenCount: 0, renderCount: 0 };
+
+const EMPTY_HISTORY: ChatMessage[] = [];
+
+/**
+ * Reference-stable history slice: returns the PREVIOUS array as long as no
+ * message object identity changed. The streaming tail mutates only the newest
+ * message, so a fresh `messages.slice(0, -1)` array (a new identity every
+ * flush) would invalidate the history-rows memo and re-wrap the whole
+ * transcript per flush — the pointer-compare here keeps it cached.
+ */
+function useStableHistory(messages: ChatMessage[]): ChatMessage[] {
+  const cacheRef = useRef<{ history: ChatMessage[] }>({ history: EMPTY_HISTORY });
+  const history = messages.length > 1 ? messages.slice(0, -1) : EMPTY_HISTORY;
+  const cached = cacheRef.current.history;
+  if (cached !== history) {
+    if (
+      cached.length === history.length &&
+      cached.every((m, i) => m === history[i])
+    ) {
+      return cached;
+    }
+    cacheRef.current = { history };
+  }
+  return history;
+}
 
 /** Memoized row: unchanged rows skip re-rendering while the streaming clock
  *  ticks the panel every second. */
@@ -131,7 +158,8 @@ interface ChatViewProps {
   isStreaming?: boolean;
 }
 
-export function ChatView({ messages, thinkingChains, scrollRef, toolOutputExpanded = false, isStreaming = false }: ChatViewProps) {
+export const ChatView = React.memo(function ChatView({ messages, thinkingChains, scrollRef, toolOutputExpanded = false, isStreaming = false }: ChatViewProps) {
+  chatViewRenderStats.renderCount++;
   const { tokens } = useTheme();
   const { height: termHeight, width: termWidth } = useTerminalSize();
   // Live wall-clock tick, scoped to this panel: only ticks while a turn is
@@ -139,8 +167,10 @@ export function ChatView({ messages, thinkingChains, scrollRef, toolOutputExpand
   const now = useNowTick(isStreaming);
 
   // Self-measure the rows/columns Yoga actually allotted (same pattern as
-  // SidebarPanel): until the first measurement lands, fall back to a
-  // conservative bound derived from the terminal size.
+  // SidebarPanel): until the first measurement lands, fall back to a bound
+  // derived from the layout POLICY (frame minus header/status/editor) instead
+  // of raw constants — the old `termHeight - 8` guess over-wrapped whenever
+  // the sidebar or editor took more than the assumed few rows.
   const rootRef = useRef<DOMElement | null>(null);
   const [measured, setMeasured] = useState<{ rows: number; cols: number } | null>(null);
   useEffect(() => {
@@ -150,17 +180,20 @@ export function ChatView({ messages, thinkingChains, scrollRef, toolOutputExpand
       setMeasured({ rows, cols });
     }
   });
-  const rows = measured?.rows ?? Math.max(4, termHeight - 8);
-  const cols = measured?.cols ?? Math.max(20, termWidth - 6);
+  const frameHeight = getFrameHeight(termHeight);
+  const policy = computeOpenCodeLayout(termWidth, frameHeight);
+  const rows = measured?.rows ?? Math.max(
+    1,
+    frameHeight - policy.headerHeight - policy.statusBarHeight - policy.editorHeight - 1,
+  );
+  const cols = measured?.cols ?? Math.max(20, termWidth - policy.rightPanelWidth - 2);
 
   // Flatten messages into pre-wrapped terminal rows. The wall-clock `now` only
   // affects live tool-card clocks, which can only exist on the newest message —
   // so history is flattened WITHOUT `now` and stays cached across clock ticks
-  // (previously the tick re-rendered every message line once per second).
-  const historyMessages = useMemo(
-    () => (messages.length > 1 ? messages.slice(0, -1) : []),
-    [messages],
-  );
+  // AND across streaming tail flushes (useStableHistory keeps the array
+  // identity while only the newest message mutates).
+  const historyMessages = useStableHistory(messages);
   const lastMessage = messages.length > 0 ? messages[messages.length - 1] : undefined;
 
   const historyRows = useMemo(() => {
@@ -268,4 +301,4 @@ export function ChatView({ messages, thinkingChains, scrollRef, toolOutputExpand
       )}
     </Box>
   );
-}
+});

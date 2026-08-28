@@ -58,6 +58,10 @@ class FakeStdout extends EventEmitter {
   }
 
   write = (chunk: string): boolean => {
+    // Terminal mode switches (bracketed-paste enable/disable, emitted by
+    // ink's usePaste) are not rendered frames — recording them would make
+    // lastFrame() return a bare control sequence.
+    if (/^\u001B\[\?2004[hl]$/.test(chunk)) return true;
     this.frames.push(chunk);
     return true;
   };
@@ -172,6 +176,7 @@ function patchProcessStdoutSize(columns: number, rows: number): () => void {
 export const KEYS = {
   escape: '\u001B',
   enter: '\r',
+  ctrlJ: '\n',
   tab: '\t',
   ctrlK: '\u000B',
   ctrlO: '\u000F',

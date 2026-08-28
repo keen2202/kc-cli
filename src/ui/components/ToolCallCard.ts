@@ -26,6 +26,29 @@ function spinnerFrame(now: number): string {
 const PREVIEW_LINES = 2;
 /** Expanded cards cap the output to avoid flooding the terminal. */
 const EXPANDED_MAX_LINES = 200;
+/** Per-argument value cap in the expanded input detail block. */
+const EXPANDED_ARG_MAX_CHARS = 200;
+
+/**
+ * Render the full raw input args for an expanded card: one `key: value` line
+ * per argument, values single-lined and capped (the full values live in the
+ * engine transcript; this is an inspection aid, not a dump).
+ */
+function renderRawInputArgs(rawInput: Record<string, unknown>): string[] {
+  const lines: string[] = [];
+  const entries = Object.entries(rawInput);
+  if (entries.length === 0) return lines;
+  lines.push(chalk.dim('  args:'));
+  for (const [key, value] of entries) {
+    const raw = typeof value === 'string' ? value : JSON.stringify(value) ?? String(value);
+    const oneLine = raw.replace(/\r?\n/g, '\\n');
+    const capped = oneLine.length > EXPANDED_ARG_MAX_CHARS
+      ? oneLine.slice(0, EXPANDED_ARG_MAX_CHARS - 1) + '…'
+      : oneLine;
+    lines.push(chalk.dim(`    ${key}: ${capped || "''"}`));
+  }
+  return lines;
+}
 
 export function renderToolCallCard(
   tc: ToolCallData,
@@ -58,19 +81,40 @@ export function renderToolCallCard(
     : [];
 
   // Header: icon + name + input summary + elapsed, plus a collapse hint when
-  // there is hidden output to expand.
+  // there is hidden content to expand.
+  const hasHiddenDetail = (outputLines.length > PREVIEW_LINES)
+    || (tc.rawInput !== undefined && Object.keys(tc.rawInput).length > 0);
   let hint = '';
-  if (outputLines.length > 0 && !expanded && outputLines.length > PREVIEW_LINES) {
-    hint = chalk.dim(` · ${outputLines.length} lines (Ctrl+O to expand)`);
+  if (!expanded && hasHiddenDetail) {
+    hint = outputLines.length > PREVIEW_LINES
+      ? chalk.dim(` · ${outputLines.length} lines (Ctrl+O to expand)`)
+      : chalk.dim(' (Ctrl+O for details)');
   }
 
   const lines: string[] = [];
   lines.push(`${statusIcon} ${nameColor(tc.toolName)}${inputSummary}${elapsed}${hint}`);
 
+  // Expanded cards reveal the full input args above the output.
+  if (expanded && tc.rawInput !== undefined) {
+    lines.push(...renderRawInputArgs(tc.rawInput));
+  }
+
   if (tc.status === 'failed' && tc.output) {
-    const truncated = tc.output.length > 200 ? tc.output.slice(0, 200) + '...' : tc.output;
     const errorColor = tokens ? tokens['error.text'] : chalk.red;
-    lines.push(errorColor(`  ${truncated}`));
+    if (expanded) {
+      // Expanded failures keep the whole error visible (line-capped), instead
+      // of the collapsed 200-char slice.
+      const errLines = tc.output.replace(/\r\n/g, '\n').split('\n');
+      for (const line of errLines.slice(0, EXPANDED_MAX_LINES)) {
+        lines.push(errorColor(`  ${line}`));
+      }
+      if (errLines.length > EXPANDED_MAX_LINES) {
+        lines.push(errorColor(`  … ${errLines.length - EXPANDED_MAX_LINES} more lines truncated`));
+      }
+    } else {
+      const truncated = tc.output.length > 200 ? tc.output.slice(0, 200) + '...' : tc.output;
+      lines.push(errorColor(`  ${truncated}`));
+    }
   } else if (outputLines.length > 0) {
     if (expanded) {
       const shown = outputLines.slice(0, EXPANDED_MAX_LINES);

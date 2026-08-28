@@ -76,4 +76,44 @@ describe('Ctrl+O expand/collapse (behavior)', () => {
       'tool output to collapse',
     );
   });
+
+  it('reveals the full tool input args on expand and hides them on collapse', async () => {
+    const longCommand = 'run-a-very-long-command --flag value-that-exceeds-the-40-char-summary-cut';
+    const engine = new FakeQueryEngine();
+    engine.scriptEvents([
+      {
+        type: 'tool_started',
+        toolCall: { id: 'tc-1', toolName: 'Bash', input: { command: longCommand, timeout: 1234 } },
+      },
+      {
+        type: 'tool_completed',
+        toolCall: { id: 'tc-1', toolName: 'Bash' },
+        result: { output: 'done' },
+        isError: false,
+      },
+      { type: 'turn_complete' },
+    ]);
+    h = await renderApp({ width: 100, height: 40, engine });
+    await h.type('go');
+    await h.press(KEYS.enter);
+    await h.waitFor(() => engine.completedTurns === 1, 5000, 'turn to complete');
+    await h.waitForText('○ idle', 5000);
+
+    // Collapsed: only the 40-char input summary survives ingestion.
+    expect(h.plainFrame()).toContain('Bash');
+    expect(h.plainFrame()).not.toContain('value-that-exceeds');
+
+    await h.press(KEYS.ctrlO);
+    await h.waitForText('args:', 5000);
+    // The full command renders (it may wrap across terminal columns).
+    expect(h.plainFrame()).toContain('timeout: 1234');
+    expect(h.plainFrame()).toContain('value-that-exceeds');
+
+    await h.press(KEYS.ctrlO);
+    await h.waitFor(
+      () => !h!.plainFrame().includes('args:'),
+      5000,
+      'args block to collapse',
+    );
+  });
 });

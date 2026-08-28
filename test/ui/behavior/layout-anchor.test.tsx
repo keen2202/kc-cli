@@ -125,3 +125,34 @@ describe('layout invariant matrix (T8)', () => {
     }
   });
 });
+
+// ── Small-window strips matrix: error bar visible at short heights ──
+// The anchor matrix above runs idle (no strips); these cases pin the frame
+// invariants WITH the error strip consuming rows on terminals where the
+// compactVertical policy kicks in.
+
+const SMALL_WITH_ERROR: Array<[number, number]> = [
+  [40, 10],
+  [60, 12],
+  [80, 10],
+  [100, 14],
+  [120, 12],
+];
+
+describe('layout anchor with error strip on short frames', () => {
+  it.each(SMALL_WITH_ERROR)('keeps the status bar last at %ix%i with an error visible', async (width, height) => {
+    const { FakeQueryEngine } = await import('./harness');
+    const engine = new FakeQueryEngine();
+    engine.scriptEvents([{ type: 'error', error: { message: 'short-frame-check' } }]);
+    h = await renderApp({ width, height, engine });
+
+    await h.type('x');
+    await h.press('\r');
+    await h.waitForText('short-frame-check');
+
+    const lines = h.lines();
+    expect(lines.length).toBeLessThanOrEqual(height);
+    const lastIdx = lastNonEmptyIndex(lines);
+    expect(lines[lastIdx]).toContain('idle');
+  });
+});

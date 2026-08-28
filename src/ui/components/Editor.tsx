@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Box, Text, measureElement, type DOMElement } from 'ink';
 import { useTheme } from '../hooks/useTheme';
 import { useTerminalSize } from '../hooks/useTerminalSize';
-import { computeOpenCodeLayout } from '../layout';
+import { computeOpenCodeLayout, getFrameHeight } from '../layout';
 
 interface Attachment {
   path: string;
@@ -27,7 +27,7 @@ function KeyboardHints() {
   const { tokens } = useTheme();
   const hints = [
     { key: 'Enter', action: 'Submit' },
-    { key: 'S-Enter', action: 'Newline' },
+    { key: '^J/S-Enter', action: 'Newline' },
     { key: '^I', action: 'Steer' },
     { key: '^E', action: 'Editor' },
     { key: '^C', action: 'Quit' },
@@ -72,7 +72,9 @@ export function Editor({
   // Height budget the editor is allotted by the layout. Content must fit
   // within this (minus the border) or it overflows and overlaps the chat
   // panel on small terminals. We progressively reveal chrome as room allows.
-  const { editorHeight } = computeOpenCodeLayout(width, height);
+  // getFrameHeight mirrors Layout's frame (height-1) — deriving the budget
+  // from the FULL terminal height was a one-row overshoot on tight screens.
+  const { editorHeight } = computeOpenCodeLayout(width, getFrameHeight(height));
   const innerBudget = editorHeight - 2; // subtract top/bottom border rows
   const remaining = innerBudget - 1; // reserve one row for the input line
   const showHints = remaining >= 3; // hint bar needs ~3 rows (with margins)

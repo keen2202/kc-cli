@@ -22,9 +22,15 @@ export interface CommandItem {
 interface CommandPaletteProps {
   commands: CommandItem[];
   onClose: () => void;
+  /** Row budget from the layout policy; the item list is windowed to fit. */
+  maxRows?: number;
+  /** Width budget from the layout policy on narrow terminals. */
+  maxWidth?: number;
 }
 
 const MAX_VISIBLE = 10;
+/** Chrome rows (border + padding + title + query + hint + margins). */
+const CHROME_ROWS = 9;
 
 /**
  * Case-insensitive substring filter over label + keywords. An empty query
@@ -39,7 +45,7 @@ export function filterCommands(commands: CommandItem[], query: string): CommandI
   });
 }
 
-export function CommandPalette({ commands, onClose }: CommandPaletteProps) {
+export function CommandPalette({ commands, onClose, maxRows, maxWidth }: CommandPaletteProps) {
   const { colors } = useTheme();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -86,7 +92,12 @@ export function CommandPalette({ commands, onClose }: CommandPaletteProps) {
     },
   });
 
-  const visible = filtered.slice(0, MAX_VISIBLE);
+  // Window the item list into the layout policy's row budget so the overlay
+  // can never grow past the terminal (which would push the frame out of the
+  // incremental-diff path and displace the status bar).
+  const maxItems = Math.max(1, Math.min(MAX_VISIBLE, (maxRows ?? 24) - CHROME_ROWS));
+  const visible = filtered.slice(0, maxItems);
+  const hiddenCount = filtered.length - visible.length;
 
   return (
     <Box
@@ -95,7 +106,7 @@ export function CommandPalette({ commands, onClose }: CommandPaletteProps) {
       borderStyle="single"
       borderColor={colors.border}
       padding={1}
-      width={54}
+      width={maxWidth !== undefined ? Math.min(54, maxWidth) : 54}
     >
       <Box marginBottom={1}>
         <Text bold color={colors.primary}>Command Palette</Text>
@@ -116,6 +127,9 @@ export function CommandPalette({ commands, onClose }: CommandPaletteProps) {
             </Text>
           </Box>
         ))
+      )}
+      {hiddenCount > 0 && (
+        <Text color={colors.muted}>… {hiddenCount} more (type to filter)</Text>
       )}
       <Box marginTop={1}>
         <Text color={colors.muted}>↑/↓: navigate · Enter: run · Esc: close</Text>

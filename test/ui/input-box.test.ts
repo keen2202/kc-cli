@@ -9,8 +9,13 @@ import {
   insertChar,
   deleteBefore,
   insertNewline,
+  insertText,
+  isCursorOnFirstLine,
+  isCursorOnLastLine,
   moveCursorLeft,
   moveCursorRight,
+  moveCursorUp,
+  moveCursorDown,
   getCursorLineCol,
   getLineCount,
   type InputState,
@@ -182,5 +187,60 @@ describe('InputBox — renderInputBox', () => {
     const joined = lines.join('');
     expect(joined).toContain('"quotes"');
     expect(joined).toContain('<brackets>');
+  });
+});
+
+describe('InputBox — multi-line text insertion (bracketed paste)', () => {
+  it('insertText inserts multi-line text at the cursor', () => {
+    let state = createInputState();
+    state = insertChar(state, 'a');
+    state = insertText(state, 'one\ntwo');
+    expect(state.text).toBe('aone\ntwo');
+    expect(state.cursorPos).toBe(8);
+  });
+
+  it('insertText normalizes CRLF and bare CR to LF', () => {
+    let state = createInputState();
+    state = insertText(state, 'x\r\ny\rz');
+    expect(state.text).toBe('x\ny\nz');
+  });
+
+  it('insertText keeps trailing text after the cursor intact', () => {
+    let state: InputState = { text: 'ab', cursorPos: 1, historyIndex: -1 };
+    state = insertText(state, 'X\nY');
+    expect(state.text).toBe('aX\nYb');
+    expect(state.cursorPos).toBe(4);
+  });
+});
+
+describe('InputBox — cursor line boundaries', () => {
+  it('reports first/last line for single-line text on both boundaries', () => {
+    const start: InputState = { text: 'abc', cursorPos: 0, historyIndex: -1 };
+    const end: InputState = { text: 'abc', cursorPos: 3, historyIndex: -1 };
+    expect(isCursorOnFirstLine(start)).toBe(true);
+    expect(isCursorOnLastLine(start)).toBe(true);
+    expect(isCursorOnFirstLine(end)).toBe(true);
+    expect(isCursorOnLastLine(end)).toBe(true);
+  });
+
+  it('reports interior lines of a multi-line buffer', () => {
+    const state: InputState = { text: 'aa\nbb\ncc', cursorPos: 3, historyIndex: -1 };
+    // cursorPos 3 = start of line 1 ('bb')
+    expect(isCursorOnFirstLine(state)).toBe(false);
+    expect(isCursorOnLastLine(state)).toBe(false);
+    expect(isCursorOnFirstLine({ ...state, cursorPos: 1 })).toBe(true);
+    expect(isCursorOnLastLine({ ...state, cursorPos: 8 })).toBe(true);
+  });
+
+  it('moveCursorUp/Down keep the column clamp within line length', () => {
+    let state: InputState = { text: 'aaaa\nb\ncccc', cursorPos: 10, historyIndex: -1 };
+    state = moveCursorUp(state, 0);
+    expect(getCursorLineCol(state)).toEqual({ line: 1, col: 1 });
+    state = moveCursorUp(state, 0);
+    expect(getCursorLineCol(state)).toEqual({ line: 0, col: 1 });
+    state = moveCursorDown(state, 0);
+    expect(getCursorLineCol(state)).toEqual({ line: 1, col: 1 });
+    state = moveCursorDown(state, 0);
+    expect(getCursorLineCol(state)).toEqual({ line: 2, col: 1 });
   });
 });
