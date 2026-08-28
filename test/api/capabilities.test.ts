@@ -94,4 +94,17 @@ describe('ProviderCapabilities', () => {
       expect(getMaxContextWindow('openai', 'gpt-4o')).toBe(128_000);
     });
   });
+
+  describe('parallel tool-call capability (tool-search-efficiency spec)', () => {
+    it('enables parallel calls for documented OpenAI-compatible providers', () => {
+      for (const provider of ['anthropic', 'openai', 'deepseek', 'qwen', 'glm', 'kimi', 'mimo', 'step', 'gemini']) {
+        expect(hasCapability(provider, 'supportsParallelToolCalls'), provider).toBe(true);
+      }
+    });
+
+    it('keeps ollama and unknown providers sequential', () => {
+      expect(hasCapability('ollama', 'supportsParallelToolCalls')).toBe(false);
+      expect(hasCapability('unknown', 'supportsParallelToolCalls')).toBe(false);
+    });
+  });
 });

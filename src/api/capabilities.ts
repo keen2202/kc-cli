@@ -221,7 +221,10 @@ export const PROVIDER_CAPABILITIES: Record<string, ProviderCapabilities> = {
     maxContextWindow: 128_000,
     maxOutputTokens: 8_192,
     supportsToolUse: true,
-    supportsParallelToolCalls: false,
+    // OpenAI-compatible wire format: multiple tool_calls per assistant message
+    // are supported, so the instruction surface can encourage batching
+    // independent searches (docs/specs/tool-search-efficiency-spec.md).
+    supportsParallelToolCalls: true,
     supportsForcedToolUse: false,
     supportsThinking: false,
     supportsExtendedThinking: false,
@@ -261,7 +264,7 @@ export const PROVIDER_CAPABILITIES: Record<string, ProviderCapabilities> = {
     maxContextWindow: 128_000,
     maxOutputTokens: 4_096,
     supportsToolUse: true,
-    supportsParallelToolCalls: false,
+    supportsParallelToolCalls: true,
     supportsForcedToolUse: false,
     supportsThinking: false,
     supportsExtendedThinking: false,
@@ -275,6 +278,54 @@ export const PROVIDER_CAPABILITIES: Record<string, ProviderCapabilities> = {
     recommendedTemperature: 0.7,
     recommendedMaxTools: 10,
     prefixCachingStrategy: 'none',
+  },
+
+  // OpenAI-compatible endpoints with documented parallel function calling.
+  // Previously absent (fell through to DEFAULT_CAPABILITIES), which kept the
+  // instruction surface on "call tools one at a time" and multiplied search
+  // round-trips.
+  kimi: {
+    ...DEFAULT_CAPABILITIES,
+    supportsToolUse: true,
+    supportsParallelToolCalls: true,
+    supportsForcedToolUse: false,
+    supportsFunctionCalling: true,
+    supportsStreamingToolCalls: true,
+    supportsJsonMode: true,
+    recommendedMaxTools: 15,
+  },
+
+  mimo: {
+    ...DEFAULT_CAPABILITIES,
+    supportsToolUse: true,
+    supportsParallelToolCalls: true,
+    supportsForcedToolUse: false,
+    supportsFunctionCalling: true,
+    supportsStreamingToolCalls: true,
+    supportsJsonMode: true,
+    recommendedMaxTools: 15,
+  },
+
+  step: {
+    ...DEFAULT_CAPABILITIES,
+    supportsToolUse: true,
+    supportsParallelToolCalls: true,
+    supportsForcedToolUse: false,
+    supportsFunctionCalling: true,
+    supportsStreamingToolCalls: true,
+    supportsJsonMode: true,
+    recommendedMaxTools: 15,
+  },
+
+  gemini: {
+    ...DEFAULT_CAPABILITIES,
+    supportsToolUse: true,
+    supportsParallelToolCalls: true,
+    supportsForcedToolUse: false,
+    supportsFunctionCalling: true,
+    supportsStreamingToolCalls: true,
+    supportsJsonMode: true,
+    recommendedMaxTools: 20,
   },
 
   ollama: {

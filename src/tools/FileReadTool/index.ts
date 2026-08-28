@@ -170,7 +170,7 @@ export const tool = buildTool<FileReadInput, string>({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  prompt: () => 'Read file contents. Supports line ranges and large file preview via streaming.',
+  prompt: () => 'Read file contents. Supports line ranges and large file preview via streaming. Prefer a targeted range once a search identified the region; issue independent file reads as parallel tool calls in one message.',
 
   getToolUseSummary: (input) => `Reading: ${input.path}`,
   getActivityDescription: (input) => `Reading file ${input.path}`,

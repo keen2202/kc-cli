@@ -89,7 +89,7 @@ export const tool = buildTool<GlobInput, string>({
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  prompt: () => 'Find files by glob pattern. Supports ** for recursive matching.',
+  prompt: () => 'Find files by glob pattern. Supports ** for recursive matching. Prefer Glob over Grep when you know the filename shape; combine with Grep output_mode "files_with_matches" for content lookups.',
 
   getToolUseSummary: (input) => `Finding: ${input.pattern}`,
   getActivityDescription: (input) => `Globbing for ${input.pattern}`,

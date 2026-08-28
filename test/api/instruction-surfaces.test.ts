@@ -42,8 +42,13 @@ function legacyBuildSystemPrompt(
   }
   sections.push(
     capabilities.supportsParallelToolCalls
-      ? 'You may call multiple independent tools in parallel when appropriate.'
+      ? 'You may call multiple independent tools in parallel when appropriate. Batch independent searches (Grep/Glob/FileRead) into one message instead of one-per-turn.'
       : 'Call tools one at a time. Wait for each result before making the next call.'
+  );
+  sections.push(
+    'Search efficiently: prefer ONE Grep call with multiple "patterns" (or output_mode "files_with_matches") over several sequential searches; ' +
+    'use Glob when you know the filename shape; FileRead only the specific files/ranges a match identified; ' +
+    'and batch independent lookups as parallel tool calls when the provider allows it.'
   );
 
   if (template.planning) {

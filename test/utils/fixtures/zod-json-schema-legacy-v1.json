@@ -170,7 +170,13 @@
       "properties": {
         "pattern": {
           "type": "string",
-          "description": "Regex pattern to search for"
+          "description": "Regex pattern to search for (single-pattern form)"
+        },
+        "patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "path": {
           "type": "string",
@@ -190,11 +196,17 @@
         "context_lines": {
           "type": "number",
           "default": 0
+        },
+        "output_mode": {
+          "type": "string",
+          "enum": [
+            "content",
+            "files_with_matches",
+            "count"
+          ],
+          "default": "content"
         }
-      },
-      "required": [
-        "pattern"
-      ]
+      }
     },
     "Glob": {
       "type": "object",
