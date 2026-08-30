@@ -29,6 +29,14 @@ export function renderInkUI(options: RenderOptions): void {
     {
       stdout: process.stdout,
       stdin: process.stdin,
+      // Line-level frame diffing (ink 7). The default (false) erases and
+      // rewrites the ENTIRE frame on every render; with the composer's white
+      // cursor cell and border that reads as constant flicker — every
+      // keystroke, every ~33ms streaming flush, and every status-bar clock
+      // tick repainted all frameHeight-1 rows. Incremental mode skips lines
+      // whose content is unchanged, so streaming only repaints the chat rows
+      // that actually moved and the composer stays visually still.
+      incrementalRendering: true,
     },
   );
 

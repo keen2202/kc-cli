@@ -142,7 +142,16 @@ export class FakeQueryEngine {
     const gate = this.gatePromise;
     const events = this.script;
     this.script = [];
-    for (const event of events) yield event;
+    for (const event of events) {
+      // Optional pacing (stripped before emit) so transport-level tests can
+      // spread deltas across several 33ms flush windows instead of one
+      // coalesced burst; content-level tests simply never set it.
+      const { delayBeforeMs, ...payload } = event as EngineEvent & { delayBeforeMs?: number };
+      if (typeof delayBeforeMs === 'number' && delayBeforeMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayBeforeMs));
+      }
+      yield payload as EngineEvent;
+    }
     if (gate) await gate;
     this.completedTurns++;
   }
@@ -196,6 +205,11 @@ export interface HarnessOptions {
   maxTurns?: number;
   /** Session restored before render — seeded into the transcript once. */
   resumedSession?: { sessionId: string; messages: Array<{ id: string; role: 'user' | 'assistant'; content: string; timestamp: number }>; turnCount: number };
+  /** Override ink render options. The default (`debug: true`) writes full
+   *  unthrottled frames, which is what frame-content assertions want; frame-
+   *  transport tests (diff/erase behavior) pass `debug: false` plus the
+   *  production `incrementalRendering` value to exercise the real write path. */
+  renderOptions?: { debug?: boolean; incrementalRendering?: boolean };
 }
 
 export interface Harness {
@@ -205,6 +219,8 @@ export interface Harness {
   /** Latest rendered frame with ANSI stripped. */
   plainFrame(): string;
   lines(): string[];
+  /** Every chunk written to the fake stdout so far (raw transport stream). */
+  rawFrames(): string[];
   /** Type a raw chunk (printable text or a KEYS chord). */
   press(chunk: string): Promise<void>;
   /** Type printable text one character at a time. */
@@ -241,7 +257,8 @@ export async function renderApp(options: HarnessOptions = {}): Promise<Harness> 
     {
       stdout: stdout as unknown as NodeJS.WriteStream,
       stdin: stdin as unknown as NodeJS.ReadStream,
-      debug: true,
+      debug: options.renderOptions?.debug ?? true,
+      incrementalRendering: options.renderOptions?.incrementalRendering,
       exitOnCtrlC: false,
       patchConsole: false,
     },
@@ -261,6 +278,7 @@ export async function renderApp(options: HarnessOptions = {}): Promise<Harness> 
     frame: () => stdout.lastFrame(),
     plainFrame: () => stripAnsi(stdout.lastFrame()),
     lines: () => frameLines(stdout.lastFrame()),
+    rawFrames: () => [...stdout.frames],
     press: async (chunk: string) => {
       stdin.push(chunk);
       // Bare ESC is buffered by ink's input parser (escape-sequence
