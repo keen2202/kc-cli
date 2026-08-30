@@ -97,7 +97,7 @@ describe('StatusBar', () => {
       const result = renderStatusBar({
         sessionStartTime: startTime,
       });
-      expect(result).toContain('2m5s');
+      expect(result).toContain('2m05s');
 
       vi.useRealTimers();
     });
@@ -119,7 +119,7 @@ describe('StatusBar', () => {
       expect(result).toContain('openai/gpt-4o');
       expect(result).toContain('3/10');
       expect(result).toContain('15.0k tokens');
-      expect(result).toContain('1m0s');
+      expect(result).toContain('1m00s');
       expect(result).toContain('│');
 
       vi.useRealTimers();

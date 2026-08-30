@@ -33,6 +33,18 @@ export function isExecError(error: unknown): error is ExecError {
 }
 
 /**
+ * True when a rejection came from an AbortSignal rather than from the work
+ * itself. Node reports it as `name === 'AbortError'`; the promisified
+ * `child_process.exec` additionally surfaces the `ABORT_ERR` code, so both are
+ * accepted. round4 §3-R7: a cancellation must never be reported as a failure.
+ */
+export function isAbortError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const candidate = error as { name?: unknown; code?: unknown };
+  return candidate.name === 'AbortError' || candidate.code === 'ABORT_ERR';
+}
+
+/**
  * Safely extract error message from unknown error type.
  */
 export function getErrorMessage(error: unknown): string {

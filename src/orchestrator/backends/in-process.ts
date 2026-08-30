@@ -24,6 +24,13 @@ import {
 } from '../permission-cascader.js';
 import { ResultAggregator } from '../result-aggregator.js';
 import { createScopedState, runWithScopedState, getState } from '../../bootstrap/state';
+import {
+  BaseSubAgentBackend,
+  createAgentIdCounter,
+  createSubAgentRuntime,
+  capMessageQueue,
+  resolveTimeoutMs,
+} from './backend-shared.js';
 
 // Async context store for sub-agent isolation
 const agentContextStore = new AsyncLocalStorage<SubAgentRuntime>();
@@ -49,17 +56,14 @@ export function getCurrentAgentContext(): SubAgentRuntime | undefined {
  * InProcessBackend - Executes sub-agents in the same process
  * with AsyncLocalStorage-based context isolation
  */
-export class InProcessBackend implements SubAgentBackend {
+export class InProcessBackend extends BaseSubAgentBackend implements SubAgentBackend {
   readonly type = 'in_process' as const;
 
-  private activeAgents: Map<string, SubAgentRuntime> = new Map();
   private eventBus: EventBus;
   private allTools: Map<string, ToolDefinition>;
   private parentPermissionMode: PermissionMode;
   private parentCwd: string;
-  private agentCounter = 0;
-  /** Tracks which agents have already sent a terminal event, preventing duplicates (FUN-07) */
-  private terminalEventSent: Set<string> = new Set();
+  private nextAgentId = createAgentIdCounter();
 
   constructor(
     eventBus: EventBus,
@@ -67,19 +71,11 @@ export class InProcessBackend implements SubAgentBackend {
     parentPermissionMode: PermissionMode,
     parentCwd: string
   ) {
+    super();
     this.eventBus = eventBus;
     this.allTools = new Map(allTools.map((t) => [t.name, t]));
     this.parentPermissionMode = parentPermissionMode;
     this.parentCwd = parentCwd;
-  }
-
-  /** Ensure terminal event is only emitted once per agent (FUN-07) */
-  private tryEmitTerminalEvent(agentId: string): boolean {
-    if (this.terminalEventSent.has(agentId)) {
-      return false;
-    }
-    this.terminalEventSent.add(agentId);
-    return true;
   }
 
   /**
@@ -89,7 +85,7 @@ export class InProcessBackend implements SubAgentBackend {
     config: SubAgentSpawnConfig,
     parentContext: ToolUseContext
   ): Promise<SpawnResult> {
-    const agentId = `${config.name}@${this.agentCounter++}`;
+    const agentId = this.nextAgentId(config.name);
     const startedAt = Date.now();
 
     try {
@@ -121,26 +117,8 @@ export class InProcessBackend implements SubAgentBackend {
         allowedToolNamesSet.has(tool.name as ToolName)
       );
 
-      // Create abort controller
-      const abortController = new AbortController();
-
-      // Create runtime
-      const runtime: SubAgentRuntime = {
-        identity: {
-          agentId,
-          name: config.name,
-          team: 'default',
-          parentId: null,
-        },
-        status: 'spawning',
-        config,
-        queryEngine: null, // Will be set below
-        abortController,
-        startedAt,
-        completedAt: undefined,
-        toolUseCount: 0,
-        totalTokensUsed: 0,
-      };
+      // Create runtime (shared builder supplies abortController + counters)
+      const runtime = createSubAgentRuntime(agentId, config, startedAt);
 
       // Store runtime
       this.activeAgents.set(agentId, runtime);
@@ -195,18 +173,16 @@ export class InProcessBackend implements SubAgentBackend {
           runtime.error = error;
           runtime.completedAt = Date.now();
 
-          if (this.tryEmitTerminalEvent(agentId)) {
-            this.eventBus.emit(agentId, {
+          this.terminalGuard.emitOnce(agentId, this.eventBus, {
               type: 'agent:subagent_failed',
               agentId,
               error: error.message || String(error),
               timestamp: Date.now(),
             });
-          }
         });
 
         // Wire up abort controller to query engine
-        abortController.signal.addEventListener('abort', () => {
+        runtime.abortController.signal.addEventListener('abort', () => {
           qe.abort('Sub-agent timeout or cancellation requested');
         }, { once: true });
 
@@ -243,7 +219,7 @@ export class InProcessBackend implements SubAgentBackend {
     await agentContextStore.run(runtime, async () => {
       try {
         // Set up timeout
-        const timeoutMs = (Number.isFinite(config.timeoutSeconds ?? NaN) ? config.timeoutSeconds! : 300) * 1000;
+        const timeoutMs = resolveTimeoutMs(config.timeoutSeconds);
         const timeoutId = setTimeout(() => {
           abortController.abort();
         }, timeoutMs);
@@ -289,14 +265,12 @@ export class InProcessBackend implements SubAgentBackend {
 
         if (isTimedOut) {
           runtime.status = 'timed_out';
-          if (this.tryEmitTerminalEvent(agentId)) {
-            this.eventBus.emit(agentId, {
+          this.terminalGuard.emitOnce(agentId, this.eventBus, {
               type: 'agent:subagent_timed_out',
               agentId,
               elapsed: Math.round(duration / 1000),
               timestamp: Date.now(),
             });
-          }
         } else {
           runtime.status = 'completed';
           runtime.completedAt = Date.now();
@@ -311,28 +285,24 @@ export class InProcessBackend implements SubAgentBackend {
             duration,
           };
 
-          if (this.tryEmitTerminalEvent(agentId)) {
-            this.eventBus.emit(agentId, {
+          this.terminalGuard.emitOnce(agentId, this.eventBus, {
               type: 'agent:subagent_completed',
               agentId,
               result,
               timestamp: Date.now(),
             });
-          }
         }
       } catch (error) {
         runtime.status = 'failed';
         runtime.error = error instanceof Error ? error : new Error(String(error));
         runtime.completedAt = Date.now();
 
-        if (this.tryEmitTerminalEvent(agentId)) {
-          this.eventBus.emit(agentId, {
+        this.terminalGuard.emitOnce(agentId, this.eventBus, {
             type: 'agent:subagent_failed',
             agentId,
             error: runtime.error.message,
             timestamp: Date.now(),
           });
-        }
       } finally {
         // Clean up completed/failed agents from active map immediately
         this.activeAgents.delete(agentId);
@@ -359,9 +329,7 @@ export class InProcessBackend implements SubAgentBackend {
       this.messageQueues.set(agentId, []);
     }
     const queue = this.messageQueues.get(agentId)!;
-    if (queue.length >= 256) {
-      queue.splice(0, queue.length - 256 + 1); // Cap queue size
-    }
+    capMessageQueue(queue); // Cap queue size
     queue.push(message);
 
     // Emit as inter-agent event on the target agent's EventBus
@@ -409,13 +377,11 @@ export class InProcessBackend implements SubAgentBackend {
       runtime.status = 'cancelled';
       runtime.completedAt = Date.now();
 
-      if (this.tryEmitTerminalEvent(agentId)) {
-        this.eventBus.emit(agentId, {
+      this.terminalGuard.emitOnce(agentId, this.eventBus, {
           type: 'agent:subagent_cancelled',
           agentId,
           timestamp: Date.now(),
         });
-      }
 
       this.activeAgents.delete(agentId);
       return true;
@@ -426,26 +392,6 @@ export class InProcessBackend implements SubAgentBackend {
     return true;
   }
 
-  /**
-   * Get status of a sub-agent
-   */
-  getStatus(agentId: string): SubAgentStatus | null {
-    const runtime = this.activeAgents.get(agentId);
-    return runtime?.status || null;
-  }
-
-  /**
-   * List all active agent IDs
-   */
-  listActive(): string[] {
-    return Array.from(this.activeAgents.keys());
-  }
-
-  /**
-   * Shutdown all sub-agents
-   */
-  async shutdownAll(): Promise<void> {
-    const agentIds = this.listActive();
-    await Promise.all(agentIds.map((id) => this.shutdown(id, true)));
-  }
+  // getStatus / listActive / shutdownAll are inherited from BaseSubAgentBackend
+  // (T26: one shared implementation for both backends).
 }

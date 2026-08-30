@@ -509,25 +509,17 @@ export class AnthropicClient extends BaseApiClient {
   }
 
   /**
-   * Handle API errors with Anthropic-specific handling
+   * M8: Anthropic-specific classification sits ahead of the shared rules —
+   * the shared table now covers 401/429 (`rate_limit` included), 403 and 404.
    */
-  protected handleApiError(error: unknown, context: string, response?: Response): never {
-    if (error instanceof Error) {
-      const message = error.message;
-
-      if (message.includes('401') || message.includes('invalid_api_key')) {
-        throw new ApiError(`${context}: Invalid API key`, 401);
-      }
-
-      if (message.includes('429') || message.includes('rate_limit')) {
-        throw new ApiError(`${context}: Rate limit exceeded`, 429);
-      }
-
-      if (message.includes('overloaded_error')) {
-        throw new ApiError(`${context}: Anthropic API is currently overloaded, please try again`, 529);
-      }
-    }
-
-    super.handleApiError(error, context, response);
+  protected errorRules(): Array<{ match: RegExp | string[]; status?: number; message: string }> {
+    return [
+      {
+        match: /overloaded_error/,
+        status: 529,
+        message: 'Anthropic API is currently overloaded, please try again',
+      },
+      ...super.errorRules(),
+    ];
   }
 }

@@ -71,6 +71,11 @@ export interface QueryEngineDeps {
   memory: MemoryHandler;
   errorHandler: ErrorHandler;
   toolExecutor: ToolExecutor;
+  /**
+   * T23: live lookup for tools registered after the executor was constructed
+   * (background MCP connections). Wired by Bootstrap to the shared registry.
+   */
+  dynamicToolSource?: import('../executors/toolExecutor').DynamicToolSource;
   userProfile: UserProfileService;
   budgetEnforcer: BudgetEnforcer;
   cacheMetrics: PromptCacheMetrics;
@@ -227,7 +232,7 @@ export class QueryEngine {
       alwaysAllowRules: rules.allow || [],
     }, undefined, {
       failIfNoSandbox: config.sandboxFailIfNoSandbox,
-    });
+    }, undefined, d.dynamicToolSource);
 
     // T1 (H1): inject the non-interactive 'ask' fail-safe policy (default 'deny').
     this.toolExecutor.setNoninteractiveAskPolicy(config.noninteractiveAskPolicy ?? 'deny');
@@ -999,6 +1004,16 @@ export class QueryEngine {
   /** Clear conversation history and reset state */
   clear(): void {
     this.conversation.clear();
+    this.resetPerQueryState();
+  }
+
+  /**
+   * M7 (round4 §6-M7): the per-query reset shared by `clear()` and
+   * `restoreSession()`. Previously 13 identical reset lines existed in both
+   * methods; adding a new stateful member required remembering BOTH sites or
+   * a `/clear` would leave stale session state behind.
+   */
+  private resetPerQueryState(): void {
     this.compaction.reset();
     this.errorHandler.reset();
     this._aborted = false;
@@ -1042,31 +1057,12 @@ export class QueryEngine {
       throw new Error('Session snapshot is missing required system or user message');
     }
 
-    // Reset all internal state to a clean slate
-    this.compaction.reset();
-    this.errorHandler.reset();
-    this._aborted = false;
-    this.steerQueue = [];
-    this.followUpQueue = [];
-    this.modifiedFiles.clear();
-    this.progress.lastModifiedTurn = 0;
-    this.progress.lastProgressTurn = 0;
-    this.decision.reset();
-    this.planningHandler.reset();
-    this.fileContentCache.invalidateAll();
-    this.readHistory.clear();
-    this.editHistory.clear();
-    this.abortController = new AbortController();
-    this.budgetEnforcer.reset();
+    // Reset all internal state to a clean slate (shared with clear())
+    this.resetPerQueryState();
 
     // Replace messages via the controlled API — this also resets the
     // SessionTree active branch and recalculates the token estimate.
     this.conversation.setMessages([...msgs]);
-
-    // Reset state machine to idle so the next query starts fresh
-    if (this.stateMachine.currentState !== 'idle') {
-      this.stateMachine.forceTransitionTo('idle');
-    }
 
     logger.query.info(`[QueryEngine] Session restored: ${snapshot.sessionId}, ${msgs.length} messages, turnCount=${snapshot.state.turnCount}`);
     return snapshot.state.turnCount;

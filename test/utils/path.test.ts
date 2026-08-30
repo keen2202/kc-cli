@@ -1,25 +1,12 @@
-// Tests for path security utilities
+// Tests for protected-path matching (permissions/protectedPaths)
+//
+// T31 (round4 §6-M6): the dead `isPathAllowed` / `resolvePathSafely` /
+// `validateWritePath` helpers in utils/path.ts were removed, and the tests
+// that referenced them were removed with them. Real path security is covered
+// by test/utils/path-scope.test.ts against `assertPathWithinWorkspace`.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { isPathAllowed, resolvePathSafely, validateWritePath } from '../../src/utils/path';
+import { describe, it, expect } from 'vitest';
 import { isProtectedPath, containsProtectedPath } from '../../src/permissions/protectedPaths';
-
-// Mock fs for symlink tests
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
-  const path = await vi.importActual<typeof import('path')>('path');
-  return {
-    ...actual,
-    promises: {
-      ...actual.promises,
-      realpath: vi.fn(async (p: string) => {
-        // Simulate symlink resolution then normalize
-        const resolved = p.includes('/symlink/') ? p.replace('/symlink/', '/real/') : p;
-        return path.resolve(resolved);
-      }),
-    },
-  };
-});
 
 describe('Path Security', () => {
   describe('isProtectedPath', () => {
@@ -85,83 +72,6 @@ describe('Path Security', () => {
     it('should not match normal text', () => {
       expect(containsProtectedPath('npm install')).toBe(false);
       expect(containsProtectedPath('git commit -m "test"')).toBe(false);
-    });
-  });
-
-  describe('isPathAllowed', () => {
-    it('should deny protected paths', async () => {
-      const result = await isPathAllowed('/etc/passwd', {
-        cwd: '/project',
-        allowedDirectories: ['/project'],
-        operation: 'read',
-      });
-      expect(result).toBe('deny');
-    });
-
-    it('should allow paths in allowed directories', async () => {
-      const result = await isPathAllowed('/project/src/index.ts', {
-        cwd: '/project',
-        allowedDirectories: ['/project'],
-        operation: 'read',
-      });
-      expect(result).toBe('allow');
-    });
-
-    it('should ask for paths outside allowed directories', async () => {
-      const result = await isPathAllowed('/tmp/file.txt', {
-        cwd: '/project',
-        allowedDirectories: ['/project'],
-        operation: 'read',
-      });
-      expect(result).toBe('ask');
-    });
-  });
-
-  describe('resolvePathSafely', () => {
-    it('should resolve symlinks and check safety', async () => {
-      const result = await resolvePathSafely('/project/symlink/file.ts', {
-        cwd: '/project',
-        allowedDirectories: ['/project'],
-      });
-      // After symlink resolution, path becomes /project/real/file.ts which is still in /project
-      expect(result.resolvedPath).toContain('/real/');
-    });
-
-    it('should detect symlink escape', async () => {
-      const result = await resolvePathSafely('/project/symlink/../../etc/passwd', {
-        cwd: '/project',
-        allowedDirectories: ['/project'],
-      });
-      // The mock resolves /symlink/ to /real/, but ../.. still escapes to /etc/passwd
-      expect(result.isSafe).toBe(false);
-      expect(result.reason).toBeDefined();
-    });
-  });
-
-  describe('validateWritePath', () => {
-    it('should deny writing to system directories', async () => {
-      const result = await validateWritePath('/etc/test.conf', {
-        cwd: '/project',
-        allowedDirectories: ['/project'],
-      });
-      expect(result.valid).toBe(false);
-      expect(result.reason).toContain('system');
-    });
-
-    it('should allow writing to allowed directories', async () => {
-      const result = await validateWritePath('/project/src/new-file.ts', {
-        cwd: '/project',
-        allowedDirectories: ['/project'],
-      });
-      expect(result.valid).toBe(true);
-    });
-
-    it('should deny writing outside allowed directories', async () => {
-      const result = await validateWritePath('/tmp/evil.sh', {
-        cwd: '/project',
-        allowedDirectories: ['/project'],
-      });
-      expect(result.valid).toBe(false);
     });
   });
 });

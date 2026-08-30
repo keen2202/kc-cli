@@ -1,7 +1,7 @@
 // Task Get Tool - Get task status and output
 
 import { z } from 'zod';
-import { buildTool, toolResult, toolError } from '../../Tool';
+import { readonlyAllow, buildTool, toolResult, toolError, toolFailure } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import { taskStore } from '../TaskStore';
@@ -77,15 +77,11 @@ export const tool = buildTool<TaskGetInput, string>({
         }
       );
     } catch (error) {
-      return toolError(`TaskGet failed: ${error instanceof Error ? error.message : String(error)}`);
+      return toolFailure('TaskGet', error);
     }
   },
 
-  checkPermissions: (): PermissionResult => ({
-    behavior: 'allow',
-    updatedInput: undefined,
-    decisionReason: { type: 'readonly', reason: 'Task status query is read-only' },
-  }),
+  checkPermissions: () => readonlyAllow('Task status query is read-only'),
 
   isReadOnly: () => true,
   isConcurrencySafe: () => true,

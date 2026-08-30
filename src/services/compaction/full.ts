@@ -10,6 +10,7 @@ import { estimateMessageTokensArray, calculateTokensSaved } from '../../utils/to
 import { classifyApiError, getRetryDelay } from '../error-classifier';
 import { logger } from '../logger';
 import { withTimeout, TimeoutError } from '../../utils/async-helpers';
+import { buildSummaryPrompt, buildFallbackSummary } from './prompts';
 
 /** Default compaction timeout in milliseconds */
 const DEFAULT_COMPACTION_TIMEOUT_MS = 60_000;
@@ -25,57 +26,6 @@ const AUTOCOMPACT_BUFFER_TOKENS = 13_000;
 
 /** Maximum output tokens for summary */
 const MAX_OUTPUT_TOKENS_FOR_SUMMARY = 20_000;
-
-/**
- * Build the prompt for LLM-based conversation summarization
- */
-function buildCompactPrompt(messagesToSummarize: ChatMessage[], systemPrompt: string): string {
-  const conversationText = messagesToSummarize
-    .map(msg => {
-      const role = msg.role.toUpperCase();
-      const content = msg.content || '[tool calls/results]';
-      return `${role}: ${content}`;
-    })
-    .join('\n\n');
-
-  return `Please summarize the following conversation concisely, preserving key information, decisions, and context that would be needed for future turns. Focus on what was accomplished and what is still pending.
-
-<system_context>
-${systemPrompt || 'You are an AI assistant helping with software development tasks.'}
-</system_context>
-
-<conversation_to_summarize>
-${conversationText}
-</conversation_to_summarize>
-
-Provide a concise summary that captures:
-1. What tasks were requested and completed
-2. What files were created or modified
-3. What decisions were made
-4. What is still pending or incomplete
-5. Any important technical details or context
-
-Keep the summary under 500 words.`;
-}
-
-/**
- * Build a fallback summary when LLM API is unavailable
- */
-function buildFallbackSummary(messages: ChatMessage[]): string {
-  const parts: string[] = ['[Auto-generated summary - LLM unavailable]'];
-
-  for (const msg of messages) {
-    if (msg.role === 'user' && msg.content) {
-      const preview = msg.content.slice(0, 100);
-      parts.push(`User: ${preview}${msg.content.length > 100 ? '...' : ''}`);
-    } else if (msg.role === 'assistant' && msg.content) {
-      const preview = msg.content.slice(0, 100);
-      parts.push(`Assistant: ${preview}${msg.content.length > 100 ? '...' : ''}`);
-    }
-  }
-
-  return parts.join('\n');
-}
 
 /**
  * Full compaction: LLM-based conversation summarization.
@@ -98,7 +48,7 @@ async function fullCompact(
     const recentMessages = messages.slice(-PRESERVE_RECENT);
 
     // Build summary prompt
-    const summaryPrompt = buildCompactPrompt(oldMessages, systemPrompt);
+    const summaryPrompt = buildSummaryPrompt(oldMessages, systemPrompt);
 
     // Call LLM to generate summary (no tools)
     let summaryResponse: string;

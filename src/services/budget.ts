@@ -1,6 +1,7 @@
 import { KCError } from '../utils/errors';
 import type { ToolResult } from '../tools/protocol';
 import { estimateToolResultTokens } from '../utils/tokenEstimation';
+import { logger } from './logger';
 
 /**
  * Budget configuration for token and cost enforcement.
@@ -72,6 +73,20 @@ export class BudgetEnforcer {
   }
 
   /**
+   * O4: every denial leaves a warn-level trace. Previously budget rejections
+   * were silent — audit and alerting had nothing to key on. `kind` names the
+   * limit that fired; tokens/costUsd/limit carry the numbers behind the reason.
+   */
+  private logDenial(
+    kind: string,
+    tokens: number | null,
+    costUsd: number | null,
+    limit: number | null,
+  ): void {
+    logger.services.warn('budget exceeded', { kind, tokens, costUsd, limit });
+  }
+
+  /**
    * Check whether a turn (LLM call) is within budget.
    * @param estimatedTokens - Estimated tokens for the upcoming turn
    * @returns BudgetCheckResult with allowed flag and remaining snapshot
@@ -81,6 +96,7 @@ export class BudgetEnforcer {
 
     // Check session limit
     if (this.sessionTokens + estimatedTokens > this.config.sessionTokenLimit) {
+      this.logDenial('session_token_limit:turn', this.sessionTokens + estimatedTokens, null, this.config.sessionTokenLimit);
       return {
         allowed: false,
         reason: `Session token budget exceeded: ${this.sessionTokens} used + ${estimatedTokens} estimated > ${this.config.sessionTokenLimit} limit`,
@@ -90,6 +106,7 @@ export class BudgetEnforcer {
 
     // Check turn limit
     if (this.turnTokens + estimatedTokens > this.config.turnTokenLimit) {
+      this.logDenial('turn_token_limit', this.turnTokens + estimatedTokens, null, this.config.turnTokenLimit);
       return {
         allowed: false,
         reason: `Turn token budget exceeded: ${this.turnTokens} used + ${estimatedTokens} estimated > ${this.config.turnTokenLimit} limit`,
@@ -99,6 +116,7 @@ export class BudgetEnforcer {
 
     // Check cost limit (include estimated cost to avoid overshooting, FUN-03)
     if (this.config.costLimitUsd !== null && this.sessionCostUsd + (estimatedCostUsd ?? 0) >= this.config.costLimitUsd) {
+      this.logDenial('cost_limit:turn', null, this.sessionCostUsd + (estimatedCostUsd ?? 0), this.config.costLimitUsd);
       return {
         allowed: false,
         reason: `Session cost budget exceeded: $${this.sessionCostUsd.toFixed(4)} spent + $${(estimatedCostUsd ?? 0).toFixed(4)} estimated >= $${this.config.costLimitUsd} limit`,
@@ -120,6 +138,7 @@ export class BudgetEnforcer {
     const resultTokens = estimateToolResultTokens(outputText);
 
     if (resultTokens > this.config.toolResultTokenLimit) {
+      this.logDenial('tool_result_token_limit', resultTokens, null, this.config.toolResultTokenLimit);
       return {
         allowed: false,
         reason: `Tool result token budget exceeded: ${resultTokens} tokens > ${this.config.toolResultTokenLimit} limit`,
@@ -129,6 +148,7 @@ export class BudgetEnforcer {
 
     // Also check session-level budget
     if (this.sessionTokens + resultTokens > this.config.sessionTokenLimit) {
+      this.logDenial('session_token_limit:tool_result', this.sessionTokens + resultTokens, null, this.config.sessionTokenLimit);
       return {
         allowed: false,
         reason: `Session token budget exceeded by tool result: ${this.sessionTokens} used + ${resultTokens} result > ${this.config.sessionTokenLimit} limit`,
@@ -138,6 +158,7 @@ export class BudgetEnforcer {
 
     // Check cost limit with estimated (FUN-03)
     if (this.config.costLimitUsd !== null && this.sessionCostUsd + (estimatedCostUsd ?? 0) >= this.config.costLimitUsd) {
+      this.logDenial('cost_limit:tool_result', null, this.sessionCostUsd + (estimatedCostUsd ?? 0), this.config.costLimitUsd);
       return {
         allowed: false,
         reason: `Session cost budget exceeded: $${this.sessionCostUsd.toFixed(4)} spent + $${(estimatedCostUsd ?? 0).toFixed(4)} estimated >= $${this.config.costLimitUsd} limit`,
@@ -158,6 +179,7 @@ export class BudgetEnforcer {
 
     // Check sub-agent limit
     if (estimatedTokens > this.config.subAgentTokenLimit) {
+      this.logDenial('sub_agent_token_limit', estimatedTokens, null, this.config.subAgentTokenLimit);
       return {
         allowed: false,
         reason: `Sub-agent token budget exceeded: ${estimatedTokens} estimated > ${this.config.subAgentTokenLimit} limit`,
@@ -167,6 +189,7 @@ export class BudgetEnforcer {
 
     // Check session-level budget
     if (this.sessionTokens + estimatedTokens > this.config.sessionTokenLimit) {
+      this.logDenial('session_token_limit:sub_agent', this.sessionTokens + estimatedTokens, null, this.config.sessionTokenLimit);
       return {
         allowed: false,
         reason: `Session token budget exceeded by sub-agent: ${this.sessionTokens} used + ${estimatedTokens} estimated > ${this.config.sessionTokenLimit} limit`,
@@ -176,6 +199,7 @@ export class BudgetEnforcer {
 
     // Check cost limit with estimated (FUN-03)
     if (this.config.costLimitUsd !== null && this.sessionCostUsd + (estimatedCostUsd ?? 0) >= this.config.costLimitUsd) {
+      this.logDenial('cost_limit:sub_agent', null, this.sessionCostUsd + (estimatedCostUsd ?? 0), this.config.costLimitUsd);
       return {
         allowed: false,
         reason: `Session cost budget exceeded: $${this.sessionCostUsd.toFixed(4)} spent + $${(estimatedCostUsd ?? 0).toFixed(4)} estimated >= $${this.config.costLimitUsd} limit`,

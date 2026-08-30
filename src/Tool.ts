@@ -7,7 +7,9 @@ import type {
   ToolResult,
   ToolCallProgress,
 } from './tools/protocol';
+import type { PermissionResult } from './permissions/protocol';
 import { withToolErrorHandling } from './utils/errorHandling';
+import { getErrorMessage } from './utils/errors';
 
 /**
  * Build a tool with sensible defaults.
@@ -60,6 +62,32 @@ export function toolResult<T>(
 /**
  * Create an error tool result
  */
+/**
+ * M8: shared readonly allow decision. Every read-only tool previously carried
+ * its own copy of this boilerplate, and one of the six used
+ * `updatedInput: undefined` where the rest used `{}` — now one shape.
+ */
+export function readonlyAllow(reason: string): PermissionResult {
+  return {
+    behavior: 'allow',
+    updatedInput: {},
+    decisionReason: { type: 'readonly', reason },
+  };
+}
+
+/**
+ * M5: uniform tool failure result. Routes the error text through
+ * `getErrorMessage` so error-like plain objects (deserialized / cross-process
+ * errors with a `message` field) render their message instead of `[object Object]`.
+ */
+export function toolFailure(
+  toolName: string,
+  error: unknown,
+  metadata?: Record<string, unknown>,
+): ToolResult<never> {
+  return toolError(`${toolName} failed: ${getErrorMessage(error)}`, metadata);
+}
+
 export function toolError(message: string, metadata?: Record<string, unknown>): ToolResult<never> {
   return {
     output: null as never,

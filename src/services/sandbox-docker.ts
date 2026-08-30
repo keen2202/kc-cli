@@ -12,6 +12,7 @@ import { execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { randomBytes } from 'crypto';
+import { SANDBOX_DOCKER_CHECK_TIMEOUT_MS } from '../constants';
 
 const DEFAULT_IMAGE = 'node:22-alpine';
 
@@ -25,7 +26,7 @@ export class DockerSandbox implements SandboxBackend {
    */
   async init(): Promise<void> {
     try {
-      execSync('docker info', { stdio: 'ignore', timeout: 5000 });
+      execSync('docker info', { stdio: 'ignore', timeout: SANDBOX_DOCKER_CHECK_TIMEOUT_MS });
       this._available = true;
     } catch {
       this._available = false;
@@ -37,7 +38,7 @@ export class DockerSandbox implements SandboxBackend {
     // First call: probe synchronously for backward compatibility
     // (callers that don't await init() still get a valid answer)
     try {
-      execSync('docker info', { stdio: 'ignore', timeout: 5000 });
+      execSync('docker info', { stdio: 'ignore', timeout: SANDBOX_DOCKER_CHECK_TIMEOUT_MS });
       this._available = true;
     } catch {
       this._available = false;

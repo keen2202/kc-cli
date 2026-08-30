@@ -2,6 +2,7 @@
 
 import { CircuitBreakerRegistry } from './circuitBreaker';
 import { withTimeout } from '../utils/async-helpers';
+import { logger } from './logger';
 
 export type ServiceStatus = 'healthy' | 'degraded' | 'unhealthy';
 
@@ -295,9 +296,19 @@ export class HealthCheckService {
     }
 
     const interval = intervalMs || this.config.checkIntervalMs;
-    this.checkInterval = setInterval(async () => {
-      await this.checkAll();
+    // M9h: an async callback in setInterval means a rejection inside checkAll()
+    // becomes an unhandled rejection — which, now that the process-wide crash
+    // guard is installed (round4 §2-S3), would terminate the CLI. Handle it
+    // explicitly and keep the interval alive.
+    this.checkInterval = setInterval(() => {
+      void this.checkAll().catch((err) => {
+        logger.services.error('[healthCheck] periodic check failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     }, interval);
+    // A background health check must never be the reason the CLI cannot exit.
+    this.checkInterval.unref?.();
   }
 
   /**

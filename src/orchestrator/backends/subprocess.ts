@@ -23,6 +23,13 @@ import {
   buildChildToolAllowList,
   createChildPermissionContext,
 } from '../permission-cascader.js';
+import {
+  BaseSubAgentBackend,
+  createAgentIdCounter,
+  createSubAgentRuntime,
+  capMessageQueue,
+  resolveTimeoutMs,
+} from './backend-shared.js';
 
 // IPC message types for parent↔child communication
 interface ParentMessage {
@@ -50,16 +57,17 @@ interface ChildMessage {
  * filesystem and isolated memory. IPC serialization provides the
  * communication boundary.
  */
-export class SubprocessBackend implements SubAgentBackend {
+export class SubprocessBackend extends BaseSubAgentBackend implements SubAgentBackend {
   readonly type = 'subprocess' as const;
 
-  private activeAgents: Map<string, SubAgentRuntime> = new Map();
   private processes: Map<string, ChildProcess> = new Map();
   private messageQueues: Map<string, Array<SubAgentMessage>> = new Map();
+  /** Pending 5s removal timers per agent, so cleanup() cannot stack duplicates. */
+  private cleanupTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private eventBus: EventBus;
   private parentPermissionMode: PermissionMode;
   private parentCwd: string;
-  private agentCounter = 0;
+  private nextAgentId = createAgentIdCounter();
 
   constructor(
     eventBus: EventBus,
@@ -67,6 +75,7 @@ export class SubprocessBackend implements SubAgentBackend {
     parentPermissionMode: PermissionMode,
     parentCwd: string
   ) {
+    super();
     this.eventBus = eventBus;
     this.parentPermissionMode = parentPermissionMode;
     this.parentCwd = parentCwd;
@@ -76,7 +85,7 @@ export class SubprocessBackend implements SubAgentBackend {
     config: SubAgentSpawnConfig,
     parentContext: ToolUseContext
   ): Promise<SpawnResult> {
-    const agentId = `${config.name}@${this.agentCounter++}`;
+    const agentId = this.nextAgentId(config.name);
     const startedAt = Date.now();
 
     // PERF-03: Timer handle tracking for cleanup
@@ -105,23 +114,8 @@ export class SubprocessBackend implements SubAgentBackend {
         cwd: config.cwd || this.parentCwd,
       });
 
-      // Create runtime
-      const runtime: SubAgentRuntime = {
-        identity: {
-          agentId,
-          name: config.name,
-          team: 'default',
-          parentId: null,
-        },
-        status: 'spawning',
-        config,
-        queryEngine: null,
-        abortController: new AbortController(),
-        startedAt,
-        completedAt: undefined,
-        toolUseCount: 0,
-        totalTokensUsed: 0,
-      };
+      // Create runtime (shared builder supplies abortController + counters)
+      const runtime = createSubAgentRuntime(agentId, config, startedAt);
 
       this.activeAgents.set(agentId, runtime);
       this.processes.set(agentId, child);
@@ -166,7 +160,9 @@ export class SubprocessBackend implements SubAgentBackend {
               if (runtimeTimeoutHandle !== undefined) clearTimeout(runtimeTimeoutHandle);
               runtime.status = 'completed';
               runtime.completedAt = Date.now();
-              this.eventBus.emit(agentId, {
+              // T26 (M1): terminal-event guard shared with the in-process
+              // backend — duplicate result/exit events must not double-emit.
+              this.terminalGuard.emitOnce(agentId, this.eventBus, {
                 type: 'agent:subagent_completed',
                 agentId,
                 result: msg.result,
@@ -185,7 +181,8 @@ export class SubprocessBackend implements SubAgentBackend {
             runtime.status = 'failed';
             runtime.error = new Error(msg.error?.message || 'Unknown subprocess error');
             runtime.completedAt = Date.now();
-            this.eventBus.emit(agentId, {
+            // T26 (M1): guarded, as above.
+            this.terminalGuard.emitOnce(agentId, this.eventBus, {
               type: 'agent:subagent_failed',
               agentId,
               error: runtime.error.message,
@@ -213,7 +210,8 @@ export class SubprocessBackend implements SubAgentBackend {
             runtime.status = 'completed';
           }
           runtime.completedAt = Date.now();
-          this.eventBus.emit(agentId, {
+          // T26 (M1): guarded, as above.
+          this.terminalGuard.emitOnce(agentId, this.eventBus, {
             type: 'agent:subagent_completed',
             agentId,
             result: {
@@ -257,6 +255,8 @@ export class SubprocessBackend implements SubAgentBackend {
           } as ParentMessage);
         }
       }, 5000);
+      // M9j: a stuck child must never delay process exit.
+      readyTimeout.unref?.();
 
       // Wire abort controller
       runtime.abortController.signal.addEventListener('abort', () => {
@@ -265,15 +265,17 @@ export class SubprocessBackend implements SubAgentBackend {
         killTimeoutHandle = setTimeout(() => {
           if (!child.killed) child.kill('SIGKILL');
         }, 5000);
+        killTimeoutHandle.unref?.();
       }, { once: true });
 
       // Set up timeout
-      const timeoutMs = (Number.isFinite(config.timeoutSeconds ?? NaN) ? config.timeoutSeconds! : 300) * 1000;
+      const timeoutMs = resolveTimeoutMs(config.timeoutSeconds);
       runtimeTimeoutHandle = setTimeout(() => {
         if (runtime.status === 'running') {
           runtime.abortController.abort();
         }
       }, timeoutMs);
+      runtimeTimeoutHandle.unref?.();
 
       this.eventBus.emit(agentId, {
         type: 'agent:subagent_spawned',
@@ -308,9 +310,7 @@ export class SubprocessBackend implements SubAgentBackend {
       this.messageQueues.set(agentId, []);
     }
     const queue = this.messageQueues.get(agentId)!;
-    if (queue.length >= 256) {
-      queue.splice(0, queue.length - 256 + 1);
-    }
+    capMessageQueue(queue);
     queue.push(message);
 
     // Forward to child via IPC
@@ -334,38 +334,41 @@ export class SubprocessBackend implements SubAgentBackend {
     if (force) {
       runtime.status = 'cancelled';
       runtime.completedAt = Date.now();
+      // M9j: this timer only escalates an already-requested shutdown; it must
+      // never keep the event loop alive or hold up process exit.
       setTimeout(() => {
         if (!child.killed) child.kill('SIGKILL');
-      }, 2000);
+      }, 2000).unref?.();
       this.cleanup(agentId);
     }
 
     return true;
   }
 
-  getStatus(agentId: string): SubAgentStatus | null {
-    return this.activeAgents.get(agentId)?.status || null;
-  }
-
-  listActive(): string[] {
-    return Array.from(this.activeAgents.keys());
-  }
-
-  async shutdownAll(): Promise<void> {
-    const agentIds = this.listActive();
-    await Promise.all(agentIds.map((id) => this.shutdown(id, true)));
-  }
+  // getStatus / listActive / shutdownAll are inherited from BaseSubAgentBackend
+  // (T26: one shared implementation for both backends).
 
   private cleanup(agentId: string): void {
     const child = this.processes.get(agentId);
     if (child && !child.killed) {
       child.kill('SIGTERM');
     }
+    // M9j: idempotent, unref'd, and cleared on re-entry. Previously each call
+    // stacked another 5s timer for the same agent, and a pending timer kept the
+    // process alive after every agent had already exited.
+    const existing = this.cleanupTimers.get(agentId);
+    if (existing) clearTimeout(existing);
+
     // Delay removal to allow pending queries
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      this.cleanupTimers.delete(agentId);
+      // Guard against re-addition between delete and this callback.
+      if (!this.processes.has(agentId)) return;
       this.activeAgents.delete(agentId);
       this.processes.delete(agentId);
       this.messageQueues.delete(agentId);
     }, 5000);
+    timer.unref?.();
+    this.cleanupTimers.set(agentId, timer);
   }
 }

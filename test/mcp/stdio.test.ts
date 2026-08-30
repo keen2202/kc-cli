@@ -69,6 +69,31 @@ describe('StdioTransport', () => {
       });
     });
 
+    it('should not leak KC_* secrets into the spawned MCP server', async () => {
+      // round4 §2-S2: MCP servers are third-party processes. They must never
+      // inherit host secrets, even though the config may declare extra vars.
+      const original = process.env.KC_API_KEY;
+      process.env.KC_API_KEY = 'sk-test-secret';
+      try {
+        const connectPromise = transport.connect('server', [], { MY_VAR: 'value' });
+        await new Promise(r => setTimeout(r, 150));
+        await connectPromise;
+
+        const env = (spawn as unknown as { mock: { calls: unknown[][] } }).mock.calls.at(-1)?.[2] as
+          | { env: Record<string, string> }
+          | undefined;
+        const childEnv = env?.env ?? {};
+        expect(Object.keys(childEnv).filter(k => k.toUpperCase().startsWith('KC_'))).toEqual([]);
+        expect(JSON.stringify(childEnv)).not.toContain('sk-test-secret');
+        // Legitimate config-declared variables must survive the filter.
+        expect(childEnv).toHaveProperty('MY_VAR', 'value');
+        expect(childEnv).toHaveProperty('PATH');
+      } finally {
+        if (original === undefined) delete process.env.KC_API_KEY;
+        else process.env.KC_API_KEY = original;
+      }
+    });
+
     it('should reject if spawn errors', async () => {
       const connectPromise = transport.connect('bad-cmd', []);
       setTimeout(() => {
@@ -200,6 +225,41 @@ describe('StdioTransport', () => {
       await expect(req).rejects.toThrow('exited with code 1');
     });
 
+    // round4 §2-S4: a third-party MCP server dying mid-request used to surface
+    // as an unhandled stream 'error', taking the whole CLI process down.
+    it('should reject in-flight requests on a pipe error instead of throwing', async () => {
+      const p = transport.connect('server', []);
+      await new Promise(r => setTimeout(r, 150));
+      await p;
+
+      const req = transport.sendRequest('test');
+
+      // Server died: the next write/read on the pipe raises EPIPE.
+      mockProcess.stdout.emit('error', Object.assign(new Error('read EPIPE'), { code: 'EPIPE' }));
+
+      await expect(req).rejects.toThrow(/pipe error/);
+      expect(transport.isConnected()).toBe(false);
+    });
+
+    it('should reject a request when stdin.write reports an error', async () => {
+      const p = transport.connect('server', []);
+      await new Promise(r => setTimeout(r, 150));
+      await p;
+
+      mockProcess.stdin.write = vi.fn((_data: string, cb?: (e: Error | null) => void) => {
+        cb?.(Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+        return true;
+      });
+
+      await expect(transport.sendRequest('test')).rejects.toThrow(/pipe error/);
+    });
+
+    it('should reject the pending connect when the pipe fails before startup', async () => {
+      const connectPromise = transport.connect('server', []);
+      mockProcess.stdin.emit('error', Object.assign(new Error('spawn helper died'), { code: 'EPIPE' }));
+      await expect(connectPromise).rejects.toThrow(/pipe error/);
+    });
+
     it('should increment message IDs', async () => {
       const p = transport.connect('server', []);
       await new Promise(r => setTimeout(r, 150));
@@ -248,6 +308,24 @@ describe('StdioTransport', () => {
 
     it('should be safe to disconnect when not connected', async () => {
       await expect(transport.disconnect()).resolves.not.toThrow();
+    });
+
+    // round4 §2-S4: listeners must come off symmetrically or every reconnect
+    // stacks another handler on the same streams.
+    it('should remove the pipe error listeners from all three streams', async () => {
+      const p = transport.connect('server', []);
+      await new Promise(r => setTimeout(r, 150));
+      await p;
+
+      expect(mockProcess.stdin.listenerCount('error')).toBe(1);
+      expect(mockProcess.stdout.listenerCount('error')).toBe(1);
+      expect(mockProcess.stderr.listenerCount('error')).toBe(1);
+
+      await transport.disconnect();
+
+      expect(mockProcess.stdin.listenerCount('error')).toBe(0);
+      expect(mockProcess.stdout.listenerCount('error')).toBe(0);
+      expect(mockProcess.stderr.listenerCount('error')).toBe(0);
     });
   });
 

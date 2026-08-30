@@ -11,7 +11,9 @@ import type {
 import { StdioTransport } from './transports/stdio';
 import { HttpTransport } from './transports/http';
 import { VERSION } from '../bootstrap/cli-config';
-import { KCError } from '../utils/errors';
+import { KCError, getErrorMessage } from '../utils/errors';
+import { logger } from '../services/logger';
+import { redactTruncated } from '../utils/redact';
 
 interface ServerConnection {
   config: MCPServerConfig;
@@ -32,6 +34,18 @@ const DISCONNECTED_REGEX = /exited|not connected/;
 
 export class MCPClientManager {
   private connections = new Map<string, ServerConnection>();
+
+  /**
+   * O3: fired once when a server's reconnect budget is exhausted. The host app
+   * wires this to its UI (notification bar / status line) so "tool not found"
+   * later on has a visible root cause. The mcp layer itself stays UI-agnostic.
+   */
+  private onServerUnavailable?: (serverId: string, reason: string) => void;
+
+  /** Register the UI-facing handler for final reconnect failure. */
+  setServerUnavailableHandler(handler: (serverId: string, reason: string) => void): void {
+    this.onServerUnavailable = handler;
+  }
 
   async connect(serverId: string, config: MCPServerConfig): Promise<void> {
     if (this.connections.has(serverId)) {
@@ -246,7 +260,16 @@ export class MCPClientManager {
     if (!conn) return;
 
     if (conn.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      // O3: final failure was silent — the server's tools simply vanished.
       conn.status = 'error';
+      const reason = `reconnect attempts exhausted (${MAX_RECONNECT_ATTEMPTS})`;
+      logger.mcp.error('MCP server unavailable', {
+        serverId,
+        attempt: conn.reconnectAttempts,
+        maxAttempts: MAX_RECONNECT_ATTEMPTS,
+        reason,
+      });
+      this.onServerUnavailable?.(serverId, reason);
       return;
     }
 
@@ -259,7 +282,15 @@ export class MCPClientManager {
       // Create new transport
       conn.transport = conn.config.type === 'stdio' ? new StdioTransport() : new HttpTransport();
       await this.establishConnection(serverId, conn);
-    } catch {
+    } catch (err) {
+      // O3: every failed attempt is logged with its backoff context.
+      logger.mcp.error('MCP reconnect failed', {
+        serverId,
+        attempt: conn.reconnectAttempts,
+        maxAttempts: MAX_RECONNECT_ATTEMPTS,
+        nextDelayMs: BASE_RECONNECT_DELAY_MS * Math.pow(2, conn.reconnectAttempts),
+        reason: redactTruncated(getErrorMessage(err)),
+      });
       conn.status = 'error';
     }
   }

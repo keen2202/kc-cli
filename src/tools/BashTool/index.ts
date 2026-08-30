@@ -6,8 +6,8 @@ import type { ToolUseContext, ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import { hasPermissionsToUseTool } from '../../permissions/engine';
 import { isReadOnlyBashCommand } from '../../permissions/readonlyCommands';
-import { isExecError, getErrorMessage } from '../../utils/errors';
-import { buildSafeEnv } from '../RunTool/secrets';
+import { isExecError, getErrorMessage, isAbortError } from '../../utils/errors';
+import { buildSafeEnv } from '../../utils/env-sanitize';
 import {
   applySandboxPreWrap,
   checkDangerousCommand,
@@ -100,6 +100,15 @@ export const tool = buildTool<BashInput, string>({
         },
       });
     } catch (error) {
+      // R7: a user cancellation is not a command failure — reporting it as one
+      // makes the model "fix" a command that was never broken.
+      if (isAbortError(error)) {
+        return toolResult('', {
+          isError: true,
+          message: `Command cancelled: ${input.command}`,
+          metadata: { cancelled: true },
+        });
+      }
       const errorMessage = getErrorMessage(error);
       if (isExecError(error)) {
         return toolResult(error.stdout || '', {

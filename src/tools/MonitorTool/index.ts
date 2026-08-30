@@ -1,7 +1,7 @@
 // Monitor Tool - System monitoring (CPU, memory, disk, processes)
 
 import { z } from 'zod';
-import { buildTool, toolResult, toolError } from '../../Tool';
+import { readonlyAllow, buildTool, toolResult, toolError, toolFailure } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import * as os from 'os';
@@ -89,15 +89,11 @@ export const tool = buildTool<MonitorInput, string>({
         },
       });
     } catch (error) {
-      return toolError(`Monitor failed: ${error instanceof Error ? error.message : String(error)}`);
+      return toolFailure('Monitor', error);
     }
   },
 
-  checkPermissions: (): PermissionResult => ({
-    behavior: 'allow',
-    updatedInput: {},
-    decisionReason: { type: 'readonly', reason: 'System monitoring is read-only' },
-  }),
+  checkPermissions: () => readonlyAllow('System monitoring is read-only'),
 
   isReadOnly: () => true,
   isConcurrencySafe: () => true,

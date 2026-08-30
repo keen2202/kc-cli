@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { createRequire } from 'node:module';
 import type { JSONRPCRequest, JSONRPCResponse, JSONRPCNotification } from '../types';
 import { logger } from '../../services/logger';
+import { buildSafeEnv } from '../../utils/env-sanitize';
 
 // ESM-compatible require for optionally loading the MCP SDK transport (CommonJS)
 const require = createRequire(import.meta.url);
@@ -38,6 +39,7 @@ export class StdioTransport {
   private _onStdoutData: ((data: Buffer) => void) | null = null;
   private _onStderrData: ((data: Buffer) => void) | null = null;
   private _onProcessExit: ((code: number | null) => void) | null = null;
+  private _onPipeError: ((err: Error) => void) | null = null;
 
   async connect(command: string, args: string[], env?: Record<string, string>): Promise<void> {
     this.isDisconnecting = false;
@@ -48,7 +50,9 @@ export class StdioTransport {
       this.sdkTransport = new StdioClientTransport({
         command,
         args,
-        env: { ...process.env, ...env },
+        // MCP servers are third-party processes: hand them the sanitized
+        // baseline plus whatever the config explicitly declares as overrides.
+        env: buildSafeEnv(env),
       });
       await this.sdkTransport!.connect();
       this.useSdk = true;
@@ -65,7 +69,7 @@ export class StdioTransport {
 
     return new Promise((resolve, reject) => {
       this._connectReject = reject;
-      const mergedEnv = { ...process.env, ...env };
+      const mergedEnv = buildSafeEnv(env);
 
       this.process = spawn(command, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -88,6 +92,28 @@ export class StdioTransport {
         // stderr is used for logging in MCP servers, ignore silently
       };
       this.process.stderr?.on('data', this._onStderrData);
+
+      // Pipe-level failures (EPIPE when the server died, EACCES, EIO) are
+      // reported via 'error' on the *streams*, not on the child process. With
+      // no listener, Node rethrows them as uncaught exceptions and takes the
+      // whole CLI down. Route them through the same teardown path instead.
+      this._onPipeError = (err: Error) => {
+        if (this.isDisconnecting) return;
+        clearTimeout(startupTimer);
+        logger.mcp.error('[MCP stdio] pipe error', {
+          command,
+          error: err.message,
+          code: (err as NodeJS.ErrnoException).code,
+        });
+        const failure = new Error(
+          `MCP server pipe error: ${err.message} (command: ${command})`,
+        );
+        this.handleTransportFailure(failure);
+        this.process = null;
+      };
+      this.process.stdin?.on('error', this._onPipeError);
+      this.process.stdout?.on('error', this._onPipeError);
+      this.process.stderr?.on('error', this._onPipeError);
 
       this._onProcessExit = (code: number | null) => {
         clearTimeout(startupTimer);
@@ -146,12 +172,33 @@ export class StdioTransport {
 
       const message = JSON.stringify(request);
       const header = `Content-Length: ${Buffer.byteLength(message)}\r\n\r\n`;
-      this.process!.stdin!.write(header + message);
+      // Without the callback an EPIPE surfaces as an unhandled stream 'error'
+      // (i.e. a process crash) instead of rejecting this request.
+      this.process!.stdin!.write(header + message, (err?: Error | null) => {
+        if (err) this._onPipeError?.(err);
+      });
     });
   }
 
   onNotification(handler: (notification: JSONRPCNotification) => void): void {
     this.notificationHandler = handler;
+  }
+
+  /**
+   * Reject the pending connect (if any) and every in-flight request, clearing
+   * their timeout timers. Shared by the process-exit and pipe-error paths so a
+   * dead server can never leave a caller waiting on a promise that never settles.
+   */
+  private handleTransportFailure(error: Error): void {
+    if (this._connectReject) {
+      this._connectReject(error);
+      this._connectReject = null;
+    }
+    for (const [, pending] of this.pendingRequests) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+    }
+    this.pendingRequests.clear();
   }
 
   async disconnect(): Promise<void> {
@@ -189,6 +236,14 @@ export class StdioTransport {
       if (this._onProcessExit) {
         this.process.removeListener('exit', this._onProcessExit);
         this._onProcessExit = null;
+      }
+      // Symmetric with connect(): the pipe 'error' listeners must come off too,
+      // otherwise every reconnect leaves another handler on the same streams.
+      if (this._onPipeError) {
+        this.process.stdin?.removeListener('error', this._onPipeError);
+        this.process.stdout?.removeListener('error', this._onPipeError);
+        this.process.stderr?.removeListener('error', this._onPipeError);
+        this._onPipeError = null;
       }
 
       this.process.kill('SIGTERM');

@@ -106,7 +106,7 @@ function getDefaultDeployCommand(target: string): string {
     case 'netlify':
       return 'netlify deploy --prod';
     case 'ssh':
-      return 'echo "No SSH target configured. Set CC_DEPLOY_SSH_TARGET or provide a custom command."';
+      return 'echo "No SSH target configured. Provide a custom deploy command." '; // M9b: CC_DEPLOY_SSH_TARGET was never read anywhere
     case 'custom':
       return 'echo "No custom command specified"';
     default:

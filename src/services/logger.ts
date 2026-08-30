@@ -173,9 +173,12 @@ export function createLogger(module: string, minLevel?: LogLevel): Logger {
 
 // Pre-configured loggers for common modules
 export const logger = {
+  agp: createLogger('agp'),
   api: createLogger('api'),
+  audit: createLogger('audit'),
   cache: createLogger('cache'),
   lsp: createLogger('lsp'),
+  main: createLogger('main'),
   mcp: createLogger('mcp'),
   memory: createLogger('memory'),
   orchestrator: createLogger('orchestrator'),

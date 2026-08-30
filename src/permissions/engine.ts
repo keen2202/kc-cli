@@ -353,13 +353,27 @@ function checkSecurityCritical(
     }
   }
 
+  // T24 (P2, decision D3): dedupe realpath resolution *within this one check*
+  // — nested inputs and compound commands commonly repeat the same path. The
+  // cache lives and dies with this call, so there is zero staleness across
+  // permission checks (a TTL cache was explicitly rejected for that reason).
+  const realpathCache = new Map<string, string | null>();
+  const resolveOnce = (value: string): string | null => {
+    if (!looksLikePath(value)) return value;
+    const cached = realpathCache.get(value);
+    if (cached !== undefined) return cached;
+    const resolved = tryRealpath(value);
+    realpathCache.set(value, resolved);
+    return resolved;
+  };
+
   for (const value of allValuesToCheck) {
     if (!value) continue;
 
     // Resolve symlinks for path-like values before matching (SEC-05)
     // Prevents symlink-based bypass of protected path checks.
     // Use try/catch — realpath fails if file doesn't exist yet.
-    const resolved = looksLikePath(value) ? tryRealpath(value) : value;
+    const resolved = resolveOnce(value);
 
     // System write directories: deny for write-capable tools only
     if (isWriteTool && isSystemWriteDirectory(resolved || value)) {

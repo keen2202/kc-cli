@@ -45,3 +45,9 @@ export function buildSourcePathRegex(): RegExp {
   const alt = TRACKED_SOURCE_EXTENSIONS.join('|');
   return new RegExp(`[\\w./\\\\-]+\\.(?:${alt})\\b`, 'g');
 }
+
+/** M9d: sandbox backend timeouts (probe/docker/monitor) — single shared values. */
+export const SANDBOX_PROBE_TIMEOUT_MS = 10_000;
+export const SANDBOX_DOCKER_CHECK_TIMEOUT_MS = 5_000;
+export const SANDBOX_MONITOR_SNAPSHOT_TIMEOUT_MS = 5_000;
+export const SANDBOX_MONITOR_POLL_TIMEOUT_MS = 2_000;

@@ -2,6 +2,8 @@
 // Prevents cascading failures by tracking service health and rejecting requests
 // when a service is consistently failing.
 
+import { logger } from './logger';
+
 export type CircuitState = 'closed' | 'open' | 'half-open';
 
 export interface CircuitBreakerConfig {
@@ -30,6 +32,26 @@ export class CircuitBreaker {
   }
 
   /**
+   * O2: every state change goes through here so an open circuit is visible in
+   * the logs instead of the user only seeing requests mysteriously rejected.
+   * Same-state calls are a no-op (no log spam).
+   */
+  private transition(to: CircuitState, reason: string): void {
+    if (this._state === to) return;
+    const from = this._state;
+    this._state = to;
+    logger.api.warn('circuit breaker state transition', {
+      name: this.name,
+      from,
+      to,
+      reason,
+      failures: this.failureCount,
+      threshold: this.config.failureThreshold,
+      resetTimeoutMs: this.config.resetTimeoutMs,
+    });
+  }
+
+  /**
    * Check if a request can be executed through this circuit breaker.
    * Returns false if the circuit is open and the reset timeout hasn't elapsed.
    */
@@ -41,7 +63,7 @@ export class CircuitBreaker {
     if (this._state === 'open') {
       const elapsed = Date.now() - this.lastFailureTime;
       if (elapsed >= this.config.resetTimeoutMs) {
-        this._state = 'half-open';
+        this.transition('half-open', 'reset timeout elapsed');
         this.successCount = 0;
         return true;
       }
@@ -77,13 +99,13 @@ export class CircuitBreaker {
     this.lastFailureTime = Date.now();
 
     if (this._state === 'half-open') {
-      this._state = 'open';
+      this.transition('open', 'half-open probe failed');
       return;
     }
 
     this.failureCount++;
     if (this.failureCount >= this.config.failureThreshold) {
-      this._state = 'open';
+      this.transition('open', `failure threshold reached (${this.failureCount})`);
     }
   }
 
@@ -95,7 +117,7 @@ export class CircuitBreaker {
     if (this._state === 'open') {
       const elapsed = Date.now() - this.lastFailureTime;
       if (elapsed >= this.config.resetTimeoutMs) {
-        this._state = 'half-open';
+        this.transition('half-open', 'reset timeout elapsed');
         this.successCount = 0;
       }
     }
@@ -123,7 +145,7 @@ export class CircuitBreaker {
    * Manually reset the circuit to closed state.
    */
   reset(): void {
-    this._state = 'closed';
+    this.transition('closed', 'manual reset');
     this.failureCount = 0;
     this.successCount = 0;
     this.lastFailureTime = 0;

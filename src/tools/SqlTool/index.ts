@@ -259,17 +259,37 @@ async function executeInWorker(
     }, timeoutMs);
 
     worker.on('message', (msg: { type: string; data?: any; error?: string }) => {
+      // R8: every branch below must settle the promise. Previously an unknown
+      // message type (or a `result` with no payload) fell through silently: the
+      // timeout was already cleared, so the caller hung until the watchdog
+      // fired — or forever if `timeoutMs` was large.
       clearTimeout(timer);
-      if (msg.type === 'error') {
-        reject(new Error(msg.error ?? 'Unknown worker error'));
-      } else if (msg.type === 'result') {
-        // Normalise to the same shape as executeDirect() so the caller
-        // can dispatch on result.type === 'select' | 'write'.
-        if ('rows' in msg.data) {
-          resolve({ type: 'select', rows: msg.data.rows });
+      try {
+        if (msg.type === 'error') {
+          reject(new Error(msg.error ?? 'Unknown worker error'));
+        } else if (msg.type === 'result') {
+          if (!msg.data) {
+            reject(new Error('SqlTool worker returned a result with no data'));
+            return;
+          }
+          // Normalise to the same shape as executeDirect() so the caller
+          // can dispatch on result.type === 'select' | 'write'.
+          if ('rows' in msg.data) {
+            resolve({ type: 'select', rows: msg.data.rows });
+          } else {
+            resolve({
+              type: 'write',
+              changes: msg.data.changes,
+              lastInsertRowid: msg.data.lastInsertRowid,
+            });
+          }
         } else {
-          resolve({ type: 'write', changes: msg.data.changes, lastInsertRowid: msg.data.lastInsertRowid });
+          reject(new Error(`Unexpected worker message type: ${String(msg.type)}`));
         }
+      } catch (err) {
+        // A malformed payload must reject, not surface as an unhandled
+        // exception inside the worker message handler.
+        reject(err instanceof Error ? err : new Error(String(err)));
       }
     });
 

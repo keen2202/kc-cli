@@ -10,6 +10,7 @@
 
 import type { ResourceRegistrationRecord, ResourceEntity, PromptMetadata, ExportedRepresentation } from '../protocol';
 import { createResourceEntity, createRegistrationRecord, createTextRep } from '../types';
+import { GUIDELINES_SECTION, CAPABILITIES_SECTION } from '../../api/prompts/system-prompt-sections';
 
 // ─── Prompt Resource Creation ─────────────────────────────────────────────────
 
@@ -126,25 +127,9 @@ export function createDefaultSystemPrompt(toolNames: string[]): ResourceRegistra
 
 You have access to the following tools: {{tools}}
 
-Guidelines:
-1. Always think step-by-step before taking action
-2. Use tools to gather information before making changes
-3. Be careful with destructive operations
-4. Explain what you're doing and why
-5. Ask for clarification when needed
-6. Follow best practices for code quality and security
+${GUIDELINES_SECTION}
 
-Available capabilities:
-- Read, write, and edit files
-- Execute bash commands
-- Search code and files
-- Git operations
-- Web search and fetch
-- Database queries
-- Docker operations
-- Application deployment
-- System monitoring
-- Compile, test, and run programs
+${CAPABILITIES_SECTION}
 
 Always work methodically and keep the user informed of your progress.`;
 

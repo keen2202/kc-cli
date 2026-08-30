@@ -1,3 +1,4 @@
+import { formatCount, formatDurationSec } from './format-duration';
 import chalk from 'chalk';
 import { createRequire } from 'node:module';
 
@@ -133,11 +134,11 @@ export function formatStatusLine(data: {
   }
 
   if (data.tokensUsed !== undefined) {
-    parts.push(chalk.gray(`${formatTokenCount(data.tokensUsed)} tokens`));
+    parts.push(chalk.gray(`${formatCount(data.tokensUsed)} tokens`));
   }
 
   if (data.sessionTime !== undefined) {
-    parts.push(chalk.gray(formatDuration(data.sessionTime)));
+    parts.push(chalk.gray(formatDurationSec(data.sessionTime / 1000)));
   }
 
   return parts.join(chalk.gray(' | '));
@@ -147,20 +148,6 @@ function renderProgressBar(percent: number, width: number): string {
   const filled = Math.round((percent / 100) * width);
   const empty = width - filled;
   return chalk.green('█'.repeat(filled)) + chalk.gray('░'.repeat(empty));
-}
-
-function formatTokenCount(count: number): string {
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
-  return String(count);
-}
-
-function formatDuration(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${minutes}m${secs}s`;
 }
 
 // Cached highlight.js module reference (lazy-loaded once)

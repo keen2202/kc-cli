@@ -1,7 +1,7 @@
 // Config Tool - Manage configuration settings
 
 import { z } from 'zod';
-import { buildTool, toolResult, toolError } from '../../Tool';
+import { buildTool, toolResult, toolError, toolFailure } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import * as path from 'path';
@@ -231,7 +231,7 @@ export const tool = buildTool<ConfigInput, string>({
           return toolError(`Unknown action: ${input.action}`);
       }
     } catch (error) {
-      return toolError(`Config failed: ${error instanceof Error ? error.message : String(error)}`);
+      return toolFailure('Config', error);
     }
   },
 

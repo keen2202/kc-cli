@@ -468,31 +468,6 @@ export class OpenAICompatibleClient extends BaseApiClient {
     this.toolCallBuffer.clear();
   }
 
-  /**
-   * Handle API errors with provider-specific handling
-   */
-  protected handleApiError(error: unknown, context: string, response?: Response): never {
-    if (error instanceof Error) {
-      const message = error.message;
-
-      // Common error patterns
-      if (message.includes('401') || message.includes('Unauthorized')) {
-        throw new ApiError(`${context}: Invalid API key`, 401);
-      }
-
-      if (message.includes('429') || message.includes('rate limit')) {
-        throw new ApiError(`${context}: Rate limit exceeded`, 429);
-      }
-
-      if (message.includes('403') || message.includes('Forbidden')) {
-        throw new ApiError(`${context}: Access forbidden. Check API key permissions`, 403);
-      }
-
-      if (message.includes('model_not_found') || message.includes('invalid_model')) {
-        throw new ApiError(`${context}: Model '${this.model}' not found`, 404);
-      }
-    }
-
-    super.handleApiError(error, context, response);
-  }
+  // M8: the previous local 401/429/403/404 ladder is replaced by the shared
+  // rule table in BaseApiClient.errorRules() — no provider-specific rules.
 }

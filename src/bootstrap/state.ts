@@ -27,6 +27,12 @@ export interface GlobalState {
    * the T2 `.kc-cli/backups/` snapshots surfaced via FileRestore.
    */
   isGitRepo?: boolean;
+  /**
+   * O3 (round4): MCP servers whose reconnect budget is exhausted, appended by
+   * Bootstrap when the client manager reports final failure. The UI status
+   * surface reads this to explain why an MCP integration's tools vanished.
+   */
+  unavailableMcpServers?: Array<{ serverId: string; reason: string; at: string }>;
 }
 
 // Scoped state for per-agent isolation (used by sub-agents)

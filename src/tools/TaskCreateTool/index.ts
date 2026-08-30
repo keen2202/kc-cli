@@ -93,7 +93,7 @@ export const tool = buildTool<TaskCreateInput, string>({
       }
     } catch (error) {
       const err = error as Record<string, unknown>;
-      return toolError(`TaskCreate failed: ${err.stdout || err.stderr || (error instanceof Error ? error.message : String(error))}`);
+      return toolError(`TaskCreate failed: ${err.stdout || err.stderr || getErrorMessage(error)}`);
     }
   },
 

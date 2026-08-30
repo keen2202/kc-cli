@@ -296,7 +296,7 @@ describe('formatter', () => {
       setBareMode(false);
       const result = formatStatusLine({ sessionTime: 125000 });
       const plain = stripAnsi(result);
-      expect(plain).toContain('2m5s');
+      expect(plain).toContain('2m05s');
     });
 
     it('renders combined data with separators', () => {
@@ -313,7 +313,7 @@ describe('formatter', () => {
       expect(plain).toContain('openai/gpt-4');
       expect(plain).toContain('3/10 turns');
       expect(plain).toContain('5.0k tokens');
-      expect(plain).toContain('1m0s');
+      expect(plain).toContain('1m00s');
       expect(result).toContain('|');
     });
 
@@ -354,7 +354,7 @@ describe('formatter', () => {
       setBareMode(false);
       const result = formatStatusLine({ sessionTime: 60000 });
       const plain = stripAnsi(result);
-      expect(plain).toContain('1m0s');
+      expect(plain).toContain('1m00s');
     });
 
     it('handles tokensUsed of 0', () => {

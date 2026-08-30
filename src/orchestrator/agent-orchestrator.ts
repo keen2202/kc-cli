@@ -19,6 +19,23 @@ import { deriveChildPermissions } from './permission-cascader.js';
 import { getState } from '../bootstrap/state.js';
 
 /**
+ * How long `spawn()` will wait for a permit before failing.
+ *
+ * Without a bound, a backend that never emits a terminal event leaks its permit
+ * and the orchestrator deadlocks permanently once `maxConcurrentAgents` agents
+ * have been spawned.
+ */
+const SPAWN_PERMIT_TIMEOUT_MS = 30_000;
+
+/** Events that mean a sub-agent has reached a terminal state. */
+const TERMINAL_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'agent:subagent_completed',
+  'agent:subagent_failed',
+  'agent:subagent_timed_out',
+  'agent:subagent_cancelled',
+]);
+
+/**
  * AgentOrchestrator - Manages sub-agent lifecycle
  *
  * Coordinates spawning, monitoring, and collecting results from multiple sub-agents.
@@ -30,9 +47,15 @@ export class AgentOrchestrator {
   private allTools: ToolDefinition[];
   private parentPermissionMode: PermissionMode;
   private semaphore: Semaphore;
+  /**
+   * Idempotent permit-release hook per agent. Held here so paths outside
+   * `spawn()` (wait timeouts, explicit cancel) can release a permit that the
+   * terminal-event listener never saw.
+   */
+  private releaseHooks = new Map<string, (reason: string) => void>();
 
   constructor(allTools: ToolDefinition[], maxConcurrentAgents: number = 8) {
-    this.semaphore = new Semaphore(maxConcurrentAgents);
+    this.semaphore = new Semaphore(maxConcurrentAgents, SPAWN_PERMIT_TIMEOUT_MS);
     this.eventBus = new EventBus();
     this.allTools = allTools;
     this.parentPermissionMode = getState().permissionMode;
@@ -56,34 +79,49 @@ export class AgentOrchestrator {
     config: SubAgentSpawnConfig,
     parentContext: ToolUseContext
   ): Promise<string> {
-    // Acquire semaphore permit — bounds concurrent sub-agents
+    // Acquire semaphore permit — bounds concurrent sub-agents. Times out so a
+    // leaked permit degrades into a diagnosable error instead of a deadlock.
     await this.semaphore.acquire();
+
+    // `agentId` is only known once the backend has spawned, but the
+    // spawn-failure path also has to release — hence the placeholder.
+    let agentId = '<not-spawned>';
+    let released = false;
+
+    /**
+     * Release the permit at most once, whatever the reason. The previous code
+     * declared `released` but never set it, so a terminal event followed by a
+     * failing `register()` handed the semaphore back twice and inflated the
+     * permit count past `maxConcurrentAgents`.
+     */
+    const releaseOnce = (reason: string): void => {
+      if (released) return;
+      released = true;
+      this.releaseHooks.delete(agentId);
+      this.semaphore.release();
+      logger.orchestrator.debug('[AgentOrchestrator] released spawn permit', {
+        agentId,
+        reason,
+      });
+    };
 
     // Spawn via backend first — backend assigns the unique agentId
     const spawnResult = await this.backend.spawn(config, parentContext);
 
     if (!spawnResult.success) {
-      this.semaphore.release();
+      releaseOnce('spawn-failed');
       throw new Error(`Failed to spawn agent: ${spawnResult.error}`);
     }
 
-    const agentId = spawnResult.agentId;
+    agentId = spawnResult.agentId;
+    this.releaseHooks.set(agentId, releaseOnce);
 
     // Register listener to release permit when agent reaches terminal state
-    const releaseOnTerminal = (event: AgentEvent | MultiAgentEvent): void => {
-      if (
-        event.type === 'agent:subagent_completed' ||
-        event.type === 'agent:subagent_failed' ||
-        event.type === 'agent:subagent_timed_out' ||
-        event.type === 'agent:subagent_cancelled'
-      ) {
-        this.semaphore.release();
-        unsubscribe();
-      }
-    };
-    const unsubscribe = this.eventBus.on(agentId, releaseOnTerminal);
-
-    let released = false;
+    const unsubscribe = this.eventBus.on(agentId, (event: AgentEvent | MultiAgentEvent) => {
+      if (!TERMINAL_EVENT_TYPES.has(event.type)) return;
+      releaseOnce(event.type.replace('agent:subagent_', ''));
+      unsubscribe();
+    });
 
     try {
       // Register with aggregator
@@ -91,10 +129,8 @@ export class AgentOrchestrator {
 
       return agentId;
     } catch (error) {
-      if (!released) {
-        this.semaphore.release();
-        unsubscribe();
-      }
+      releaseOnce('register-failed');
+      unsubscribe();
       throw error;
     }
   }
@@ -140,6 +176,9 @@ export class AgentOrchestrator {
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         this.aggregator.recordTimeout(agentId, timeoutMs / 1000);
+        // The caller gave up on this agent: if the backend never emits a
+        // terminal event, its permit would be held forever.
+        this.releaseHooks.get(agentId)?.('wait-completion-timeout');
         reject(
           new Error(
             `Agent ${agentId} timed out after ${timeoutMs / 1000}s`
@@ -198,6 +237,7 @@ export class AgentOrchestrator {
         const elapsed = timeoutMs / 1000;
         for (const agentId of activeAgents) {
           this.aggregator.recordTimeout(agentId, elapsed);
+          this.releaseHooks.get(agentId)?.('wait-all-timeout');
           this.backend.shutdown(agentId, true).catch(err => { logger.orchestrator.error('[AgentOrchestrator] Failed to shutdown agent', err); });
         }
         resolve(); // Continue to get results (with timeouts recorded)
@@ -244,6 +284,8 @@ export class AgentOrchestrator {
   async cancel(agentId: string): Promise<void> {
     await this.backend.shutdown(agentId, true);
     this.aggregator.recordCancellation(agentId);
+    // A cancelled backend may never emit a terminal event of its own.
+    this.releaseHooks.get(agentId)?.('cancelled');
   }
 
   /**
@@ -301,6 +343,15 @@ export class AgentOrchestrator {
   async shutdownAll(force = false): Promise<void> {
     await this.backend.shutdownAll();
     this.eventBus.clear();
+    this.releaseHooks.clear();
+  }
+
+  /**
+   * Permits currently free, exposed for diagnostics and tests. A value above
+   * `maxConcurrentAgents` means a permit was released more than once.
+   */
+  get availablePermits(): number {
+    return this.semaphore.available;
   }
 
   // ─── AGP Evolution Coordination ─────────────────────────────────────────

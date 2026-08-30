@@ -9,10 +9,12 @@
 
 import { FileMemoryService } from '../memory/FileMemoryService';
 import { SessionManager } from './sessionManager';
+import { logger } from './logger';
 import type { SessionSnapshot } from '../memory/types';
 import type { AgentState, AgentEvent } from '../state/types';
 import type { StreamEvent, ChatMessage } from '../query/protocol';
 import { getState, updateState } from '../bootstrap/state';
+import { getErrorMessage } from '../utils/errors';
 
 /**
  * Minimal engine surface the REPL session service needs. QueryEngine
@@ -33,6 +35,13 @@ export class ReplSessionService {
   private toolsUsed = new Set<string>();
   private createdAt = Date.now();
   private lastAutoSaveAt = 0;
+  /** O5: how many best-effort saves have failed since the service was created. */
+  private saveFailureCount = 0;
+
+  /** Number of failed persistence attempts — surfaced via /status and at exit. */
+  getSaveFailureCount(): number {
+    return this.saveFailureCount;
+  }
 
   constructor(
     memoryService: FileMemoryService = new FileMemoryService(),
@@ -92,8 +101,16 @@ export class ReplSessionService {
         stateSnapshot,
         Array.from(this.toolsUsed)
       );
-    } catch {
-      // Persistence is best-effort; a save failure must never break the session.
+    } catch (error) {
+      // O5: persistence stays best-effort, but it must not be *silent* — a full
+      // disk or a deleted `.kc-cli` previously looked exactly like a saved
+      // session, and hours of conversation vanished without a trace.
+      this.saveFailureCount++;
+      logger.services.warn('session persistence failed (best-effort)', {
+        sessionId: getState().sessionId,
+        failureCount: this.saveFailureCount,
+        reason: getErrorMessage(error),
+      });
     }
   }
 

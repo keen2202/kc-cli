@@ -25,6 +25,7 @@ import type { ExecutionEnv } from '../services/execution-env';
 import { Semaphore } from '../utils/semaphore';
 import { DEFAULT_TOOL_TIMEOUT_MS } from '../constants';
 import { getErrorMessage } from '../utils/errors';
+import { redactTruncated } from '../utils/redact';
 import { logger } from '../services/logger';
 import { classifyToolError } from '../services/error-classifier';
 import { getOperationAuditLog } from '../services/operation-audit-log';
@@ -222,12 +223,33 @@ function describeToolInputDetails(toolName: string, input: Record<string, unknow
 }
 
 /**
+ * T23: live tool lookup for tools registered AFTER executor construction
+ * (e.g. background MCP connections registering into the shared tool registry).
+ * Injected rather than imported so executors keep no dependency on tools/.
+ */
+export interface DynamicToolSource {
+  getTool(name: string): ToolDefinition | undefined;
+  getToolNames(): string[];
+}
+
+/**
  * Tool executor that supports both sequential and parallel tool execution
  * with timeout protection and sandbox isolation to prevent infinite hangs.
  */
 export class ToolExecutor {
   private tools: Map<string, ToolDefinition>;
   private cachedToolNames: string[]; // Cached since tools don't change after construction
+  /** T23: live source for tools registered after construction (background MCP). */
+  private dynamicTools: DynamicToolSource | null;
+
+  /**
+   * Resolve a tool by name: the executor's static map first, then the dynamic
+   * source (tools registered after construction). `undefined` still means
+   * "unknown tool" — the R5 fail-closed contract is unchanged.
+   */
+  private resolveTool(name: string): ToolDefinition | undefined {
+    return this.tools.get(name) ?? this.dynamicTools?.getTool(name);
+  }
   private cwd: string;
   private permissionConfig?: {
     alwaysDenyRules?: string[];
@@ -279,13 +301,18 @@ export class ToolExecutor {
     },
     concurrencyOptions?: {
       maxConcurrentTools?: number;
-    }
+    },
+    dynamicTools?: DynamicToolSource
   ) {
     this.tools = new Map(tools.map(tool => [tool.name, tool]));
     this.cachedToolNames = Array.from(this.tools.keys());
     this.cwd = cwd;
     this.permissionConfig = permissionConfig;
     this.pluginHooks = pluginHooks;
+    // T23: optional live lookup for tools registered AFTER construction
+    // (background MCP connections). Kept as an injected source instead of a
+    // direct registry import to avoid an executors→tools import cycle.
+    this.dynamicTools = dynamicTools ?? null;
 
     // Initialize concurrency semaphore
     const maxConcurrent = concurrencyOptions?.maxConcurrentTools ?? DEFAULT_MAX_CONCURRENT_TOOLS;
@@ -330,7 +357,7 @@ export class ToolExecutor {
   ): Promise<ToolResult> {
     try {
       // 1. Find tool
-      const tool = this.tools.get(toolCall.toolName);
+      const tool = this.resolveTool(toolCall.toolName);
       if (!tool) {
         return {
           toolCallId: toolCall.id,
@@ -527,8 +554,16 @@ export class ToolExecutor {
 
   /**
    * T6 (M1): record a high-risk tool operation to the unified audit log.
-   * Best-effort and fully swallowed — auditing must never disrupt execution.
+   * Best-effort and never throws — but failures are counted and logged (O6):
+   * a silently missing audit trail cannot be reconstructed after the fact.
    */
+  private auditFailureCount = 0;
+
+  /** Number of failed audit writes since executor creation (diagnostics). */
+  getAuditFailureCount(): number {
+    return this.auditFailureCount;
+  }
+
   private recordOperationAudit(toolCall: ToolCall, result: ToolResult, startTime: number): void {
     if (!AUDITED_TOOLS.has(toolCall.toolName)) return;
     try {
@@ -547,8 +582,15 @@ export class ToolExecutor {
         backupPath: typeof metadata.backupPath === 'string' ? metadata.backupPath : undefined,
         timedOut: result.timedOut === true ? true : undefined,
       });
-    } catch {
-      // Auditing is best-effort; swallow all errors.
+    } catch (error) {
+      // Auditing is best-effort; swallow the error but leave a trace.
+      this.auditFailureCount++;
+      logger.audit.warn('operation audit record failed', {
+        toolName: toolCall.toolName,
+        sessionId: this.getSessionIdSafe(),
+        failureCount: this.auditFailureCount,
+        reason: redactTruncated(getErrorMessage(error)),
+      });
     }
   }
 
@@ -569,10 +611,19 @@ export class ToolExecutor {
   private getSessionIdSafe(): string {
     try {
       return getState().sessionId;
-    } catch {
+    } catch (error) {
+      // O6: the 'unknown' fallback is intentional (state can be absent in narrow
+      // harnesses) — but it must not be silent. Warn once, not per audit entry.
+      if (!this.sessionIdFallbackWarned) {
+        this.sessionIdFallbackWarned = true;
+        logger.audit.warn('audit session id unavailable — recording as "unknown"', {
+          reason: getErrorMessage(error),
+        });
+      }
       return 'unknown';
     }
   }
+  private sessionIdFallbackWarned = false;
 
   /**
    * Execute tool with timeout protection using AbortSignal.
@@ -699,8 +750,28 @@ export class ToolExecutor {
     const sequentialTools: ToolCall[] = [];
 
     for (const toolCall of toolCalls) {
-      const tool = this.tools.get(toolCall.toolName);
-      if (tool?.isConcurrencySafe?.(toolCall.input) !== false) {
+      const tool = this.resolveTool(toolCall.toolName);
+      if (!tool) {
+        // R5: `tool?.isConcurrencySafe?.(...) === false` is false for an unknown
+        // tool, so it fell into the concurrent group and was handed to
+        // executeSingle along with everything else. Failing closed here keeps
+        // the error in the same shape executeSingle would have produced, but
+        // without spending a slot in the parallel batch.
+        logger.tools.warn('Unknown tool requested in parallel batch', {
+          toolName: toolCall.toolName,
+          toolCallId: toolCall.id,
+        });
+        const errorResult: ToolResult = {
+          toolCallId: toolCall.id,
+          output: `Unknown tool: ${toolCall.toolName}`,
+          isError: true,
+        };
+        results.set(toolCall.id, errorResult);
+        onSettled?.(toolCall.id, errorResult);
+        continue;
+      }
+
+      if (tool.isConcurrencySafe?.(toolCall.input) !== false) {
         concurrentTools.push(toolCall);
       } else {
         sequentialTools.push(toolCall);
@@ -784,7 +855,7 @@ export class ToolExecutor {
     const results: PermissionResult[] = [];
 
     for (const toolCall of toolCalls) {
-      const tool = this.tools.get(toolCall.toolName);
+      const tool = this.resolveTool(toolCall.toolName);
       if (!tool) {
         results.push({
           behavior: 'deny',
@@ -824,21 +895,26 @@ export class ToolExecutor {
    * Get registered tool names
    */
   getRegisteredTools(): string[] {
-    return this.cachedToolNames;
+    // T23: merge in dynamically-registered tools (background MCP) so per-request
+    // tool definitions include late arrivals. Static names stay first to
+    // preserve the original ordering for prompt-cache stability.
+    if (!this.dynamicTools) return this.cachedToolNames;
+    const dynamic = this.dynamicTools.getToolNames().filter(n => !this.tools.has(n));
+    return [...this.cachedToolNames, ...dynamic];
   }
 
   /**
    * Check if a tool is registered
    */
   hasTool(toolName: string): boolean {
-    return this.tools.has(toolName);
+    return this.tools.has(toolName) || (this.dynamicTools?.getTool(toolName) !== undefined);
   }
 
   /**
    * Get tool definition by name
    */
   getTool(toolName: string): ToolDefinition | undefined {
-    return this.tools.get(toolName);
+    return this.resolveTool(toolName);
   }
 
   /**

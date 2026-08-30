@@ -9,8 +9,8 @@
 // which the Shell.exec contract cannot express. Verification always runs on
 // the host, never inside a tool sandbox.
 
-import { spawn } from 'child_process';
 import { getState } from '../bootstrap/state';
+import { runCommand } from '../utils/run-command';
 import { detectProjectLanguage } from '../utils/project-detect';
 import { logger } from '../services/logger';
 import type { ChatMessage, PatchGuaranteeConfig } from './protocol';
@@ -114,41 +114,14 @@ export async function verifyTypeCheckBeforeExit(
   const cwd = getState().cwd;
 
   try {
-    const result = await new Promise<{
-      stdout: string;
-      stderr: string;
-      code: number | null;
-      timedOut: boolean;
-    }>((resolve, reject) => {
-      // T5 (H5): run the command through the platform's default shell
-      // (Windows: cmd.exe, *nix: /bin/sh) instead of hard-coding `bash`, which
-      // does not exist on Windows and made this gate a silent no-op there.
-      // The command was validated by isStaticCommandSafe (runner allowlist +
-      // shell-metacharacter rejection), so `shell: true` cannot be abused for
-      // injection here.
-      const child = spawn(command, {
-        cwd,
-        timeout: config.verificationTimeout * 1000,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        shell: true,
-        windowsHide: true,
-      });
-
-      let stdout = '';
-      let stderr = '';
-      let timedOut = false;
-
-      child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
-      child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
-      child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
-        // The `timeout` option kills the child (SIGTERM) once exceeded; detect
-        // that so a timeout is never misreported as a pass or a type error.
-        if (child.killed || signal === 'SIGTERM') timedOut = true;
-        resolve({ stdout, stderr, code, timedOut });
-      });
-      // spawn-infrastructure failure (shell/runner missing, ENOENT, …) is NOT a
-      // type-check result — reject so it is classified distinctly below.
-      child.on('error', reject);
+    // Shared runner: platform default shell, timeout classified as
+    // `timedOut`, spawn-infrastructure failure surfaced as a rejection.
+    // The command was validated by isStaticCommandSafe (runner allowlist +
+    // shell-metacharacter rejection), so `shell: true` cannot be abused for
+    // injection here.
+    const result = await runCommand(command, {
+      cwd,
+      timeoutMs: config.verificationTimeout * 1000,
     });
 
     if (result.timedOut) {
@@ -221,23 +194,21 @@ export async function verifyBeforeExit(
   }
 
   try {
-    const result = await new Promise<{ stdout: string; stderr: string; code: number }>(
-      (resolve, reject) => {
-        const child = spawn('bash', ['-c', command], {
-          cwd,
-          timeout: config.verificationTimeout * 1000,
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
+    // R6: this path used to hard-code `spawn('bash', ['-c', command])`. `bash`
+    // is absent on stock Windows, so the spawn failed with ENOENT and the catch
+    // below reported "tests not found" — the gate silently let the agent exit
+    // with failing tests. The shared runner uses the platform default shell.
+    const result = await runCommand(command, {
+      cwd,
+      timeoutMs: config.verificationTimeout * 1000,
+    });
 
-        let stdout = '';
-        let stderr = '';
-
-        child.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
-        child.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
-        child.on('close', (code: number) => resolve({ stdout, stderr, code: code ?? 1 }));
-        child.on('error', reject);
-      }
-    );
+    if (result.timedOut) {
+      logger.query.warn(
+        `[QueryEngine] Test verification timed out after ${config.verificationTimeout}s: ${command}`
+      );
+      return { canExit: true, reason: 'timeout' };
+    }
 
     const output = result.stdout + result.stderr;
 

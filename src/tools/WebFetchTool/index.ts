@@ -1,7 +1,7 @@
 // Web Fetch Tool - Fetch content from URLs
 
 import { z } from 'zod';
-import { buildTool, toolResult, toolError } from '../../Tool';
+import { buildTool, toolResult, toolError, toolFailure } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import { secondsToMs } from '../../utils/timeout';
@@ -143,11 +143,11 @@ export const tool = buildTool<WebFetchInput, string>({
           req.end();
         } catch (error) {
           clearTimeout(globalTimeout);
-          resolve(toolError(`HTTP request failed: ${error instanceof Error ? error.message : String(error)}`));
+          resolve(toolFailure('WebFetch', error));
         }
       });
     } catch (error) {
-      return toolError(`WebFetch failed: ${error instanceof Error ? error.message : String(error)}`);
+      return toolFailure('WebFetch', error);
     }
   },
 

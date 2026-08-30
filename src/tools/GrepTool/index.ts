@@ -6,7 +6,7 @@
 // search storms (docs/specs/tool-search-efficiency-spec.md).
 
 import { z } from 'zod';
-import { buildTool, toolResult, toolError } from '../../Tool';
+import { readonlyAllow, buildTool, toolResult, toolError, toolFailure } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import * as path from 'path';
@@ -37,6 +37,8 @@ type GrepInput = z.infer<typeof GrepInputSchema>;
 const MAX_FILE_BYTES = 1_000_000;
 /** Bytes inspected for the null-byte binary sniff. */
 const BINARY_SNIFF_BYTES = 8192;
+/** M9f: hard wall-clock budget for a single Grep invocation (ReDoS containment). */
+const GREP_SEARCH_DEADLINE_MS = 30_000;
 
 export const tool = buildTool<GrepInput, string>({
   name: 'Grep',
@@ -71,13 +73,24 @@ export const tool = buildTool<GrepInput, string>({
       // Pre-compile glob pattern once (not per-file in recursion)
       let globRegex: RegExp | null = null;
       if (input.file_pattern) {
-        globRegex = new RegExp(input.file_pattern.replace(/\*/g, '.*').replace(/\?/g, '.'));
+        // M9f: glob meta chars must be escaped before the * / ? wildcard
+        // conversion — an unescaped `.` or `(` made user globs into arbitrary
+        // regexes (incorrect matches / ReDoS vector).
+        const GLOB_ESCAPE_REGEX = /[.+^${}()|[\]\\]/g;
+        globRegex = new RegExp(
+          input.file_pattern
+            .replace(GLOB_ESCAPE_REGEX, '\\$&')
+            .replace(/\*/g, '.*')
+            .replace(/\?/g, '.'),
+        );
       }
 
+      const searchDeadline = Date.now() + GREP_SEARCH_DEADLINE_MS;
       await walkDirectory(searchPath, {
         maxResults: input.max_results,
         baseDir: context.cwd,
         onFile: async (entry) => {
+          if (Date.now() > searchDeadline) return false; // M9f: stop the walk once the budget is spent
           if (mode === 'content' && contentMatches.length >= input.max_results) return false;
           if (mode !== 'content' && fileCounts.size >= input.max_results) return false;
           if (globRegex && !globRegex.test(entry.name)) return;
@@ -186,15 +199,11 @@ export const tool = buildTool<GrepInput, string>({
         }
       );
     } catch (error) {
-      return toolError(`Grep failed: ${error instanceof Error ? error.message : String(error)}`);
+      return toolFailure('Grep', error);
     }
   },
 
-  checkPermissions: (): PermissionResult => ({
-    behavior: 'allow',
-    updatedInput: {},
-    decisionReason: { type: 'readonly', reason: 'File search is read-only' },
-  }),
+  checkPermissions: () => readonlyAllow('File search is read-only'),
 
   isReadOnly: () => true,
   isConcurrencySafe: () => true,

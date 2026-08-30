@@ -7,6 +7,7 @@ import {
   estimateMessageTokens,
   calculateTokensSaved,
 } from '../../utils/tokenEstimation';
+import { buildSummaryPrompt, buildFallbackSummary } from './prompts';
 
 // Compaction constants (from OpenHarness pattern)
 const AUTOCOMPACT_BUFFER_TOKENS = 13_000;
@@ -175,7 +176,7 @@ export async function fullCompact(
     const recentMessages = messages.slice(-PRESERVE_RECENT);
 
     // Build summary prompt
-    const summaryPrompt = buildCompactPrompt(oldMessages, systemPrompt, modifiedFiles);
+    const summaryPrompt = buildSummaryPrompt(oldMessages, systemPrompt, modifiedFiles);
 
     // Call LLM to generate summary (no tools)
     let summaryResponse: string;
@@ -224,46 +225,6 @@ export async function fullCompact(
       method: 'none',
     };
   }
-}
-
-/**
- * Build the prompt for LLM-based conversation summarization
- */
-function buildCompactPrompt(messagesToSummarize: ChatMessage[], systemPrompt: string, modifiedFiles?: string[]): string {
-  const conversationText = messagesToSummarize
-    .map(msg => {
-      const role = msg.role.toUpperCase();
-      const content = msg.content || '[tool calls/results]';
-      return `${role}: ${content}`;
-    })
-    .join('\n\n');
-
-  let prompt = `Please summarize the following conversation concisely, preserving key information, decisions, and context that would be needed for future turns. Focus on what was accomplished and what is still pending.
-
-<system_context>
-${systemPrompt || 'You are an AI assistant helping with software development tasks.'}
-</system_context>
-
-<conversation_to_summarize>
-${conversationText}
-</conversation_to_summarize>
-
-Provide a concise summary that captures:
-1. What tasks were requested and completed
-2. What files were created or modified
-3. What decisions were made
-4. What is still pending or incomplete
-5. Any important technical details or context
-
-Keep the summary under 500 words.`;
-
-  // Append modified files list for explicit preservation
-  if (modifiedFiles && modifiedFiles.length > 0) {
-    const fileList = modifiedFiles.map(f => `- ${f}`).join('\n');
-    prompt += `\n\nIMPORTANT: The following files were modified during this session. Ensure they are explicitly listed in your summary:\n${fileList}`;
-  }
-
-  return prompt;
 }
 
 /**
@@ -322,24 +283,4 @@ export function formatCompactSummary(rawSummary: string): string {
 
   // Otherwise return as-is
   return rawSummary.trim();
-}
-
-/**
- * Build a fallback summary when LLM API is unavailable
- * Simple truncation-based summary
- */
-function buildFallbackSummary(messages: ChatMessage[]): string {
-  const parts: string[] = ['[Auto-generated summary - LLM unavailable]'];
-
-  for (const msg of messages) {
-    if (msg.role === 'user' && msg.content) {
-      const preview = msg.content.slice(0, 100);
-      parts.push(`User: ${preview}${msg.content.length > 100 ? '...' : ''}`);
-    } else if (msg.role === 'assistant' && msg.content) {
-      const preview = msg.content.slice(0, 100);
-      parts.push(`Assistant: ${preview}${msg.content.length > 100 ? '...' : ''}`);
-    }
-  }
-
-  return parts.join('\n');
 }

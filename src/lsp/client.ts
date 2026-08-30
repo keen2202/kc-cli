@@ -46,12 +46,39 @@ export function detectLanguage(filePath: string): LanguageId {
   return map[ext] || 'unknown';
 }
 
+/**
+ * O6: bucket an LSP failure so logs explain *why* diagnostics disappeared.
+ * `spawn-enoent` (server binary missing) is the dominant real-world case and
+ * gets a one-time degradation hint instead of a per-request warning.
+ */
+export function classifyLspError(error: unknown): 'spawn-enoent' | 'timeout' | 'protocol' | 'io' {
+  const err = error as { code?: string; message?: string };
+  if (err?.code === 'ENOENT') return 'spawn-enoent';
+  const msg = err?.message ?? '';
+  if (/timed out/i.test(msg)) return 'timeout';
+  if (/jsonrpc|protocol|parse/i.test(msg)) return 'protocol';
+  return 'io';
+}
+
 export class LSPClientManager {
   private servers = new Map<LanguageId, ServerProcess>();
   private diagnosticCache = getCacheManager().getOrCreate<LSPDiagnostic[]>(
     'lsp-diagnostics', 'lsp', { maxSize: 500 }
   );
   private pendingDiagnostics = new Map<string, { resolve: (d: LSPDiagnostic[]) => void; timer: ReturnType<typeof setTimeout> }>();
+  /** O6: languages already told (once) that their server binary is missing. */
+  private enoentWarned = new Set<LanguageId>();
+
+  /** One-time "server not installed" hint — a missing binary never heals mid-session. */
+  private warnSpawnEnoentOnce(languageId: LanguageId, cmd: string): void {
+    if (this.enoentWarned.has(languageId)) return;
+    this.enoentWarned.add(languageId);
+    logger.lsp.warn(`LSP server binary not found — ${languageId} diagnostics disabled for this session`, {
+      languageId,
+      command: cmd,
+      kind: 'spawn-enoent',
+    });
+  }
 
   async connect(languageId: LanguageId, rootUri: string): Promise<boolean> {
     if (this.servers.has(languageId)) return true;
@@ -78,7 +105,14 @@ export class LSPClientManager {
         this.processBuffer(server);
       });
 
-      proc.on('error', () => {
+      proc.on('error', (err) => {
+        // O6: this used to be a bare `() => {}`. A missing server binary used
+        // to surface as "no diagnostics" with zero explanation.
+        if (classifyLspError(err) === 'spawn-enoent') {
+          this.warnSpawnEnoentOnce(languageId, cmdConfig.cmd);
+        } else {
+          logger.lsp.warn('LSP server process error', { languageId, kind: classifyLspError(err), reason: err.message });
+        }
         // PERF-04: Clear pending request timers before removing server
         for (const [, pending] of server.pending) {
           clearTimeout(pending.timer);
@@ -112,7 +146,14 @@ export class LSPClientManager {
       // Only add to server map after successful initialization
       this.servers.set(languageId, server);
       return true;
-    } catch {
+    } catch (error) {
+      // O6: connection failures were swallowed wholesale; now classified.
+      const kind = classifyLspError(error);
+      if (kind === 'spawn-enoent') {
+        this.warnSpawnEnoentOnce(languageId, cmdConfig.cmd);
+      } else {
+        logger.lsp.warn('LSP connect failed', { languageId, kind, reason: error instanceof Error ? error.message : String(error) });
+      }
       // Clean up: kill process and ensure server is not in map (FUN-04)
       if (this.servers.has(languageId)) {
         this.servers.delete(languageId);
@@ -138,7 +179,15 @@ export class LSPClientManager {
 
       // Wait for publishDiagnostics notification instead of arbitrary timeout
       return await this.waitForDiagnostics(filePath, 5000);
-    } catch {
+    } catch (error) {
+      // O6: "no diagnostics" used to be indistinguishable from "the server is
+      // broken" — the model reads an empty list as "the code is fine".
+      logger.lsp.warn('LSP diagnostics request failed', {
+        method: 'textDocument/didOpen',
+        filePath,
+        kind: classifyLspError(error),
+        reason: error instanceof Error ? error.message : String(error),
+      });
       return [];
     }
   }
@@ -188,7 +237,13 @@ export class LSPClientManager {
       });
 
       return result as LSPHover | null;
-    } catch {
+    } catch (error) {
+      logger.lsp.warn('LSP hover request failed', {
+        method: 'textDocument/hover',
+        filePath,
+        kind: classifyLspError(error),
+        reason: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   }

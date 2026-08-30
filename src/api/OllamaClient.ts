@@ -1,7 +1,7 @@
 import { logger } from '../services/logger';
 // Ollama API Client (Local LLM Server)
 
-import { BaseApiClient, ApiError } from './BaseApiClient';
+import { BaseApiClient } from './BaseApiClient';
 import type { LLMStreamEvent, LLMRequestConfig, LLMResponse, TokenUsage } from './BaseApiClient';
 import type { ChatMessage, ToolCall } from '../query/protocol';
 import type { ToolDefinition } from '../tools/protocol';
@@ -242,22 +242,21 @@ export class OllamaClient extends BaseApiClient {
   }
 
   /**
-   * Handle API errors with Ollama-specific handling
+   * M8: Ollama-specific classification ahead of the shared rules. The string
+   * array expresses the AND-semantics of the original model-not-found check.
    */
-  protected handleApiError(error: unknown, context: string, response?: Response): never {
-    if (error instanceof Error) {
-      const message = error.message;
-
-      // Connection refused - Ollama not running
-      if (message.includes('ECONNREFUSED') || message.includes('fetch failed')) {
-        throw new ApiError(`${context}: Cannot connect to Ollama at ${this.baseUrl}. Is Ollama running?`);
-      }
-
-      if (message.includes('model') && message.includes('not found')) {
-        throw new ApiError(`${context}: Model '${this.model}' not found. Run 'ollama pull ${this.model}' first`, 404);
-      }
-    }
-
-    super.handleApiError(error, context, response);
+  protected errorRules(): Array<{ match: RegExp | string[]; status?: number; message: string }> {
+    return [
+      {
+        match: /ECONNREFUSED|fetch failed/,
+        message: `Cannot connect to Ollama at ${this.baseUrl}. Is Ollama running?`,
+      },
+      {
+        match: ['model', 'not found'],
+        status: 404,
+        message: `Model '${this.model}' not found. Run 'ollama pull ${this.model}' first`,
+      },
+      ...super.errorRules(),
+    ];
   }
 }

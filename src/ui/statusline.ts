@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import { formatStatusLine } from './formatter';
 
-interface StatusData {
+export interface StatusData {
   provider?: string;
   model?: string;
   turnCount?: number;

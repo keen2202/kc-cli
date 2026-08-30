@@ -6,6 +6,8 @@ import type { LLMStreamEvent, LLMRequestConfig, LLMResponse } from './protocol';
 import { ApiError } from './protocol';
 import { z } from 'zod';
 import { zodToJsonSchema } from '../utils/zodToJsonSchema';
+import { logger } from '../services/logger';
+import { redactTruncated } from '../utils/redact';
 
 // Re-export protocol types for backward compatibility
 export type { LLMStreamEvent, TokenUsage, LLMRequestConfig, LLMResponse } from './protocol';
@@ -329,9 +331,18 @@ export abstract class BaseApiClient {
   }
 
   /**
-   * Handle API errors
-   * When a Response is provided, extracts status code and headers into ApiError.
-   * Subclasses can override for provider-specific error handling.
+   * Handle API errors — rule-table driven (M8, round4 §6-M8).
+   *
+   * The provider clients previously carried three divergent copies of the same
+   * classification ladder (Anthropic matched `rate_limit` but missed 403/404;
+   * OpenAI matched `rate limit` and had no `overloaded_error`). Every failure
+   * now flows through this single implementation:
+   *   1. `errorRules()` — common classification + subclass extras, first match wins.
+   *   2. Fallback — redacted, length-capped generic wrap.
+   *
+   * Rule semantics: `match: RegExp` → OR-style test on the error message;
+   * `match: string[]` → ALL substrings must be present (AND).
+   * Subclasses that add rules should return `[...specific, ...super.errorRules()]`.
    */
   protected handleApiError(error: unknown, context: string, response?: Response): never {
     const headers: Record<string, string> = {};
@@ -339,13 +350,44 @@ export abstract class BaseApiClient {
 
     if (response) {
       statusCode = response.status;
-      response.headers.forEach((value, key) => {
+      // `headers` is always present on a real Response, but test doubles may
+      // omit it — classification must not depend on it.
+      response.headers?.forEach((value, key) => {
         headers[key.toLowerCase()] = value;
       });
     }
 
+    if (error instanceof Error) {
+      const message = error.message;
+      for (const rule of this.errorRules()) {
+        const matched = rule.match instanceof RegExp
+          ? rule.match.test(message)
+          : rule.match.every((needle) => message.includes(needle));
+        if (matched) {
+          throw new ApiError(`${context}: ${rule.message}`, rule.status, headers);
+        }
+      }
+    }
+
     const message = error instanceof Error ? error.message : String(error);
-    throw new ApiError(`${context}: ${message}`, statusCode, headers);
+    // O1: upstream error bodies can echo request headers (proxy misconfig);
+    // never embed them verbatim — redact and cap before surfacing.
+    throw new ApiError(`${context}: ${redactTruncated(message)}`, statusCode, headers);
+  }
+
+  /**
+   * M8: shared error classification table. The common provider-agnostic rules
+   * live here so every client classifies 401/429/403/404 identically
+   * (`rate limit` AND `rate_limit` both match; 403/404 are no longer
+   * provider-specific gaps).
+   */
+  protected errorRules(): Array<{ match: RegExp | string[]; status?: number; message: string }> {
+    return [
+      { match: /401|invalid_api_key|Unauthorized/, status: 401, message: 'Invalid API key' },
+      { match: /429|rate limit|rate_limit/, status: 429, message: 'Rate limit exceeded' },
+      { match: /403|Forbidden/, status: 403, message: 'Access forbidden. Check API key permissions' },
+      { match: /model_not_found|invalid_model/, status: 404, message: `Model '${this.model}' not found` },
+    ];
   }
 
   /**
@@ -368,6 +410,9 @@ export abstract class BaseApiClient {
     failureContext?: string,
   ): Promise<T> {
     let response: Response | undefined;
+    // O1: every LLM request gets a lifecycle trace — without it a 429/500/timeout
+    // is indistinguishable from a dead key in the logs.
+    const startedAt = Date.now();
     try {
       response = await fetch(request.url, {
         method: 'POST',
@@ -384,6 +429,14 @@ export abstract class BaseApiClient {
       const data = await response.json() as Record<string, unknown>;
       return parse(data);
     } catch (error) {
+      logger.api.error('llm request failed', {
+        op,
+        model: this.model,
+        baseUrl: this.baseUrl,
+        statusCode: response?.status ?? (error instanceof ApiError ? error.statusCode : undefined),
+        durationMs: Date.now() - startedAt,
+        message: redactTruncated(error instanceof Error ? error.message : String(error)),
+      });
       this.handleApiError(error, failureContext ?? `Failed to call ${op} API`);
     }
   }
@@ -406,6 +459,7 @@ export abstract class BaseApiClient {
     gen: (body: ReadableStream) => AsyncGenerator<LLMStreamEvent>,
   ): AsyncGenerator<LLMStreamEvent> {
     let response: Response | undefined;
+    const startedAt = Date.now();
     try {
       response = await fetch(request.url, {
         method: 'POST',
@@ -425,12 +479,28 @@ export abstract class BaseApiClient {
 
       yield* gen(response.body);
     } catch (error) {
+      // O1: same lifecycle trace as the non-streaming pipeline; the event is
+      // additionally yielded as `{ type: 'error' }` below (existing contract).
+      logger.api.error('llm request failed', {
+        op,
+        model: this.model,
+        baseUrl: this.baseUrl,
+        statusCode: response?.status ?? (error instanceof ApiError ? error.statusCode : undefined),
+        durationMs: Date.now() - startedAt,
+        message: redactTruncated(error instanceof Error ? error.message : String(error)),
+      });
       yield {
         type: 'error',
         error: error instanceof Error ? error : new Error(String(error)),
       };
     } finally {
-      await response?.body?.cancel();
+      // The !ok path consumes the body via text(), which leaves the stream
+      // locked in undici — cancel() then rejects. Cleanup is best-effort.
+      try {
+        await response?.body?.cancel();
+      } catch {
+        /* body already consumed or locked by the frame reader */
+      }
     }
   }
 

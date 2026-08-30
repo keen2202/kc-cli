@@ -3,6 +3,7 @@
 import { render } from 'ink';
 import type { QueryEngine } from '../query/QueryEngine';
 import { AppRoot } from './components/AppRoot.js';
+import { EXIT } from '../utils/exit-codes';
 
 interface RenderOptions {
   queryEngine: QueryEngine;
@@ -30,8 +31,11 @@ export function renderInkUI(options: RenderOptions): void {
   // Safety net: if stdin raw mode works but useInput somehow fails,
   // SIGINT (Ctrl+C) will still exit via Ink's default handler.
   // Additional SIGTERM handler for kill signals.
+  //
+  // R3: SIGTERM reported 0, so a supervisor killing kc-cli could not tell an
+  // orderly shutdown from a completed run. 143 = 128 + SIGTERM(15).
   const onTerminate = () => {
-    process.exit(0);
+    process.exit(EXIT.SIGTERM);
   };
   process.once('SIGTERM', onTerminate);
 
@@ -41,7 +45,7 @@ export function renderInkUI(options: RenderOptions): void {
     })
     .catch((error) => {
       console.error('UI error:', error);
-      process.exit(1);
+      process.exit(EXIT.FAILURE);
     });
 }
 

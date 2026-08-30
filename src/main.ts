@@ -5,6 +5,16 @@
 
 import chalk from 'chalk';
 import { getErrorMessage } from './utils/errors';
+import {
+  EXIT,
+  createRunOutcome,
+  exitCodeFor,
+  isFailureEvent,
+  markFailed,
+  type RunOutcome,
+} from './utils/exit-codes';
+import { installGlobalCrashGuards } from './utils/crash-guards';
+import { createSerialQueue } from './utils/async-helpers';
 
 import { profileCheckpoint, getProfileReport } from './bootstrap/profiler';
 import { getState, updateState } from './bootstrap/state';
@@ -24,6 +34,18 @@ import { ReplSessionService } from './services/replSession';
 import { main } from './bootstrap/app';
 
 let currentSpinner: Spinner | null = null;
+
+// ── Global crash guards ──
+//
+// Installed at module scope so they cover EVERY entry path (ink UI, bare REPL,
+// --json, single prompt). They used to live inside runREPL(), which meant the
+// default interactive path had no fatal-error handling at all: a floating
+// promise rejection terminated the process without ever saving the session.
+//
+// Each entry path registers its own snapshot saver; until one does, the guard
+// degrades to a no-op save and still exits non-zero instead of crashing blind.
+
+const crashGuards = installGlobalCrashGuards();
 
 // ── JSON output mode ──
 
@@ -45,30 +67,42 @@ async function runJSONMode(queryEngine: QueryEngine, prompt: string | undefined,
     process.stdout.write(stringify(msg) + '\n');
   };
 
-  if (prompt) {
-    (async () => {
-      try {
-        for await (const event of queryEngine.submitMessage(prompt)) {
-          emit(event);
+  // R3: a denial / agent error / budget stop must change the exit code, not
+  // just print something. `process.exitCode` (rather than process.exit) is used
+  // so buffered stdout is still flushed before the process ends.
+  const outcome = createRunOutcome();
+
+  const runOne = async (text: string): Promise<void> => {
+    try {
+      for await (const event of queryEngine.submitMessage(text)) {
+        if (isFailureEvent(event)) {
+          markFailed(outcome, event.type);
         }
-      } catch (error) {
-        emit({ type: 'error', error: { message: getErrorMessage(error) }, timestamp: Date.now() });
+        emit(event);
       }
-    })();
+    } catch (error) {
+      markFailed(outcome, `submitMessage: ${getErrorMessage(error)}`);
+      emit({ type: 'error', error: { message: getErrorMessage(error) }, timestamp: Date.now() });
+    }
+    process.exitCode = exitCodeFor(outcome);
+  };
+
+  if (prompt) {
+    await runOne(prompt);
   } else {
     const readline = await import('readline');
     const rl = readline.createInterface({ input: process.stdin });
 
-    rl.on('line', async (line) => {
+    // One line at a time. The 'line' callback fires as fast as stdin produces
+    // data, so awaiting inline let a second query run concurrently with the
+    // first — interleaving two conversations on a single QueryEngine, mixing up
+    // their events and emitting duplicate `sequence` values.
+    const queue = createSerialQueue();
+
+    rl.on('line', (line) => {
       const trimmed = line.trim();
       if (!trimmed) return;
-      try {
-        for await (const event of queryEngine.submitMessage(trimmed)) {
-          emit(event);
-        }
-      } catch (error) {
-        emit({ type: 'error', error: { message: getErrorMessage(error) }, timestamp: Date.now() });
-      }
+      void queue.push(() => runOne(trimmed));
     });
   }
 }
@@ -78,15 +112,26 @@ async function runJSONMode(queryEngine: QueryEngine, prompt: string | undefined,
 async function executePrompt(queryEngine: QueryEngine, prompt: string) {
   console.log(chalk.bold('\n🤔 Processing your request...\n'));
 
+  // R3: permission denials / agent errors used to leave the exit code at 0.
+  const outcome = createRunOutcome();
+
   try {
     for await (const event of queryEngine.submitMessage(prompt)) {
+      if (isFailureEvent(event)) {
+        markFailed(outcome, event.type);
+      }
       handleStreamEvent(event);
     }
   } catch (error) {
+    markFailed(outcome, `submitMessage: ${getErrorMessage(error)}`);
     console.error(
       chalk.red(`\n❌ Fatal error: ${getErrorMessage(error)}`)
     );
-    process.exit(1);
+    process.exit(EXIT.FAILURE);
+  }
+
+  if (outcome.failed) {
+    process.exit(EXIT.FAILURE);
   }
 }
 
@@ -214,21 +259,31 @@ async function runREPL(queryEngine: QueryEngine) {
   const cleanup = () => {
     console.log(chalk.yellow('\n👋 Goodbye!'));
     rl.close();
-    // Best-effort final snapshot before exiting (save() never throws).
-    void replSession.save(queryEngine).finally(() => process.exit(0));
+    // O5: if persistence kept failing this session, say so loudly — the user
+    // should not walk away believing hours of conversation were saved.
+    if (replSession.getSaveFailureCount() > 0) {
+      console.log(
+        chalk.red(
+          `⚠️  WARNING: ${replSession.getSaveFailureCount()} session save attempt(s) FAILED this session — the conversation was NOT reliably persisted.`,
+        ),
+      );
+    }
+    // Best-effort final snapshot before exiting (save() never throws, but the
+    // catch guard keeps `.finally` from absorbing an unexpected rejection).
+    void replSession
+      .save(queryEngine)
+      .catch(() => {})
+      .finally(() => process.exit(0));
   };
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
 
-  // Crash-loss guard: on a fatal error, flush a best-effort snapshot before
-  // exiting so hours of accumulated conversation survive the crash
-  // (save() never throws, so this handler cannot itself crash-loop).
-  const emergencySave = (err: unknown) => {
-    console.error(chalk.red(`\n\u{1F4A5} Fatal error: ${getErrorMessage(err)} \u2014 saving session before exit...`));
-    void replSession.save(queryEngine).finally(() => process.exit(1));
-  };
-  process.on('uncaughtException', emergencySave);
-  process.on('unhandledRejection', emergencySave);
+  // The process-wide fatal handlers live at module scope (installGlobalCrashGuards).
+  // Point them at this REPL's session service so a crash still flushes the
+  // conversation (save() never throws, so the handler cannot crash-loop).
+  crashGuards.setSnapshotSaver(async () => {
+    await replSession.save(queryEngine);
+  });
 
   const askQuestion = () => {
     rl.question(chalk.cyan.bold('kc> '), async (input) => {
@@ -252,7 +307,7 @@ async function runREPL(queryEngine: QueryEngine) {
           // Narrow the crash-loss window inside a long multi-turn query:
           // throttled snapshot after each completed agent turn.
           if (event.type === 'agent:turn_complete') {
-            void replSession.saveThrottled(queryEngine);
+            void replSession.saveThrottled(queryEngine).catch(() => {});
           }
           handleStreamEvent(event);
         }
@@ -497,17 +552,36 @@ async function listTools() {
 
 // ── Entry ──
 
+/**
+ * Point the process-wide crash guard at a session service for the given engine.
+ * The ink UI and the JSON/prompt paths each own their engine, so each registers
+ * its own emergency snapshot rather than relying on the REPL's.
+ */
+function registerCrashSnapshot(queryEngine: QueryEngine): void {
+  const session = new ReplSessionService();
+  crashGuards.setSnapshotSaver(async () => {
+    await session.save(queryEngine);
+  });
+}
+
 main({
   onInteractiveUI: async ({ queryEngine, provider, model, maxTurns }) => {
+    registerCrashSnapshot(queryEngine);
     const { renderInkUI } = await import('./ui/renderer');
     renderInkUI({ queryEngine, provider, model, maxTurns });
   },
   onRunREPL: runREPL,
-  onExecutePrompt: executePrompt,
-  onRunJSONMode: runJSONMode,
+  onExecutePrompt: (queryEngine, prompt) => {
+    registerCrashSnapshot(queryEngine);
+    return executePrompt(queryEngine, prompt);
+  },
+  onRunJSONMode: (queryEngine, prompt, pretty) => {
+    registerCrashSnapshot(queryEngine);
+    return runJSONMode(queryEngine, prompt, pretty);
+  },
   onShowConfig: showConfig,
   onListTools: listTools,
 }).catch((error) => {
   console.error(chalk.red('Fatal error:'), error);
-  process.exit(1);
+  process.exit(EXIT.FAILURE);
 });

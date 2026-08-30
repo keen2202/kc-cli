@@ -67,6 +67,56 @@ export interface WithRetryOptions {
  * @example
  * const data = await withRetry(() => api.fetchData(), { maxRetries: 3 });
  */
+/**
+ * A queue that runs at most one task at a time.
+ *
+ * Used where a stream of inputs (e.g. `--json` mode lines arriving faster than
+ * the engine can answer) would otherwise drive one shared resource
+ * concurrently. `push` returns a promise for that task's own result.
+ */
+export interface SerialQueue {
+  /** Enqueue `task`; resolves/rejects with that task's outcome. */
+  push<T>(task: () => Promise<T>): Promise<T>;
+  /** Tasks accepted but not yet started. */
+  readonly pending: number;
+  /** Whether a task is currently running. */
+  readonly running: boolean;
+}
+
+export function createSerialQueue(): SerialQueue {
+  let chain: Promise<unknown> = Promise.resolve();
+  let pending = 0;
+  let running = false;
+
+  return {
+    push<T>(task: () => Promise<T>): Promise<T> {
+      pending += 1;
+      const run = chain.then(async () => {
+        pending -= 1;
+        running = true;
+        try {
+          return await task();
+        } finally {
+          running = false;
+        }
+      });
+      // A failed task must not break the chain for the tasks behind it; the
+      // caller still gets the rejection from `run`.
+      chain = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
+    },
+    get pending(): number {
+      return pending;
+    },
+    get running(): boolean {
+      return running;
+    },
+  };
+}
+
 export async function withRetry<T>(
   fn: () => Promise<T>,
   opts: WithRetryOptions,

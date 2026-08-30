@@ -1,7 +1,7 @@
 // Todo Write Tool - Manage todo lists for tracking work
 
 import { z } from 'zod';
-import { buildTool, toolResult, toolError } from '../../Tool';
+import { readonlyAllow, buildTool, toolResult, toolError, toolFailure } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 
@@ -70,15 +70,11 @@ export const tool = buildTool<TodoWriteInput, string>({
         },
       });
     } catch (error) {
-      return toolError(`TodoWrite failed: ${error instanceof Error ? error.message : String(error)}`);
+      return toolFailure('TodoWrite', error);
     }
   },
 
-  checkPermissions: (): PermissionResult => ({
-    behavior: 'allow',
-    updatedInput: {},
-    decisionReason: { type: 'readonly', reason: 'Todo management is safe' },
-  }),
+  checkPermissions: () => readonlyAllow('Todo management is safe'),
 
   isReadOnly: () => false,
   isConcurrencySafe: () => true,

@@ -3,30 +3,14 @@
 // not wire this back into the render path.
 import chalk from 'chalk';
 import type { Theme } from '../theme';
+import { formatCount, formatDurationSec } from '../format-duration';
+import type { StatusData } from '../statusline';
 
-interface StatusBarData {
-  provider?: string;
-  model?: string;
-  turnCount?: number;
-  maxTurns?: number;
-  tokensUsed?: number;
-  sessionStartTime?: number;
+// T29 (M4): the shape mirrors statusline's StatusData; the extra fields are
+// legacy-only. Shared formatters come from ui/format-duration.
+interface StatusBarData extends StatusData {
   isStreaming?: boolean;
   mode?: 'idle' | 'streaming' | 'overlay' | 'steer';
-}
-
-function formatTokenCount(count: number): string {
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k`;
-  return String(count);
-}
-
-function formatDuration(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${minutes}m${secs}s`;
 }
 
 function renderProgressBar(percent: number, width: number = 10, theme?: Theme): string {
@@ -83,14 +67,14 @@ export function renderStatusBar(data: StatusBarData, theme?: Theme): string {
   // Right-aligned: tokens
   if (data.tokensUsed !== undefined) {
     const tokenColor = tokens ? tokens['status.tokens'] : chalk.gray;
-    rightParts.push(tokenColor(`${formatTokenCount(data.tokensUsed)} tokens`));
+    rightParts.push(tokenColor(`${formatCount(data.tokensUsed)} tokens`));
     hasData = true;
   }
 
   // Right-aligned: duration
   if (data.sessionStartTime) {
     const durationColor = tokens ? tokens['status.duration'] : chalk.gray;
-    rightParts.push(durationColor(formatDuration(Date.now() - data.sessionStartTime)));
+    rightParts.push(durationColor(formatDurationSec((Date.now() - data.sessionStartTime) / 1000)));
     hasData = true;
   }
 

@@ -121,6 +121,13 @@ export const ConfigSchema = z.object({
   // MCP Configuration
   mcp: z.object({
     enabled: z.boolean().default(true),
+    /**
+     * T23 (P2): per-server connection timeout for background MCP connects.
+     * Previously a hardcoded 30s sat on the startup critical path; connections
+     * now run off it with a tighter default (10s) that is still generous for
+     * slow npx-based servers.
+     */
+    connectionTimeoutMs: z.number().int().positive().max(120_000).default(10_000),
   }).default({}),
 
   // ── Prompt instruction surfaces (harness-evolution T1) — off by default ──

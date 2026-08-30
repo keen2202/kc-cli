@@ -21,6 +21,8 @@ import type {
   ResourceDiff,
 } from './protocol';
 import type { ContextManager, ResourceBuilder, ResourceRunner } from './context-manager';
+import { logger } from '../services/logger';
+import { getErrorMessage } from '../utils/errors';
 
 // ─── Request/Response Types ──────────────────────────────────────────────────
 
@@ -77,7 +79,7 @@ export class ServerInterface {
       const version = manager.register(record);
       return { success: true, version, data: { version } };
     } catch (err) {
-      return { success: false, error: String(err) };
+      return this.failure(err);
     }
   }
 
@@ -100,7 +102,7 @@ export class ServerInterface {
       const version = manager.update(name, changes);
       return { success: true, version, data: { version } };
     } catch (err) {
-      return { success: false, error: String(err) };
+      return this.failure(err);
     }
   }
 
@@ -192,7 +194,7 @@ export class ServerInterface {
       const version = manager.set_variables(name, variables);
       return { success: true, version, data: { version } };
     } catch (err) {
-      return { success: false, error: String(err) };
+      return this.failure(err);
     }
   }
 
@@ -208,7 +210,7 @@ export class ServerInterface {
       const variables = manager.get_variables(name);
       return { success: true, data: variables };
     } catch (err) {
-      return { success: false, error: String(err) };
+      return this.failure(err);
     }
   }
 
@@ -262,11 +264,21 @@ export class ServerInterface {
       const result = await manager.run(name, input);
       return { success: true, data: result };
     } catch (err) {
-      return { success: false, error: String(err) };
+      return this.failure(err);
     }
   }
 
   // ─── Internal ────────────────────────────────────────────────────────────
+
+  /**
+   * M9c: uniform failure shape — the error *message* is preserved (previously
+   * `String(err)` dropped Error fields and serialized as `[object Error]`-ish
+   * text with no stack) and every failure leaves a warn-level log trail.
+   */
+  private failure(err: unknown): { success: false; error: string } {
+    logger.agp.warn('AGP server operation failed', { reason: getErrorMessage(err) });
+    return { success: false, error: getErrorMessage(err) };
+  }
 
   private requireManager(type: ResourceType): ContextManager {
     const manager = this.managers.get(type);

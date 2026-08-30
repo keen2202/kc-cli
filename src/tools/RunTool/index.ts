@@ -4,9 +4,9 @@ import { z } from 'zod';
 import { buildTool, toolResult, toolError } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
-import { getErrorMessage } from '../../utils/errors';
+import { getErrorMessage, isAbortError } from '../../utils/errors';
 import { logger } from '../../services/logger';
-import { filterEnvVars } from './secrets';
+import { buildSafeEnv } from '../../utils/env-sanitize';
 import {
   applySandboxPreWrap,
   checkDangerousCommand,
@@ -45,13 +45,11 @@ export const tool = buildTool<RunInput, string>({
         });
       }
 
-      // Filter KC_* secrets and dangerous vars from parent env (SEC-03)
-      const env = {
-        ...filterEnvVars(Object.fromEntries(
-          Object.entries(process.env).filter(([, v]) => v !== undefined)
-        ) as Record<string, string>),
-        ...filterEnvVars(input.env || {}),
-      } as Record<string, string>;
+      // SEC-03: start from the sanitized host baseline (allowlisted vars only,
+      // no KC_*), then layer the caller's explicitly declared vars on top.
+      // `buildSafeEnv` rejects KC_*/provider secrets and injection vectors even
+      // when they are passed deliberately, so `input.env` cannot re-open either.
+      const env = buildSafeEnv(input.env ?? {});
 
       // The ToolExecutor pre-wraps commands for 'Run' tool at the executor level
       // (the authoritative sandbox enforcement point). Shared helper verifies the
@@ -98,6 +96,13 @@ export const tool = buildTool<RunInput, string>({
         },
       });
     } catch (error) {
+      // R7: same contract as BashTool — cancellation is its own outcome.
+      if (isAbortError(error)) {
+        return toolError(`Command cancelled: ${input.command}`, {
+          command: input.command,
+          cancelled: true,
+        });
+      }
       return toolError(`Command failed: ${getErrorMessage(error)}`, {
         command: input.command,
       });

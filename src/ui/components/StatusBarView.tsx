@@ -4,6 +4,7 @@ import { useTheme } from '../hooks/useTheme';
 import { useTerminalSize } from '../hooks/useTerminalSize';
 import { useNowTick } from '../hooks/useNowTick';
 import { abbreviateModel, truncate, getBreakpoint } from '../layout';
+import { formatDurationSec } from '../format-duration';
 
 interface StatusBarProps {
   mode: 'idle' | 'streaming' | 'executing' | 'error' | 'overlay' | 'steer';
@@ -51,15 +52,6 @@ const MODE_LABELS: Record<string, string> = {
   steer: 'steer',
 };
 
-/** Format seconds as `12s` / `2m05s` for compact status display. */
-function formatDuration(sec: number): string {
-  if (!Number.isFinite(sec) || sec < 0) return '0s';
-  if (sec < 60) return `${Math.round(sec)}s`;
-  const m = Math.floor(sec / 60);
-  const s = Math.round(sec % 60);
-  return `${m}m${String(s).padStart(2, '0')}s`;
-}
-
 export function StatusBar({ mode, provider, model, turnCount, maxTurns, tokensUsed, currentOperation, operationElapsedSec, operationStartTime, progressPercent, etaSec, queryStartTime, etaCompletedUnits, etaRemainingUnits }: StatusBarProps) {
   const { tokens } = useTheme();
   const { width } = useTerminalSize();
@@ -94,8 +86,8 @@ export function StatusBar({ mode, provider, model, turnCount, maxTurns, tokensUs
   // Live operation + progress percent are the lowest-priority segments: they
   // are appended after the essentials and dropped first when width is tight.
   const pct = progressPercent !== undefined ? ` ${Math.round(progressPercent)}%` : '';
-  const eta = liveEta !== undefined && liveEta > 0 ? ` · ETA ~${formatDuration(liveEta)}` : '';
-  const opElapsed = liveOpElapsed !== undefined ? ` (${formatDuration(liveOpElapsed)})` : '';
+  const eta = liveEta !== undefined && liveEta > 0 ? ` · ETA ~${formatDurationSec(liveEta)}` : '';
+  const opElapsed = liveOpElapsed !== undefined ? ` (${formatDurationSec(liveOpElapsed)})` : '';
   const opSuffix = currentOperation ? ` · running: ${currentOperation}${opElapsed}` : '';
   const plain = `${icon} ${label} ${provider}/${modelLabel} ${progressBar} ${turnCount}/${maxTurns}${pct}${eta}${opSuffix}${tokenSuffix}`;
   const avail = Math.max(0, width - 2);

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
-import { formatDuration } from '../format-duration';
+import { formatDuration, formatCount } from '../format-duration';
 
 interface SessionInfoProps {
   sessionId?: string;
@@ -32,11 +32,6 @@ export function SessionInfo({
 
   const effectiveDuration = startTime !== undefined ? Math.max(0, now - startTime) : duration;
 
-  const formatTokens = (n: number) => {
-    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-    return String(n);
-  };
-
   // Provider/model intentionally omitted here — the HeaderBar is the single
   // source of truth for the active provider/model to avoid duplicate display.
   // The block renders at its natural height (border + padding + 4 rows) and
@@ -48,7 +43,7 @@ export function SessionInfo({
       <Box flexDirection="column" marginTop={1}>
         <Text dimColor>Session: {sessionId}</Text>
         <Text dimColor>
-          Tokens: {formatTokens(tokensUsed)}/{formatTokens(tokensMax)}
+          Tokens: {formatCount(tokensUsed)}/{formatCount(tokensMax)}
         </Text>
         <Text dimColor>Duration: {formatDuration(effectiveDuration)}</Text>
       </Box>

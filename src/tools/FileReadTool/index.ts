@@ -26,19 +26,26 @@ const PREVIEW_LINES = 50;
 
 /**
  * Stream the first `count` lines from a file.
+ *
+ * The teardown is in `finally`: an error thrown mid-iteration (EACCES, EISDIR,
+ * the file being deleted concurrently, a decode error) used to skip
+ * `stream.destroy()` entirely, leaking a file descriptor on every failure.
  */
 async function readHeadLines(filePath: string, count: number): Promise<string> {
   const stream = createReadStream(filePath, { encoding: 'utf-8', highWaterMark: 64 * 1024 });
   const rl = createInterface({ input: stream, crlfDelay: Infinity });
 
-  const lines: string[] = [];
-  for await (const line of rl) {
-    lines.push(line);
-    if (lines.length >= count) break;
+  try {
+    const lines: string[] = [];
+    for await (const line of rl) {
+      lines.push(line);
+      if (lines.length >= count) break;
+    }
+    return lines.join('\n');
+  } finally {
+    rl.close();
+    stream.destroy();
   }
-  rl.close();
-  stream.destroy();
-  return lines.join('\n');
 }
 
 /**
@@ -48,25 +55,40 @@ async function readTailLines(filePath: string, count: number): Promise<string> {
   const stream = createReadStream(filePath, { encoding: 'utf-8', highWaterMark: 64 * 1024 });
   const rl = createInterface({ input: stream, crlfDelay: Infinity });
 
-  const buffer: string[] = [];
-  for await (const line of rl) {
-    buffer.push(line);
-    if (buffer.length > count) buffer.shift();
+  try {
+    const buffer: string[] = [];
+    for await (const line of rl) {
+      buffer.push(line);
+      if (buffer.length > count) buffer.shift();
+    }
+    return buffer.join('\n');
+  } finally {
+    rl.close();
+    stream.destroy();
   }
-  rl.close();
-  stream.destroy();
-  return buffer.join('\n');
 }
 
 /**
  * Read a large file as a stream, returning a head+tail preview.
  * Never loads the entire file into memory.
+ *
+ * Uses `allSettled` so one half failing does not abandon the other half's
+ * descriptors: each reader releases its own stream in `finally`. Only when both
+ * fail do we surface the error.
  */
 async function readLargeFilePreview(filePath: string, size: number, maxSize: number): Promise<string> {
-  const [head, tail] = await Promise.all([
+  const results = await Promise.allSettled([
     readHeadLines(filePath, PREVIEW_LINES),
     readTailLines(filePath, PREVIEW_LINES),
   ]);
+
+  const [headResult, tailResult] = results;
+  // Both halves failed: there is nothing usable to show, so surface the error.
+  if (headResult.status === 'rejected' && tailResult.status === 'rejected') {
+    throw headResult.reason;
+  }
+  const head = headResult.status === 'fulfilled' ? headResult.value : '';
+  const tail = tailResult.status === 'fulfilled' ? tailResult.value : '';
 
   const sizeKB = (size / 1024).toFixed(1);
   const maxKB = (maxSize / 1024).toFixed(1);

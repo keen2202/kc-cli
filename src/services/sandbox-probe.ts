@@ -4,6 +4,7 @@
 
 import { execSync } from 'child_process';
 import type { SandboxBackend, SandboxOptions } from './sandbox';
+import { SANDBOX_PROBE_TIMEOUT_MS } from '../constants';
 
 export interface TestResult {
   name: string;
@@ -57,7 +58,7 @@ export class SandboxProbe {
 
     try {
       const output = execSync(command, {
-        timeout: 10000,
+        timeout: SANDBOX_PROBE_TIMEOUT_MS,
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
       }).trim();
@@ -107,7 +108,7 @@ export class SandboxProbe {
 
     try {
       const output = execSync(command, {
-        timeout: 10000,
+        timeout: SANDBOX_PROBE_TIMEOUT_MS,
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
       }).trim();
@@ -145,7 +146,7 @@ export class SandboxProbe {
 
     try {
       const output = execSync(command, {
-        timeout: 10000,
+        timeout: SANDBOX_PROBE_TIMEOUT_MS,
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
       }).trim();
@@ -185,7 +186,7 @@ export class SandboxProbe {
 
     try {
       const output = execSync(command, {
-        timeout: 10000,
+        timeout: SANDBOX_PROBE_TIMEOUT_MS,
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
       }).trim();

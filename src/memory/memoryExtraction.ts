@@ -743,6 +743,13 @@ export async function extractMemoriesHybrid(
       if (llmRuntime.consecutiveFailures >= CIRCUIT_BREAKER_THRESHOLD && !llmRuntime.circuitBroken) {
         llmRuntime.circuitBroken = true;
         recordCircuitBroken();
+        // O2: tripping this breaker must be visible — from here on LLM memory
+        // extraction is off until the process restarts, with only a debug-level
+        // per-failure trace to show for it otherwise.
+        logger.memory.warn('memory extraction circuit breaker opened', {
+          threshold: CIRCUIT_BREAKER_THRESHOLD,
+          consecutiveFailures: llmRuntime.consecutiveFailures,
+        });
       }
       logger.memory.debug('[MemoryExtraction] LLM extraction failed; degrading to heuristic', {
         context: classified.context,

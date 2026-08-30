@@ -10,7 +10,7 @@ describe('Env secrets filtering', () => {
   });
 
   it('should filter KC_* prefixed vars from user-supplied env', async () => {
-    const { filterEnvVars } = await import('../../src/tools/RunTool/secrets');
+    const { filterEnvVars } = await import('../../src/utils/env-sanitize');
     const filtered = filterEnvVars({
       KC_API_KEY: 'leaked-key',
       EDITOR: 'vim',
@@ -22,7 +22,7 @@ describe('Env secrets filtering', () => {
   });
 
   it('should filter all KC_* prefixed vars dynamically', async () => {
-    const { filterEnvVars } = await import('../../src/tools/RunTool/secrets');
+    const { filterEnvVars } = await import('../../src/utils/env-sanitize');
     const filtered = filterEnvVars({
       KC_API_KEY: 'key1',
       KC_SEARCH_API_KEY: 'key2',
@@ -40,7 +40,7 @@ describe('Env secrets filtering', () => {
   });
 
   it('should filter system-level dangerous vars from user input', async () => {
-    const { filterEnvVars } = await import('../../src/tools/RunTool/secrets');
+    const { filterEnvVars } = await import('../../src/utils/env-sanitize');
     const filtered = filterEnvVars({
       LD_PRELOAD: '/evil.so',
       EDITOR: 'vim',
@@ -50,7 +50,7 @@ describe('Env secrets filtering', () => {
   });
 
   it('buildSafeEnv should strip KC_* but preserve system vars', async () => {
-    const { buildSafeEnv } = await import('../../src/tools/RunTool/secrets');
+    const { buildSafeEnv } = await import('../../src/utils/env-sanitize');
     const env = buildSafeEnv();
     expect(env).not.toHaveProperty('KC_API_KEY');
     expect(env).not.toHaveProperty('KC_SEARCH_API_KEY');

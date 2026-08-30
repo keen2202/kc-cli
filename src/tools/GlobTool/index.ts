@@ -1,7 +1,7 @@
 // Glob Tool - Find files by pattern matching
 
 import { z } from 'zod';
-import { buildTool, toolResult, toolError } from '../../Tool';
+import { readonlyAllow, buildTool, toolResult, toolError, toolFailure } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 import * as path from 'path';
@@ -76,15 +76,11 @@ export const tool = buildTool<GlobInput, string>({
         }
       );
     } catch (error) {
-      return toolError(`Glob failed: ${error instanceof Error ? error.message : String(error)}`);
+      return toolFailure('Glob', error);
     }
   },
 
-  checkPermissions: (): PermissionResult => ({
-    behavior: 'allow',
-    updatedInput: {},
-    decisionReason: { type: 'readonly', reason: 'File pattern matching is read-only' },
-  }),
+  checkPermissions: () => readonlyAllow('File pattern matching is read-only'),
 
   isReadOnly: () => true,
   isConcurrencySafe: () => true,

@@ -2,7 +2,7 @@
 
 import * as readline from 'node:readline';
 import { z } from 'zod';
-import { buildTool, toolResult, toolError } from '../../Tool';
+import { readonlyAllow, buildTool, toolResult, toolError, toolFailure } from '../../Tool';
 import type { ToolResult as ToolResultType } from '../protocol';
 import type { PermissionResult } from '../../permissions/protocol';
 
@@ -100,15 +100,11 @@ export const tool = buildTool<AskUserInput, string>({
       }
       return toolError('interactive input unavailable');
     } catch (error) {
-      return toolError(`AskUser failed: ${error instanceof Error ? error.message : String(error)}`);
+      return toolFailure('AskUser', error);
     }
   },
 
-  checkPermissions: (): PermissionResult => ({
-    behavior: 'allow',
-    updatedInput: {},
-    decisionReason: { type: 'readonly', reason: 'User interaction is safe' },
-  }),
+  checkPermissions: () => readonlyAllow('User interaction is safe'),
 
   isReadOnly: () => true,
   // Interactive reads block on IO and print prompts — never run concurrently

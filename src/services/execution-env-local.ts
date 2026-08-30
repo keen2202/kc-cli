@@ -17,7 +17,9 @@ import type {
 } from './execution-env';
 import { DEFAULT_MAX_BUFFER } from '../constants';
 import { logger } from './logger';
-import { getErrorMessage } from '../utils/errors';
+import { getErrorMessage, isAbortError } from '../utils/errors';
+import { buildSafeEnv } from '../utils/env-sanitize';
+import { withFileLock } from './file-lock';
 
 const execAsync = promisify(exec);
 
@@ -188,7 +190,11 @@ export class LocalShell implements Shell {
     try {
       const { stdout, stderr } = await execAsync(command, {
         cwd: options.cwd,
-        env: options.env ? { ...process.env, ...options.env } : undefined,
+        // `options.env` is already sanitized by the caller (buildSafeEnv).
+        // Spreading `process.env` beneath it would re-introduce every KC_* the
+        // filter just stripped. When the caller supplies nothing we fall back to
+        // a sanitized baseline rather than inheriting the full host environment.
+        env: options.env ?? buildSafeEnv(),
         timeout: options.timeout,
         maxBuffer: DEFAULT_MAX_BUFFER,
         signal: options.signal,
@@ -199,6 +205,18 @@ export class LocalShell implements Shell {
         exitCode: 0,
       };
     } catch (error: unknown) {
+      // R7: a cancellation is not a command failure. Node's AbortError arrives
+      // as a rejected exec (code ABORT_ERR), and without this guard it was
+      // rewritten into `exitCode: 1` — so hitting Ctrl+C looked to the model
+      // exactly like the command crashed. Re-throw so the tool layer can
+      // report "cancelled".
+      if (isAbortError(error)) {
+        logger.services.info('[shell] command aborted by signal', {
+          command: command.slice(0, 200),
+        });
+        throw error;
+      }
+
       // exec throws on non-zero exit codes
       const err = error as { stdout?: string; stderr?: string; code?: number; killed?: boolean; signal?: string };
       const exitCode = typeof err.code === 'number' ? err.code : 1;
@@ -223,5 +241,6 @@ export function createLocalExecutionEnv(cwd: string): ExecutionEnv {
     fs: new LocalFileSystem(),
     shell: new LocalShell(),
     cwd,
+    withFileLock,
   };
 }

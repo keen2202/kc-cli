@@ -2,6 +2,7 @@
 // Tracks memory, CPU, wall time, and network usage during sandboxed command execution.
 
 import { execSync } from 'child_process';
+import { SANDBOX_MONITOR_SNAPSHOT_TIMEOUT_MS, SANDBOX_MONITOR_POLL_TIMEOUT_MS } from '../constants';
 
 export interface SandboxMetrics {
   memoryUsageMb: number;
@@ -137,7 +138,7 @@ export class SandboxMonitor {
     try {
       const output = execSync(
         `docker stats --no-stream --format "{{.MemUsage}}|{{.CPUPerc}}|{{.NetIO}}" ${containerId}`,
-        { encoding: 'utf-8', timeout: 5000 }
+        { encoding: 'utf-8', timeout: SANDBOX_MONITOR_SNAPSHOT_TIMEOUT_MS }
       ).trim();
 
       const [memPart, cpuPart, netPart] = output.split('|');
@@ -180,7 +181,7 @@ export class SandboxMonitor {
       // Read /proc/[pid]/stat for CPU info
       const stat = execSync(`cat /proc/${pid}/stat 2>/dev/null`, {
         encoding: 'utf-8',
-        timeout: 2000,
+        timeout: SANDBOX_MONITOR_POLL_TIMEOUT_MS,
       }).trim();
 
       // Parse stat fields: pid (comm) state ppid pgrp session tty_nr tpgi flags
@@ -200,7 +201,7 @@ export class SandboxMonitor {
       try {
         const status = execSync(`grep VmRSS /proc/${pid}/status 2>/dev/null`, {
           encoding: 'utf-8',
-          timeout: 2000,
+          timeout: SANDBOX_MONITOR_POLL_TIMEOUT_MS,
         }).trim();
         const memMatch = status.match(/VmRSS:\s+(\d+)\s+kB/);
         if (memMatch) {

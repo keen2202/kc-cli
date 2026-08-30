@@ -71,4 +71,13 @@ export interface ExecutionEnv {
   fs: FileSystem;
   shell: Shell;
   cwd: string;
+  /**
+   * Run `fn` holding an exclusive lock for `resolvedPath` (round4 §3-R1).
+   *
+   * Optional: backends that cannot offer mutual exclusion may omit it, in which
+   * case callers fall back to optimistic concurrency — detect that the file
+   * changed between read and write, and report a conflict instead of silently
+   * overwriting.
+   */
+  withFileLock?<T>(resolvedPath: string, fn: () => Promise<T>): Promise<T>;
 }

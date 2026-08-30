@@ -21,3 +21,26 @@ export function formatDuration(ms: number): string {
   }
   return `${minutes}:${pad(seconds)}`;
 }
+
+/**
+ * Compact seconds-based duration for the status bar: `12s` / `2m05s`.
+ * Second, explicit contract so ms/sec callers can never be confused (M4).
+ */
+export function formatDurationSec(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return '0s';
+  if (sec < 60) return `${Math.round(sec)}s`;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${m}m${String(s).padStart(2, '0')}s`;
+}
+
+/**
+ * Token-count formatter — single shared implementation
+ * (`999` / `12.3k` / `1.2M`). SessionInfo's local copy previously lacked
+ * the `M` tier, so token totals above one million rendered unabbreviated.
+ */
+export function formatCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
