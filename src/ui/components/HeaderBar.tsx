@@ -18,7 +18,7 @@ const MODE_LABELS: Record<'build' | 'plan' | 'auto' | 'goal', string> = {
   goal: 'Goal',
 };
 
-export function HeaderBar({ provider, model, uiMode = 'build' }: HeaderBarProps) {
+export const HeaderBar = React.memo(function HeaderBar({ provider, model, uiMode = 'build' }: HeaderBarProps) {
   const { tokens } = useTheme();
   const { width } = useTerminalSize();
 
@@ -46,4 +46,4 @@ export function HeaderBar({ provider, model, uiMode = 'build' }: HeaderBarProps)
       <Text>{truncate(plain, avail)}</Text>
     </Box>
   );
-}
+});

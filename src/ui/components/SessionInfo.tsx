@@ -15,7 +15,7 @@ interface SessionInfoProps {
   duration?: number;
 }
 
-export function SessionInfo({
+export const SessionInfo = React.memo(function SessionInfo({
   sessionId = '—',
   tokensUsed = 0,
   tokensMax = 200000,
@@ -49,4 +49,4 @@ export function SessionInfo({
       </Box>
     </Box>
   );
-}
+});

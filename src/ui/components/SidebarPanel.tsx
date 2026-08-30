@@ -84,7 +84,7 @@ function Section({ title, count, emptyLabel, children }: SectionProps) {
   );
 }
 
-export function SidebarPanel({ data }: SidebarPanelProps) {
+export const SidebarPanel = React.memo(function SidebarPanel({ data }: SidebarPanelProps) {
   const { colors } = useTheme();
   const { height: termHeight, width: termWidth } = useTerminalSize();
 
@@ -179,4 +179,4 @@ export function SidebarPanel({ data }: SidebarPanelProps) {
       </Section>
     </Box>
   );
-}
+});

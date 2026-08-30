@@ -46,7 +46,10 @@ describe('ComposerPanel (behavior)', () => {
     await h.waitForText('kc> line-one\\', 5000);
     await h.press(KEYS.enter); // continuation — must NOT submit
     await h.type('line-two');
-    await h.waitForText('kc> line-two', 5000);
+    // The prompt marks the buffer's start (absolute row 0); with the row
+    // window scrolled onto the second logical line, `line-two` renders with a
+    // blank prefix — a `kc>` here would falsely advertise a new input start.
+    await h.waitForText('line-two', 5000);
 
     // Nothing reached the engine yet…
     expect(engine.submittedMessages).toEqual([]);

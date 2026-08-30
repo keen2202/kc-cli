@@ -31,6 +31,9 @@ interface ComposerPanelProps {
   attachments: ComposerAttachment[];
   /** Whether delete-attachment mode (numbered removal) is armed. */
   deleteMode: boolean;
+  /** Reports the columns actually available for input text (measured by the
+   *  Editor) so AppRoot's key handling can match the rendered wrapping. */
+  onMeasure?: (textCols: number) => void;
 }
 
 export function ComposerPanel({
@@ -39,6 +42,7 @@ export function ComposerPanel({
   isSteerMode,
   attachments,
   deleteMode,
+  onMeasure,
 }: ComposerPanelProps) {
   return (
     <Editor
@@ -47,6 +51,7 @@ export function ComposerPanel({
       isSteerMode={isSteerMode}
       attachments={attachments}
       deleteMode={deleteMode}
+      onMeasure={onMeasure}
     />
   );
 }

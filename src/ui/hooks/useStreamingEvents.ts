@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { UIEventBus } from '../event-bus';
-import type { ChatMessage, ThinkingChain, ToolCallData, SidebarData } from '../view-protocol';
+import type { ChatMessage, ThinkingChain, ToolCallData, SidebarData, LiveThinkingChain } from '../view-protocol';
 import { createSidebarData, classifyThinkingSteps, summarizeToolInput } from '../view-protocol';
 import { normalizeUIEvent } from '../event-normalizer';
 import { formatUserFacingError } from '../../utils/errors';
@@ -12,7 +12,10 @@ export type StreamActivity = 'idle' | 'streaming' | 'executing' | 'error';
 
 export interface StreamingState {
   messages: ChatMessage[];
-  thinkingChains: Map<string, ThinkingChain>;
+  /** Chains frozen at turn end (or on error) — stable identity across flushes. */
+  frozenChains: Map<string, ThinkingChain>;
+  /** Chain currently accumulating for the streaming assistant bubble, if any. */
+  liveChain: LiveThinkingChain | null;
   sidebarData: SidebarData;
   isStreaming: boolean;
   /** Fine-grained live activity: streaming LLM text vs executing tools vs error. */
@@ -27,7 +30,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
 } {
   // Use refs for mutable state to avoid stale closures in event handlers
   const messagesRef = useRef<ChatMessage[]>([]);
-  const thinkingChainsRef = useRef<Map<string, ThinkingChain>>(new Map());
+  const frozenChainsRef = useRef<Map<string, ThinkingChain>>(new Map());
   const sidebarDataRef = useRef<SidebarData>(createSidebarData());
   const currentThinkingChainRef = useRef<ThinkingChain | null>(null);
   const currentAssistantIdRef = useRef<string | null>(null);
@@ -35,7 +38,8 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
 
   // Render state (updated to trigger re-renders)
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [thinkingChains, setThinkingChains] = useState<Map<string, ThinkingChain>>(new Map());
+  const [frozenChains, setFrozenChains] = useState<Map<string, ThinkingChain>>(new Map());
+  const [liveChain, setLiveChain] = useState<LiveThinkingChain | null>(null);
   const [sidebarData, setSidebarData] = useState<SidebarData>(createSidebarData());
   const [isStreaming, setIsStreaming] = useState(false);
   const [activity, setActivity] = useState<StreamActivity>('idle');
@@ -71,9 +75,16 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
     const rawContent = chain.rawContent + chunks.join('');
     const updated = { ...chain, rawContent, steps: classifyThinkingSteps(rawContent) };
     currentThinkingChainRef.current = updated;
-    const assistantId = currentAssistantIdRef.current;
-    if (assistantId !== null) {
-      thinkingChainsRef.current.set(assistantId, updated);
+  }, []);
+
+  /** Publish the in-flight chain (if any) as the liveChain render state. */
+  const publishLiveChain = useCallback(() => {
+    const id = currentAssistantIdRef.current;
+    const chain = currentThinkingChainRef.current;
+    if (id !== null && chain !== null) {
+      setLiveChain({ id, chain });
+    } else {
+      setLiveChain(null);
     }
   }, []);
 
@@ -84,12 +95,12 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
     }
     mergeThinkingChunks();
     if (dirtyRef.current.messages) setMessages([...messagesRef.current]);
-    if (dirtyRef.current.thinking) setThinkingChains(new Map(thinkingChainsRef.current));
+    if (dirtyRef.current.thinking) publishLiveChain();
     if (dirtyRef.current.sidebar) setSidebarData({ ...sidebarDataRef.current });
     dirtyRef.current.messages = false;
     dirtyRef.current.thinking = false;
     dirtyRef.current.sidebar = false;
-  }, [mergeThinkingChunks]);
+  }, [mergeThinkingChunks, publishLiveChain]);
 
   // Schedule a coalesced render on the next frame (~33ms) so bursts of delta
   // events collapse into a single React update.
@@ -223,7 +234,9 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
           dirtyRef.current.messages = true;
           dirtyRef.current.sidebar = true;
           setActivity('executing');
-          flushRender();
+          // Coalesce with the delta flush timer: parallel tools settling in a
+          // burst collapse into a single frame instead of one flush each.
+          scheduleRender();
           break;
         }
 
@@ -238,7 +251,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
           dirtyRef.current.messages = true;
           dirtyRef.current.sidebar = true;
           setActivity('streaming');
-          flushRender();
+          scheduleRender();
           break;
         }
 
@@ -250,7 +263,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
           dirtyRef.current.messages = true;
           dirtyRef.current.sidebar = true;
           setActivity('streaming');
-          flushRender();
+          scheduleRender();
           break;
         }
 
@@ -267,7 +280,7 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
           dirtyRef.current.messages = true;
           dirtyRef.current.sidebar = true;
           setActivity('streaming');
-          flushRender();
+          scheduleRender();
           break;
         }
 
@@ -278,11 +291,13 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
           setActivity('idle');
           const chain = currentThinkingChainRef.current;
           if (chain && assistantId) {
-            // Freeze the displayed duration now that the turn is done.
-            thinkingChainsRef.current.set(assistantId, { ...chain, endTime: Date.now() });
-            dirtyRef.current.thinking = true;
+            // Freeze the chain with its final duration: history rows key off
+            // this map, so it must only move at turn boundaries.
+            frozenChainsRef.current.set(assistantId, { ...chain, endTime: Date.now() });
+            setFrozenChains(new Map(frozenChainsRef.current));
           }
           currentThinkingChainRef.current = null;
+          setLiveChain(null);
 
           // Track token usage from turn_complete events (agent:turn_complete has usage)
           if (ev.usage && typeof ev.usage.totalTokens === 'number') {
@@ -303,8 +318,16 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
           // must clear the streaming flag here — otherwise isStreaming stays
           // true forever and AppRoot's useInput guard swallows all subsequent
           // input (user can't type a second message).
+          // Freeze whatever chain accumulated so far: the partial assistant
+          // bubble keeps its thinking content after the error.
+          const deadChain = currentThinkingChainRef.current;
+          if (deadChain && assistantId) {
+            frozenChainsRef.current.set(assistantId, deadChain);
+            setFrozenChains(new Map(frozenChainsRef.current));
+          }
           currentAssistantIdRef.current = null;
           currentThinkingChainRef.current = null;
+          setLiveChain(null);
           // Drop un-flushed thinking text of the dead turn: flushRender would
           // otherwise rebuild a chain from it and leak it into the next turn.
           pendingThinkingRef.current = [];
@@ -334,15 +357,32 @@ export function useStreamingEvents(eventBus: UIEventBus): StreamingState & {
     }
   }, []);
 
+  // External setState wrapper: keeps messagesRef.current in sync so the next
+  // coalesced flush cannot clobber externally seeded state (session restore,
+  // /session load, clear). The raw setState above stays for the hot path.
+  const setMessagesSynced = useCallback<React.Dispatch<React.SetStateAction<ChatMessage[]>>>(
+    (value) => {
+      setMessages((prev) => {
+        const next = typeof value === 'function'
+          ? (value as (p: ChatMessage[]) => ChatMessage[])(prev)
+          : value;
+        messagesRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
+
   return {
     messages,
-    thinkingChains,
+    frozenChains,
+    liveChain,
     sidebarData,
     isStreaming,
     activity,
     errors,
     totalTokensUsed,
     addMessage,
-    setMessages,
+    setMessages: setMessagesSynced,
   };
 }

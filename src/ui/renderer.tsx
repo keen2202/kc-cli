@@ -4,6 +4,7 @@ import { render } from 'ink';
 import type { QueryEngine } from '../query/QueryEngine';
 import { AppRoot } from './components/AppRoot.js';
 import { EXIT } from '../utils/exit-codes';
+import type { ResumedSession } from '../bootstrap/init-sequence';
 
 interface RenderOptions {
   queryEngine: QueryEngine;
@@ -11,6 +12,8 @@ interface RenderOptions {
   model?: string;
   maxTurns?: number;
   themeName?: string;
+  /** Session restored by kc --continue/--resume before the UI started. */
+  resumedSession?: ResumedSession;
 }
 
 export function renderInkUI(options: RenderOptions): void {
@@ -21,6 +24,7 @@ export function renderInkUI(options: RenderOptions): void {
       model={options.model}
       maxTurns={options.maxTurns}
       themeName={options.themeName}
+      resumedSession={options.resumedSession}
     />,
     {
       stdout: process.stdout,

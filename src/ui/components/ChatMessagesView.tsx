@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useEffect, useState } from 'react';
 import { Box, Text, measureElement, type DOMElement } from 'ink';
 import chalk from 'chalk';
 import wrapAnsi from 'wrap-ansi';
-import type { ChatMessage, ThinkingChain } from '../view-protocol';
+import type { ChatMessage, ThinkingChain, LiveThinkingChain } from '../view-protocol';
 import type { ThemeTokens } from '../theme';
 import { renderThinkingChain } from './ThinkingChainView';
 import { renderToolCallCard } from './ToolCallCard';
@@ -147,7 +147,10 @@ const ChatRow = React.memo(function ChatRow({ text }: { text: string }) {
 
 interface ChatViewProps {
   messages: ChatMessage[];
-  thinkingChains?: Map<string, ThinkingChain>;
+  /** Chains frozen at turn end — stable identity; must NOT move during streaming. */
+  frozenChains?: Map<string, ThinkingChain>;
+  /** Chain of the streaming assistant bubble (highest-frequency updates land here only). */
+  liveChain?: LiveThinkingChain | null;
   /** Populated with scroll callbacks; ←/→ and PgUp/PgDn are dispatched by the focus stack's base layer. */
   scrollRef?: React.MutableRefObject<ChatScrollHandle | null>;
   /** Global tool-output expansion toggle (Ctrl+O). */
@@ -158,7 +161,7 @@ interface ChatViewProps {
   isStreaming?: boolean;
 }
 
-export const ChatView = React.memo(function ChatView({ messages, thinkingChains, scrollRef, toolOutputExpanded = false, isStreaming = false }: ChatViewProps) {
+export const ChatView = React.memo(function ChatView({ messages, frozenChains, liveChain, scrollRef, toolOutputExpanded = false, isStreaming = false }: ChatViewProps) {
   chatViewRenderStats.renderCount++;
   const { tokens } = useTheme();
   const { height: termHeight, width: termWidth } = useTerminalSize();
@@ -200,19 +203,24 @@ export const ChatView = React.memo(function ChatView({ messages, thinkingChains,
     chatViewRenderStats.historyFlattenCount++;
     const out: ChatRowData[] = [];
     for (const msg of historyMessages) {
-      const rendered = renderMessageLines(msg, thinkingChains?.get(msg.id), tokens, cols, toolOutputExpanded);
+      const rendered = renderMessageLines(msg, frozenChains?.get(msg.id), tokens, cols, toolOutputExpanded);
       for (let j = 0; j < rendered.length; j++) {
         out.push({ key: `${msg.id}:${j}`, text: rendered[j] });
       }
     }
     return out;
-  }, [historyMessages, thinkingChains, tokens, cols, toolOutputExpanded]);
+    // frozenChains only moves at turn boundaries, so this flatten is amortized
+    // across the whole stream instead of once per delta flush.
+  }, [historyMessages, frozenChains, tokens, cols, toolOutputExpanded]);
 
   const lastRows = useMemo(() => {
     if (!lastMessage) return [] as ChatRowData[];
-    const rendered = renderMessageLines(lastMessage, thinkingChains?.get(lastMessage.id), tokens, cols, toolOutputExpanded, now);
+    const chain = liveChain && liveChain.id === lastMessage.id
+      ? liveChain.chain
+      : frozenChains?.get(lastMessage.id);
+    const rendered = renderMessageLines(lastMessage, chain, tokens, cols, toolOutputExpanded, now);
     return rendered.map((text, j) => ({ key: `${lastMessage.id}:${j}`, text }));
-  }, [lastMessage, thinkingChains, tokens, cols, toolOutputExpanded, now]);
+  }, [lastMessage, liveChain, frozenChains, tokens, cols, toolOutputExpanded, now]);
 
   const lines = useMemo(() => {
     const out = [...historyRows, ...lastRows];

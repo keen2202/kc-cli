@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ApiError } from '../../src/api/BaseApiClient';
 import {
   classifyApiError,
   classifyToolError,
   getRetryDelay,
+  isContextOverflowError,
   RetryState,
 } from '../../src/services/error-classifier';
 
@@ -239,5 +241,43 @@ describe('RetryState', () => {
     retryState.incrementAttempt('key2');
     expect(retryState.getAttempt('key1')).toBe(2);
     expect(retryState.getAttempt('key2')).toBe(1);
+  });
+});
+
+describe('context overflow classification', () => {
+  it('classifies Anthropic "prompt is too long" as context_overflow', () => {
+    const result = classifyApiError(new Error('prompt is too long: 250000 tokens > 200000 maximum'));
+    expect(result.context).toBe('context_overflow');
+    expect(result.retryable).toBe(false);
+  });
+
+  it('classifies OpenAI "maximum context length" as context_overflow', () => {
+    const result = classifyApiError(
+      new Error("This model's maximum context length is 8192 tokens. However, your messages resulted in 9000 tokens."),
+    );
+    expect(result.context).toBe('context_overflow');
+  });
+
+  it('classifies "context_length_exceeded" as context_overflow', () => {
+    expect(classifyApiError(new Error('400 context_length_exceeded')).context).toBe('context_overflow');
+  });
+
+  it('classifies "input token count" overflow as context_overflow', () => {
+    expect(classifyApiError(new Error('input token count exceeds the maximum')).context).toBe('context_overflow');
+  });
+
+  it('classifies 413 status as context_overflow', () => {
+    // The status-code branch requires a real ApiError instance.
+    const err = new ApiError('Chat API: Request Entity Too Large', 413, {});
+    expect(classifyApiError(err).context).toBe('context_overflow');
+  });
+
+  it('does not misclassify ordinary bad requests as overflow', () => {
+    expect(classifyApiError(new Error('400 invalid_request: unknown field foo')).context).toBe('bad_request');
+  });
+
+  it('exposes overflow via isContextOverflowError', () => {
+    expect(isContextOverflowError(new Error('prompt is too long: 10 tokens > 5 maximum'))).toBe(true);
+    expect(isContextOverflowError(new Error('429 rate limit'))).toBe(false);
   });
 });

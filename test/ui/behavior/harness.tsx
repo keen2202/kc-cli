@@ -194,6 +194,8 @@ export interface HarnessOptions {
   provider?: string;
   model?: string;
   maxTurns?: number;
+  /** Session restored before render — seeded into the transcript once. */
+  resumedSession?: { sessionId: string; messages: Array<{ id: string; role: 'user' | 'assistant'; content: string; timestamp: number }>; turnCount: number };
 }
 
 export interface Harness {
@@ -234,6 +236,7 @@ export async function renderApp(options: HarnessOptions = {}): Promise<Harness> 
       provider={options.provider ?? 'test-provider'}
       model={options.model ?? 'test-model'}
       maxTurns={options.maxTurns ?? 50}
+      resumedSession={options.resumedSession}
     />,
     {
       stdout: stdout as unknown as NodeJS.WriteStream,

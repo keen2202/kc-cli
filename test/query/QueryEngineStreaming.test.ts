@@ -12,7 +12,8 @@
 //   - global stream timeout enforcement (KC_STREAM_TIMEOUT_MS)
 //   - tool_call/tool_result pairing repair (unanswered ids get placeholders)
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
+import { initializeState, resetState } from '../../src/bootstrap/state';
 import { streamLLMTurn, buildApiMessages } from '../../src/query/QueryEngineStreaming';
 import type { StreamTurnDeps } from '../../src/query/QueryEngineStreaming';
 import { ConversationState } from '../../src/query/QueryEngineState';
@@ -379,5 +380,111 @@ describe('buildApiMessages — tool_call pairing repair', () => {
 
     expect(buildApiMessages([])).toEqual([]);
     expect(buildApiMessages([user, assistantPlain])).toEqual([user, assistantPlain]);
+  });
+});
+
+// ─── streamingPhase: context overflow self-recovery ─────────────────────────
+
+describe('streamingPhase — context overflow self-recovery', () => {
+  afterEach(() => {
+    resetState();
+  });
+
+  it('force-truncates and retries once when the provider reports an overflow', async () => {
+    const { QueryEngine } = await import('../../src/query/QueryEngine.js');
+    const { registerBuiltInTools, toolRegistry } = await import('../../src/tools');
+    const { ApiError } = await import('../../src/api/BaseApiClient');
+    initializeState({ sessionId: 'overflow-test', permissionMode: 'default' });
+    await registerBuiltInTools();
+    const tools = toolRegistry.getAllTools();
+
+    const engine = new QueryEngine({
+      model: 'gpt-4',
+      provider: 'openai',
+      maxTurns: 10,
+      maxBudgetUsd: null,
+      sandboxFailIfNoSandbox: false,
+    }, tools);
+
+    let calls = 0;
+    (engine as any).apiClient = {
+      streamChat: async function* () {
+        calls++;
+        if (calls === 1) {
+          throw new ApiError('Chat API: prompt is too long: 250000 tokens > 200000 maximum', 400, {});
+        }
+        yield { type: 'text_delta', text: 'recovered output' };
+        yield { type: 'stop', usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+      },
+    } as unknown as BaseApiClient;
+
+    // Seed a multi-message transcript: the estimator under-counts it, so the
+    // recovery must shrink by message count (not by estimate) to change the
+    // request before retrying.
+    for (let i = 0; i < 8; i++) {
+      (engine as any).conversation.addMessage({
+        id: `filler_${i}`, role: i % 2 === 0 ? 'user' : 'assistant',
+        content: `filler exchange ${i}`, timestamp: Date.now() + i,
+      } as ChatMessage);
+    }
+    (engine as any).conversation.addMessage({
+      id: 'u1', role: 'user', content: 'hello', timestamp: Date.now(),
+    } as ChatMessage);
+    const beforeCount = (engine as any).conversation.getMessages().length;
+
+    const events = await drain((engine as any).streamingPhase());
+
+    // The failed attempt surfaced as a recoverable error + a recovery notice…
+    const recoverable = events.find((e: any) => e.type === 'agent:error' && e.recoverable);
+    expect(recoverable).toBeDefined();
+    const notice = events.find((e: any) =>
+      e.type === 'agent:text_delta' && String(e.text ?? '').includes('truncating older messages'));
+    expect(notice).toBeDefined();
+    // …then the retry succeeded and the turn completed.
+    expect(events.some((e: any) => e.type === 'agent:turn_complete')).toBe(true);
+    expect(calls).toBe(2);
+    const messages = (engine as any).conversation.getMessages();
+    expect(messages[messages.length - 1].content).toBe('recovered output');
+    // The transcript was actually shrunk before the retry.
+    expect(messages.length).toBeLessThan(beforeCount);
+  });
+
+  it('fails cleanly when overflow persists after the single recovery attempt', async () => {
+    const { QueryEngine } = await import('../../src/query/QueryEngine.js');
+    const { registerBuiltInTools, toolRegistry } = await import('../../src/tools');
+    const { ApiError } = await import('../../src/api/BaseApiClient');
+    initializeState({ sessionId: 'overflow-test', permissionMode: 'default' });
+    await registerBuiltInTools();
+    const tools = toolRegistry.getAllTools();
+
+    const engine = new QueryEngine({
+      model: 'gpt-4',
+      provider: 'openai',
+      maxTurns: 10,
+      maxBudgetUsd: null,
+      sandboxFailIfNoSandbox: false,
+    }, tools);
+
+    let calls = 0;
+    (engine as any).apiClient = {
+      streamChat: async function* () {
+        calls++;
+        throw new ApiError('Chat API: prompt is too long: 250000 tokens > 200000 maximum', 400, {});
+      },
+    } as unknown as BaseApiClient;
+
+    for (let i = 0; i < 4; i++) {
+      (engine as any).conversation.addMessage({
+        id: `filler_${i}`, role: i % 2 === 0 ? 'user' : 'assistant',
+        content: `filler exchange ${i}`, timestamp: Date.now() + i,
+      } as ChatMessage);
+    }
+    (engine as any).conversation.addMessage({
+      id: 'u1', role: 'user', content: 'hello', timestamp: Date.now(),
+    } as ChatMessage);
+
+    await expect(drain((engine as any).streamingPhase())).rejects.toThrow();
+    // One recovery attempt, then the permanent error path — no retry storm.
+    expect(calls).toBe(2);
   });
 });

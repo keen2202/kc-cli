@@ -31,8 +31,8 @@ import {
   deleteBefore,
   insertNewline,
   insertText,
-  isCursorOnFirstLine,
-  isCursorOnLastLine,
+  isCursorOnFirstVisualRow,
+  isCursorOnLastVisualRow,
   moveCursorLeft,
   moveCursorRight,
   moveCursorUp,
@@ -53,6 +53,7 @@ import type { PermissionMode, UIPermissionRequest } from '../../permissions/prot
 import { SessionManager } from '../../services/sessionManager';
 import { FileMemoryService } from '../../memory/FileMemoryService';
 import { engineMessagesToUiMessages } from '../session-mapper';
+import type { ResumedSession } from '../../bootstrap/init-sequence';
 import type { AgentState } from '../../state/types';
 
 interface FileItem {
@@ -175,6 +176,8 @@ interface AppOpenCodeProps {
   provider: string;
   model: string;
   maxTurns: number;
+  /** Session restored by kc --continue/--resume; seeded into the transcript once. */
+  resumedSession?: ResumedSession;
 }
 
 /** Normalize an Ink (input, key) pair into a KeypressEvent for the focus stack. */
@@ -230,7 +233,7 @@ function toKeypressEvent(input: string, key: any): KeypressEvent {
   return { name, ctrl: !!key.ctrl, meta: !!key.meta, shift: !!key.shift, isPrintable: printable };
 }
 
-function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: AppOpenCodeProps) {
+function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns, resumedSession }: AppOpenCodeProps) {
   // Create event bus and keybinding manager (stable across renders)
   const eventBus = useMemo(() => new UIEventBus(), []);
   const keybindingManager = useMemo(() => createDefaultKeybindings(), []);
@@ -255,7 +258,8 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
   // Streaming state from the event bus
   const {
     messages,
-    thinkingChains,
+    frozenChains,
+    liveChain,
     sidebarData,
     isStreaming,
     activity,
@@ -272,6 +276,13 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
   // cursor position, not the one captured when the handler was created.
   const inputStateRef = useRef<InputState>(inputState);
   inputStateRef.current = inputState;
+  // Column budget the Editor measures for the input text (prompt prefix
+  // excluded). Drives visual-row caret movement so ↑/↓ match the rendered
+  // wrapping. 0 until the first measurement lands (logical fallback then).
+  const editorColsRef = useRef(0);
+  const handleEditorMeasure = useCallback((cols: number) => {
+    editorColsRef.current = cols;
+  }, []);
   const [turnCount, setTurnCount] = useState(0);
   const [sessionStartTime] = useState(() => Date.now());
   const [mode, setMode] = useState<'idle' | 'streaming' | 'overlay' | 'steer'>('idle');
@@ -347,6 +358,18 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
 
   // Session ID lives in state so /session new|<id> can swap it and re-render.
   const [sessionId, setSessionId] = useState(() => getState().sessionId);
+
+  // kc --continue/--resume: seed the transcript once with the restored
+  // conversation. The engine itself was already restored by init-sequence —
+  // this only mirrors the engine state into the UI.
+  const resumedSeedAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!resumedSession || resumedSeedAppliedRef.current) return;
+    resumedSeedAppliedRef.current = true;
+    setMessages(engineMessagesToUiMessages(resumedSession.messages));
+    setTurnCount(resumedSession.turnCount);
+    setSessionId(resumedSession.sessionId);
+  }, [resumedSession, setMessages]);
 
   // Register the interactive authorization handler with the engine.
   //
@@ -929,25 +952,29 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
       km.setContext('input');
     }
 
-    // ↑/↓ move the caret between lines in a multi-line buffer; history recall
-    // only fires at the first/last line boundary, so single-line behavior is
-    // unchanged. Chat scrolling lives on ←/→ (empty input) and PgUp/PgDn, so
-    // one key never fires two unrelated actions.
+    // ↑/↓ move the caret between visual rows — a wrapped logical line counts
+    // as multiple rows. History recall only fires at the first/last visual
+    // row boundary, so short single-line buffers behave exactly as before.
+    // Chat scrolling lives on ←/→ (empty input) and PgUp/PgDn, so one key
+    // never fires two unrelated actions.
     if (!event.ctrl && !event.meta && (event.name === 'up' || event.name === 'down')) {
-      if (inputState.text.includes('\n')) {
-        // Read the caret through the ref: handleEditorKey's memo deps track
-        // inputState.text, so a caret-only move doesn't recreate the closure.
-        const live = inputStateRef.current;
-        if (event.name === 'up' && !isCursorOnFirstLine(live)) {
-          setInputState((prev) => moveCursorUp(prev, 0));
-          return true;
-        }
-        if (event.name === 'down' && !isCursorOnLastLine(live)) {
-          setInputState((prev) => moveCursorDown(prev, 0));
-          return true;
-        }
-        // At the boundary: fall through to history recall below.
+      // Read the caret through the ref: handleEditorKey's memo deps track
+      // inputState.text, so a caret-only move doesn't recreate the closure.
+      const live = inputStateRef.current;
+      // Column budget reported by the Editor's measurement; 0 until the first
+      // measure lands, in which case the logical-line fallback applies.
+      const cols = editorColsRef.current;
+      const onFirst = isCursorOnFirstVisualRow(live, cols);
+      const onLast = isCursorOnLastVisualRow(live, cols);
+      if (event.name === 'up' && !onFirst) {
+        setInputState((prev) => moveCursorUp(prev, cols));
+        return true;
       }
+      if (event.name === 'down' && !onLast) {
+        setInputState((prev) => moveCursorDown(prev, cols));
+        return true;
+      }
+      // At the boundary: fall through to history recall below.
       const command = keybindingManager.resolve(event);
       if (command) dispatchCommand(command);
       return true;
@@ -1251,7 +1278,8 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
         chatPanel={
           <TranscriptPanel
             messages={messages}
-            thinkingChains={thinkingChains}
+            frozenChains={frozenChains}
+            liveChain={liveChain}
             scrollRef={chatScrollRef}
             toolOutputExpanded={toolOutputExpanded}
             isStreaming={mode === 'streaming'}
@@ -1264,6 +1292,7 @@ function AppOpenCode({ queryEngine, provider, model: initialModel, maxTurns }: A
             isSteerMode={inputState.steerMode ?? false}
             attachments={attachmentState.attachments}
             deleteMode={attachmentState.deleteMode}
+            onMeasure={handleEditorMeasure}
           />
         }
         sessionInfo={
@@ -1333,9 +1362,11 @@ interface AppRootProps {
   model?: string;
   maxTurns?: number;
   themeName?: string;
+  /** Session restored by kc --continue/--resume before the UI started. */
+  resumedSession?: ResumedSession;
 }
 
-export function AppRoot({ queryEngine, provider, model, maxTurns, themeName }: AppRootProps) {
+export function AppRoot({ queryEngine, provider, model, maxTurns, themeName, resumedSession }: AppRootProps) {
   return (
     <ThemeProvider initialTheme={themeName || DEFAULT_THEME}>
       <AppOpenCode
@@ -1343,6 +1374,7 @@ export function AppRoot({ queryEngine, provider, model, maxTurns, themeName }: A
         provider={provider || 'unknown'}
         model={model || 'unknown'}
         maxTurns={maxTurns || 50}
+        resumedSession={resumedSession}
       />
     </ThemeProvider>
   );

@@ -3,6 +3,7 @@ import { Box, Text, measureElement, type DOMElement } from 'ink';
 import { useTheme } from '../hooks/useTheme';
 import { useTerminalSize } from '../hooks/useTerminalSize';
 import { computeOpenCodeLayout, getFrameHeight } from '../layout';
+import { toVisualLines, locateCursor } from '../visual-lines';
 
 interface Attachment {
   path: string;
@@ -15,6 +16,9 @@ interface EditorProps {
   isSteerMode?: boolean;
   attachments?: Attachment[];
   deleteMode?: boolean;
+  /** Reports the columns available for input text (measured, prompt prefix
+   *  excluded) so AppRoot's key handling matches the rendered wrapping. */
+  onMeasure?: (textCols: number) => void;
 }
 
 const MAX_ATTACHMENTS = 5;
@@ -45,12 +49,13 @@ function KeyboardHints() {
   );
 }
 
-export function Editor({
+export const Editor = React.memo(function Editor({
   text,
   cursorPos,
   isSteerMode = false,
   attachments = [],
   deleteMode = false,
+  onMeasure,
 }: EditorProps) {
   const { tokens, colors } = useTheme();
   const { width, height } = useTerminalSize();
@@ -63,10 +68,21 @@ export function Editor({
   // which let long input lines wrap past the border on narrow terminals.
   const rootRef = useRef<DOMElement | null>(null);
   const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
+  // Report the measured text-column budget once per change (via a ref so the
+  // callback identity stays irrelevant to this effect).
+  const onMeasureRef = useRef(onMeasure);
+  onMeasureRef.current = onMeasure;
+  const lastReportedColsRef = useRef<number | null>(null);
   useEffect(() => {
     if (!rootRef.current) return;
     const { width: w } = measureElement(rootRef.current);
     if (w > 0 && w !== measuredWidth) setMeasuredWidth(w);
+    const effective = w > 0 ? w : width;
+    const cols = Math.max(4, Math.max(10, effective - 4) - promptPrefix.length);
+    if (cols !== lastReportedColsRef.current) {
+      lastReportedColsRef.current = cols;
+      onMeasureRef.current?.(cols);
+    }
   });
 
   // Height budget the editor is allotted by the layout. Content must fit
@@ -100,10 +116,10 @@ export function Editor({
     ? tokens['input.steer'](promptPrefix)
     : tokens['input.prompt'](promptPrefix);
 
-  // Build display text with cursor position indicator. Lines are clipped to
-  // the measured column budget (cursor-following horizontal window on the
-  // cursor line) and the line list to `inputRows`, so the editor never wraps
-  // or grows past its allotment on narrow terminals.
+  // Build display text with cursor position indicator. Logical lines are
+  // soft-wrapped into visual rows at the measured column budget (wide chars
+  // count as 2 columns); the row list is windowed to `inputRows` following the
+  // cursor, so the editor never grows past its allotment on any terminal.
   const renderInputLines = () => {
     if (text.length === 0) {
       return (
@@ -114,53 +130,39 @@ export function Editor({
       );
     }
 
-    // Locate the cursor's line/column in the (possibly multi-line) text.
-    const lines = text.split('\n');
-    let cursorLine = 0;
-    let cursorCol = Math.min(cursorPos, text.length);
-    for (let i = 0; i < lines.length; i++) {
-      if (cursorCol <= lines[i].length) {
-        cursorLine = i;
-        break;
-      }
-      cursorCol -= lines[i].length + 1; // +1 for the newline
-      cursorLine = i + 1;
-    }
-    if (cursorLine >= lines.length) {
-      cursorLine = lines.length - 1;
-      cursorCol = lines[cursorLine].length;
+    const rows = toVisualLines(text, textCols);
+    const cursor = locateCursor(rows, Math.min(cursorPos, text.length));
+
+    // Vertical window over VISUAL rows: show the last `inputRows` rows,
+    // shifted so the cursor row is always visible.
+    let endRow = rows.length;
+    let startRow = Math.max(0, endRow - inputRows);
+    if (cursor.row < startRow) {
+      startRow = cursor.row;
+      endRow = Math.min(rows.length, startRow + inputRows);
     }
 
-    // Vertical window: show the last `inputRows` lines, shifted up if needed
-    // so the cursor line is always visible.
-    let endLine = lines.length;
-    let startLine = Math.max(0, endLine - inputRows);
-    if (cursorLine < startLine) {
-      startLine = cursorLine;
-      endLine = Math.min(lines.length, startLine + inputRows);
-    }
+    return rows.slice(startRow, endRow).map((vl, i) => {
+      const absoluteIdx = startRow + i;
+      // The prompt marks the start of the buffer (absolute row 0); scrolled
+      // windows and wrapped continuation rows use a blank prefix of the same
+      // width so text stays column-aligned under the prompt.
+      const prefix = absoluteIdx === 0 ? promptNode : ' '.repeat(promptPrefix.length);
 
-    return lines.slice(startLine, endLine).map((line, i) => {
-      const absoluteIdx = startLine + i;
-      const prefix = i === 0 ? promptNode : ' '.repeat(promptPrefix.length);
-
-      if (absoluteIdx !== cursorLine) {
+      if (absoluteIdx !== cursor.row) {
         return (
           <Text key={absoluteIdx} wrap="truncate">
             {prefix}
-            <Text>{line.slice(0, textCols)}</Text>
+            <Text>{vl.text}</Text>
           </Text>
         );
       }
 
-      // Cursor line: horizontal window that keeps the cursor in view. The
-      // window ends at the cursor when it runs past the column budget.
-      const winStart = cursorCol >= textCols ? cursorCol - textCols + 1 : 0;
-      const visible = line.slice(winStart, winStart + textCols);
-      const vCol = cursorCol - winStart;
-      const beforeCursor = visible.slice(0, vCol);
-      const atCursor = vCol < visible.length ? visible[vCol] : ' ';
-      const afterCursor = visible.slice(vCol + 1);
+      // Cursor row: highlight the cell under the caret (' ' past the end).
+      const vCol = cursor.col;
+      const beforeCursor = vl.text.slice(0, vCol);
+      const atCursor = vCol < vl.text.length ? vl.text[vCol] : ' ';
+      const afterCursor = vl.text.slice(vCol + 1);
 
       return (
         <Text key={absoluteIdx} wrap="truncate">
@@ -202,13 +204,14 @@ export function Editor({
           </Box>
         ))}
 
-      {/* Input lines with real cursor, clipped to the row/column budget */}
+      {/* Input lines soft-wrapped at the column budget, windowed to the row
+          budget with the cursor row always visible */}
       <Box flexDirection="column">
         {renderInputLines()}
       </Box>
     </Box>
   );
-}
+});
 
 /**
  * Open the external editor ($EDITOR or fallback), read the result.

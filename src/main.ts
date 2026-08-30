@@ -240,7 +240,7 @@ function handleStreamEvent(event: AgentEvent | StreamEvent): void {
 
 // ── Fallback REPL (bare mode or non-TTY) ──
 
-async function runREPL(queryEngine: QueryEngine) {
+async function runREPL(queryEngine: QueryEngine, resumedSessionId?: string) {
   const readline = await import('readline');
 
   const rl: import('readline').Interface = readline.createInterface({
@@ -251,6 +251,15 @@ async function runREPL(queryEngine: QueryEngine) {
   // Session persistence parity with the ink UI: snapshot after each completed
   // turn so an interrupted REPL session can be resumed via /session.
   const replSession = new ReplSessionService();
+
+  // kc --continue / --resume: load through the service so the persistence
+  // counters re-sync with the restored conversation.
+  if (resumedSessionId) {
+    const loaded = await replSession.load(queryEngine, resumedSessionId);
+    if (loaded) {
+      console.log(chalk.gray(`Resumed session ${loaded.sessionId} (${loaded.messages.length} message(s)) — continue working, or /session new to start fresh.`));
+    }
+  }
 
   console.log(chalk.bold('\n💬 Ready! What would you like me to do?\n'));
   console.log(chalk.gray('Type your prompt and press Enter.'));
@@ -565,10 +574,10 @@ function registerCrashSnapshot(queryEngine: QueryEngine): void {
 }
 
 main({
-  onInteractiveUI: async ({ queryEngine, provider, model, maxTurns }) => {
+  onInteractiveUI: async ({ queryEngine, provider, model, maxTurns, resumedSession }) => {
     registerCrashSnapshot(queryEngine);
     const { renderInkUI } = await import('./ui/renderer');
-    renderInkUI({ queryEngine, provider, model, maxTurns });
+    renderInkUI({ queryEngine, provider, model, maxTurns, resumedSession });
   },
   onRunREPL: runREPL,
   onExecutePrompt: (queryEngine, prompt) => {

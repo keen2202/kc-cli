@@ -36,6 +36,8 @@ import {
 // Sub-modules
 import { ConversationState } from './QueryEngineState';
 import { CompactionHandler } from './QueryEngineCompaction';
+import { forceTruncate } from '../services/compaction/functional';
+import { isContextOverflowError } from '../services/error-classifier';
 import { MemoryHandler } from './QueryEngineMemory';
 import { ErrorHandler } from './QueryEngineError';
 import { DecisionGates } from './QueryEngineDecision';
@@ -745,6 +747,11 @@ export class QueryEngine {
    */
   private async *streamingPhase(): AsyncGenerator<StreamEvent | AgentEvent> {
     const maxRetries = 10;
+    // Context-overflow self-recovery happens at most once per turn: a second
+    // overflow after force truncation means the transcript cannot fit the
+    // window even halved (e.g. tiny window) — fail cleanly instead of looping.
+    let overflowRecoveryAttempted = false;
+    let changedAfterOverflow = false;
 
     // T3: Budget check before provider call
     const estimatedTokens = this.conversation.getTokenEstimate();
@@ -839,6 +846,36 @@ export class QueryEngine {
         return;
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
+
+        // Context-window overflow self-recovery: the token estimator can
+        // under-count relative to the provider's real accounting, and an
+        // overflow is otherwise a permanent (turn-killing) error. Shrink the
+        // transcript once and let the loop rebuild the request.
+        if (!overflowRecoveryAttempted && isContextOverflowError(err)) {
+          overflowRecoveryAttempted = true;
+          logger.query.warn(`[QueryEngine] Context overflow — force-truncating transcript and retrying: ${err.message}`);
+          yield { type: 'agent:error', error: err, recoverable: true, timestamp: Date.now() };
+          yield textDeltaEvent('\n[Context window exceeded — truncating older messages and retrying]\n');
+          const messages = this.conversation.getMessagesCopy();
+          const truncated = forceTruncate(messages);
+          if (truncated.wasCompacted) {
+            this.conversation.setMessages(truncated.messages);
+            changedAfterOverflow = true;
+            logger.query.info(`[QueryEngine] Overflow recovery dropped ${truncated.tokensSaved} estimated tokens`);
+          } else if (messages.length > 1) {
+            // The estimator thinks the transcript is tiny — that mismatch is
+            // exactly why the overflow happened. Shrink by message count
+            // instead so the retry actually changes the request.
+            this.conversation.setMessages(messages.slice(Math.ceil(messages.length / 2)));
+            changedAfterOverflow = true;
+            logger.query.info(`[QueryEngine] Overflow recovery halved the transcript (${messages.length} -> ${Math.ceil(messages.length / 2)} messages)`);
+          }
+          if (changedAfterOverflow) {
+            continue;
+          }
+          // Nothing to drop (transcript already minimal — the window itself is
+          // smaller than one turn); fall through to the normal error path.
+        }
 
         // Check if retry is possible
         const retryInfo = this.errorHandler.shouldRetry(err, retryAttempt);

@@ -217,6 +217,36 @@ describe('ReplSessionService', () => {
     });
   });
 
+  describe('latestForCwd', () => {
+    it('returns the most recent session recorded for the given cwd', async () => {
+      const makeSnapshot = (id: string, cwd: string, lastModified: number): SessionSnapshot => ({
+        sessionId: id,
+        messages: makeMessages(),
+        state: { cwd, model: 'test-model', provider: 'test-provider', turnCount: 1, totalTokensUsed: 0 },
+        metadata: { createdAt: lastModified, lastModified, toolsUsed: [] },
+      });
+      const older = makeSnapshot('s-old', '/repo', 1000);
+      const newer = makeSnapshot('s-new', '/repo', 2000);
+      const other = makeSnapshot('s-other', '/elsewhere', 3000);
+      (memoryService.listSessions as any).mockResolvedValue([other, newer, older]);
+
+      const found = await service.latestForCwd('/repo');
+      expect(found?.sessionId).toBe('s-new');
+    });
+
+    it('returns null when no session matches the cwd', async () => {
+      const makeSnapshot = (id: string, cwd: string): SessionSnapshot => ({
+        sessionId: id,
+        messages: makeMessages(),
+        state: { cwd, model: 'test-model', provider: 'test-provider', turnCount: 1, totalTokensUsed: 0 },
+        metadata: { createdAt: 1, lastModified: 1, toolsUsed: [] },
+      });
+      (memoryService.listSessions as any).mockResolvedValue([makeSnapshot('s-other', '/elsewhere')]);
+
+      expect(await service.latestForCwd('/repo')).toBeNull();
+    });
+  });
+
   describe('startNew', () => {
     it('clears the engine, rotates the session id and resets counters', async () => {
       service.bumpTurn();

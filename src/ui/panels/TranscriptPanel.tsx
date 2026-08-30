@@ -14,13 +14,15 @@
 import React from 'react';
 import { ChatPanel } from '../components/ChatPanel';
 import type { ChatScrollHandle } from '../components/ChatMessagesView.js';
-import type { ChatMessage, ThinkingChain } from '../view-protocol';
+import type { ChatMessage, ThinkingChain, LiveThinkingChain } from '../view-protocol';
 
 interface TranscriptPanelProps {
   /** Conversation transcript (user/assistant/system bubbles + tool cards). */
   messages: ChatMessage[];
-  /** Per-assistant-message thinking chains, keyed by message id. */
-  thinkingChains?: Map<string, ThinkingChain>;
+  /** Per-assistant-message thinking chains frozen at turn end, keyed by message id. */
+  frozenChains?: Map<string, ThinkingChain>;
+  /** Thinking chain of the streaming assistant bubble. */
+  liveChain?: LiveThinkingChain | null;
   /** Scroll handle wired to the focus stack's editor base layer. */
   scrollRef: React.MutableRefObject<ChatScrollHandle | null>;
   /** Global tool-output expansion toggle (Ctrl+O). */
@@ -31,7 +33,8 @@ interface TranscriptPanelProps {
 
 export function TranscriptPanel({
   messages,
-  thinkingChains,
+  frozenChains,
+  liveChain,
   scrollRef,
   toolOutputExpanded,
   isStreaming,
@@ -39,7 +42,8 @@ export function TranscriptPanel({
   return (
     <ChatPanel
       messages={messages}
-      thinkingChains={thinkingChains}
+      frozenChains={frozenChains}
+      liveChain={liveChain}
       scrollRef={scrollRef}
       toolOutputExpanded={toolOutputExpanded}
       isStreaming={isStreaming}

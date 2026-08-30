@@ -7,6 +7,10 @@ import { setLogLevel } from '../services/logger';
 import { updateStatus } from '../ui/statusline';
 import { runWithScopedState } from './state';
 import { VERSION } from './cli-config';
+import { ReplSessionService } from '../services/replSession';
+import { getErrorMessage } from '../utils/errors';
+import type { SessionSnapshot } from '../memory/protocol';
+import type { ChatMessage } from '../query/protocol';
 
 // Re-export for backward compatibility (moved to Bootstrap.ts)
 export { buildSystemPrompt } from './Bootstrap';
@@ -32,13 +36,22 @@ export interface RunAgentOptions {
     provider: string;
     model: string;
     maxTurns: number;
+    /** Set when kc --continue/--resume restored a session before dispatch. */
+    resumedSession?: ResumedSession;
   }) => void;
   /** Called to run the fallback REPL. */
-  onRunREPL: (queryEngine: QueryEngine) => Promise<void>;
+  onRunREPL: (queryEngine: QueryEngine, resumedSessionId?: string) => Promise<void>;
   /** Called for single-prompt mode. */
   onExecutePrompt: (queryEngine: QueryEngine, prompt: string) => Promise<void>;
   /** Called for JSON output mode. */
   onRunJSONMode: (queryEngine: QueryEngine, prompt: string | undefined, pretty: boolean) => Promise<void>;
+}
+
+/** A session restored from disk before the UI/REPL took over. */
+export interface ResumedSession {
+  sessionId: string;
+  messages: ChatMessage[];
+  turnCount: number;
 }
 
 export async function runAgent(options: RunAgentOptions): Promise<void> {
@@ -116,20 +129,58 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
     process.on('SIGTERM', shutdownIM);
   }
 
+  // ── Session resume (kc --continue / kc --resume [id]) ──
+  // Resolve the target snapshot before dispatch. The REPL restores through its
+  // own ReplSessionService (counter re-sync); the UI and non-interactive paths
+  // restore at the engine level here.
+  let resumeTarget: SessionSnapshot | null = null;
+  if (opts.resume || opts.continue) {
+    try {
+      const replSession = new ReplSessionService();
+      const requestedId = typeof opts.resume === 'string' ? opts.resume : undefined;
+      if (requestedId) {
+        const sessions = await replSession.list(100);
+        resumeTarget = sessions.find((s) => s.sessionId === requestedId) ?? null;
+        if (!resumeTarget) {
+          console.log(chalk.yellow(`No saved session found with id: ${requestedId} — starting fresh.`));
+        }
+      } else {
+        resumeTarget = await replSession.latestForCwd();
+        if (!resumeTarget) {
+          console.log(chalk.yellow('No saved session found for this directory — starting fresh.'));
+        }
+      }
+    } catch (error) {
+      console.log(chalk.yellow(`Session resume failed (${getErrorMessage(error)}) — starting fresh.`));
+    }
+  }
+
   // ── Phase 5: Dispatch to REPL / single prompt / JSON mode ──
   if (opts.json || opts.jsonPretty) {
+    if (resumeTarget) queryEngine.restoreSession(resumeTarget);
     await options.onRunJSONMode(queryEngine, prompt, opts.jsonPretty);
   } else if (prompt) {
+    if (resumeTarget) queryEngine.restoreSession(resumeTarget);
     await options.onExecutePrompt(queryEngine, prompt);
   } else if (!opts.bare && process.stdout.isTTY && process.stdin.isTTY) {
+    let resumedSession: ResumedSession | undefined;
+    if (resumeTarget) {
+      const restoredTurnCount = queryEngine.restoreSession(resumeTarget);
+      resumedSession = {
+        sessionId: resumeTarget.sessionId,
+        messages: resumeTarget.messages,
+        turnCount: restoredTurnCount,
+      };
+    }
     options.onInteractiveUI({
       queryEngine,
       provider,
       model,
       maxTurns,
+      resumedSession,
     });
   } else {
-    await options.onRunREPL(queryEngine);
+    await options.onRunREPL(queryEngine, resumeTarget?.sessionId);
   }
 
   if (opts.profile) {

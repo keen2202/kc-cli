@@ -46,6 +46,8 @@ export function createProgram(delegates: CLIDelegates): Command {
     .option('--profile', 'Show startup profile')
     .option('--json', 'Output events as NDJSON (for IDE integration)')
     .option('--json-pretty', 'Output events as formatted JSON (for debugging)')
+    .option('--resume [sessionId]', 'Resume a saved session by id (defaults to the latest for this directory)')
+    .option('--continue', 'Resume the latest saved session for this directory')
     .option('--acp', 'Run as ACP server (JSON-RPC over stdio)')
     .option('--im', 'Run in IM bridge mode (connect to configured IM platforms)')
     .action(async (prompt: string | undefined, opts: Record<string, any>) => {

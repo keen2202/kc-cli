@@ -140,6 +140,17 @@ export interface ThinkingChain {
 }
 
 /**
+ * The in-flight thinking chain of the streaming assistant bubble. Kept separate
+ * from the frozen chain map: streaming deltas re-key this object every flush,
+ * and folding it into a whole-map identity would invalidate ChatView's cached
+ * history rows (full transcript re-flatten) on every tick.
+ */
+export interface LiveThinkingChain {
+  id: string;
+  chain: ThinkingChain;
+}
+
+/**
  * Classify raw thinking text into structured steps by keyword heuristics.
  * Returns steps with labels based on content patterns.
  */

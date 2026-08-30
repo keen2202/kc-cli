@@ -52,7 +52,15 @@ const MODE_LABELS: Record<string, string> = {
   steer: 'steer',
 };
 
-export function StatusBar({ mode, provider, model, turnCount, maxTurns, tokensUsed, currentOperation, operationElapsedSec, operationStartTime, progressPercent, etaSec, queryStartTime, etaCompletedUnits, etaRemainingUnits }: StatusBarProps) {
+/**
+ * Test-only probe: counts StatusBar renders. The memo must skip re-renders
+ * when streaming delta flushes re-render AppRoot with unchanged props
+ * (guarded by test/ui/behavior/streaming-recompute.test.tsx).
+ */
+export const statusBarRenderStats = { renderCount: 0 };
+
+export const StatusBar = React.memo(function StatusBar({ mode, provider, model, turnCount, maxTurns, tokensUsed, currentOperation, operationElapsedSec, operationStartTime, progressPercent, etaSec, queryStartTime, etaCompletedUnits, etaRemainingUnits }: StatusBarProps) {
+  statusBarRenderStats.renderCount++;
   const { tokens } = useTheme();
   const { width } = useTerminalSize();
   const icon = MODE_ICONS[mode] || '○';
@@ -123,4 +131,4 @@ export function StatusBar({ mode, provider, model, turnCount, maxTurns, tokensUs
       <Text>{truncate(plain, avail)}</Text>
     </Box>
   );
-}
+});

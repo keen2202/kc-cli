@@ -37,6 +37,21 @@ const BAD_REQUEST_REGEX = /\b400\b|invalid_request/;
 const TOOL_ERROR_REGEX = /tool.*(error|failed)|(error|failed).*tool/;
 const TOOL_TIMEOUT_REGEX = /timeout|timed\s*out/;
 const PERMISSION_DENIED_REGEX = /permission.*denied|denied.*permission/;
+// Context-window overflow (Anthropic "prompt is too long", OpenAI "maximum
+// context length", DeepSeek/GLM/Qwen "context_length_exceeded", Gemini "input
+// token count"). Classified permanent — the STREAMING layer recovers by
+// truncating the transcript and retrying, not by blind re-sending.
+const CONTEXT_OVERFLOW_REGEX = new RegExp(
+  [
+    'context.{0,20}length.{0,20}(exceed|too long|invalid)',
+    'context_length_exceeded',
+    'prompt.{0,10}is too long',
+    'maximum.{0,20}context.{0,10}length',
+    'too many (input )?tokens',
+    'input token count (exceeds|surpasses)',
+    '(exceeds|exceeded).{0,20}(the )?(context|token).{0,10}(limit|window|max)',
+  ].join('|'),
+);
 
 /**
  * Extract retry-after delay in milliseconds from Retry-After header value.
@@ -83,11 +98,19 @@ export function classifyApiError(error: Error): ClassifiedError {
       return { error, errorClass: 'permanent', retryable: false, context: 'auth' };
     }
 
+    // 413: payload too large — context overflow with a dedicated status
+    if (status === 413) {
+      return { error, errorClass: 'permanent', retryable: false, context: 'context_overflow' };
+    }
+
     // 400: check for transient malformed request errors (e.g., mimo "missing function name")
     if (status === 400) {
       const body = error.message.toLowerCase();
       if (body.includes('missing') && body.includes('function name')) {
         return { error, errorClass: 'transient', retryable: true, retryAfterMs: 2000, context: 'malformed_tool_call' };
+      }
+      if (CONTEXT_OVERFLOW_REGEX.test(body)) {
+        return { error, errorClass: 'permanent', retryable: false, context: 'context_overflow' };
       }
       return { error, errorClass: 'permanent', retryable: false, context: 'bad_request' };
     }
@@ -129,6 +152,12 @@ export function classifyApiError(error: Error): ClassifiedError {
   // Permanent: auth errors
   if (AUTH_ERROR_REGEX.test(message)) {
     return { error, errorClass: 'permanent', retryable: false, context: 'auth' };
+  }
+
+  // Permanent: context-window overflow (recovered by the streaming layer via
+  // truncation + single retry, not by blind re-sending)
+  if (CONTEXT_OVERFLOW_REGEX.test(message)) {
+    return { error, errorClass: 'permanent', retryable: false, context: 'context_overflow' };
   }
 
   // Transient: malformed tool call (mimo API quirk - model sometimes sends empty function name)
@@ -242,6 +271,15 @@ export function getRateLimitRetryDelay(attemptNumber: number, retryAfterMs?: num
     return Math.floor(retryAfterMs + jitter);
   }
   return getRetryDelay(attemptNumber, RATE_LIMIT_BASE_DELAY_MS);
+}
+
+/**
+ * True when the error is a context-window overflow. Unlike plain retryables,
+ * overflow recovery requires shrinking the transcript before re-sending —
+ * the streaming layer force-truncates and retries once.
+ */
+export function isContextOverflowError(error: Error): boolean {
+  return classifyApiError(error).context === 'context_overflow';
 }
 
 export class RetryState {

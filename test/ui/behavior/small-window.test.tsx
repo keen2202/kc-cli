@@ -95,6 +95,8 @@ describe('small-window overlays (behavior)', () => {
     // The picker's own chrome renders (title + windowed list; the hint text
     // may wrap across lines at this width).
     expect(h.plainFrame()).toContain('File Picker');
-    expect(h.plainFrame()).toContain('… 27 more');
+    // Windowed-list count tracks the live repo root contents, so assert the
+    // more-indicator shape rather than an exact entry count.
+    expect(h.plainFrame()).toMatch(/… \d+ more/);
   });
 });

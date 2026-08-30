@@ -4,6 +4,7 @@
 // unit tests — the live editor is drawn by ink components, not this function.
 import chalk from 'chalk';
 import type { Theme } from '../theme';
+import { moveCursorVisualDown, moveCursorVisualUp, cursorVisualRow, locateCursor, toVisualLines } from '../visual-lines';
 
 const MIN_VISIBLE_LINES = 3;
 const MAX_VISIBLE_LINES = 15;
@@ -122,6 +123,23 @@ export function isCursorOnLastLine(state: InputState): boolean {
   return !state.text.slice(state.cursorPos).includes('\n');
 }
 
+/**
+ * Visual-row boundary checks: with wrapping active (screenWidth > 0) the
+ * caret moves between wrapped rows, so history recall must fire only at the
+ * first/last VISUAL row. screenWidth <= 0 falls back to the logical-line
+ * checks (legacy behavior, used by unit tests and pre-measurement callers).
+ */
+export function isCursorOnFirstVisualRow(state: InputState, screenWidth: number): boolean {
+  if (screenWidth <= 0) return isCursorOnFirstLine(state);
+  return cursorVisualRow(state.text, state.cursorPos, screenWidth) === 0;
+}
+
+export function isCursorOnLastVisualRow(state: InputState, screenWidth: number): boolean {
+  if (screenWidth <= 0) return isCursorOnLastLine(state);
+  const rows = toVisualLines(state.text, screenWidth);
+  return locateCursor(rows, state.cursorPos).row >= rows.length - 1;
+}
+
 export function moveCursorLeft(state: InputState): InputState {
   if (state.cursorPos <= 0) return state;
   return { ...state, cursorPos: state.cursorPos - 1 };
@@ -133,6 +151,11 @@ export function moveCursorRight(state: InputState): InputState {
 }
 
 export function moveCursorUp(state: InputState, screenWidth: number): InputState {
+  // With wrapping active, ↑/↓ step through VISUAL rows of a wrapped line;
+  // screenWidth <= 0 keeps the logical-line movement (legacy callers).
+  if (screenWidth > 0) {
+    return { ...state, cursorPos: moveCursorVisualUp(state.text, state.cursorPos, screenWidth) };
+  }
   const { line, col } = getCursorLineCol(state);
   if (line <= 0) return state;
   const prevLine = line - 1;
@@ -144,6 +167,9 @@ export function moveCursorUp(state: InputState, screenWidth: number): InputState
 }
 
 export function moveCursorDown(state: InputState, screenWidth: number): InputState {
+  if (screenWidth > 0) {
+    return { ...state, cursorPos: moveCursorVisualDown(state.text, state.cursorPos, screenWidth) };
+  }
   const { line, col } = getCursorLineCol(state);
   const totalLines = getLineCount(state);
   if (line >= totalLines - 1) return state;

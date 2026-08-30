@@ -1,11 +1,14 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { ChatView, type ChatScrollHandle } from './ChatMessagesView.js';
-import type { ChatMessage, ThinkingChain } from '../view-protocol';
+import type { ChatMessage, ThinkingChain, LiveThinkingChain } from '../view-protocol';
 
 interface ChatPanelProps {
   messages: ChatMessage[];
-  thinkingChains?: Map<string, ThinkingChain>;
+  /** Chains frozen at turn end — stable identity, must not move while streaming. */
+  frozenChains?: Map<string, ThinkingChain>;
+  /** Chain of the streaming assistant bubble. */
+  liveChain?: LiveThinkingChain | null;
   /** Scroll handle wired to the focus stack's editor base layer. */
   scrollRef?: React.MutableRefObject<ChatScrollHandle | null>;
   /** Global tool-output expansion toggle (Ctrl+O). */
@@ -14,7 +17,7 @@ interface ChatPanelProps {
   isStreaming?: boolean;
 }
 
-export function ChatPanel({ messages, thinkingChains, scrollRef, toolOutputExpanded, isStreaming }: ChatPanelProps) {
+export function ChatPanel({ messages, frozenChains, liveChain, scrollRef, toolOutputExpanded, isStreaming }: ChatPanelProps) {
   if (messages.length === 0) {
     return (
       <Box padding={1} flexDirection="column">
@@ -30,7 +33,8 @@ export function ChatPanel({ messages, thinkingChains, scrollRef, toolOutputExpan
     <Box padding={1} flexDirection="column" flexGrow={1}>
       <ChatView
         messages={messages}
-        thinkingChains={thinkingChains}
+        frozenChains={frozenChains}
+        liveChain={liveChain}
         scrollRef={scrollRef}
         toolOutputExpanded={toolOutputExpanded}
         isStreaming={isStreaming}

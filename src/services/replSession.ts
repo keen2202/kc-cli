@@ -134,6 +134,17 @@ export class ReplSessionService {
   }
 
   /**
+   * Most recent saved session recorded for `cwd` (defaults to the current
+   * working directory). Backs `kc --continue` / `kc --resume`: a crash loses
+   * at most the window since the last throttled save, and the next `kc
+   * --continue` picks the conversation back up in this repo.
+   */
+  async latestForCwd(cwd: string = getState().cwd, limit = 50): Promise<SessionSnapshot | null> {
+    const sessions = await this.list(limit);
+    return sessions.find((s) => s.state?.cwd === cwd) ?? null;
+  }
+
+  /**
    * Load a saved session into the engine. Returns null when the id is
    * unknown; throws when the snapshot fails restoreSession validation (in
    * which case the current session is left untouched). On success the
