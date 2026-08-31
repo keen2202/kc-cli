@@ -2,6 +2,10 @@
 import { describe, it, expect } from 'vitest';
 import { ConversationState } from '../../src/query/QueryEngineState';
 import type { ChatMessage } from '../../src/query/protocol';
+import { QueryEngine } from '../../src/query/QueryEngine';
+import { MockLLMClient } from '../../test/utils/mock-llm';
+import type { BaseApiClient } from '../../src/api/BaseApiClient';
+import { initializeState } from '../../src/bootstrap/state';
 
 function msg(role: 'user' | 'assistant', content: string): ChatMessage {
   return { id: `${role}-${Math.random()}`, role, content, timestamp: Date.now() } as ChatMessage;
@@ -54,5 +58,29 @@ describe('ConversationState version counter', () => {
     const v2 = cs.version;
     cs.clear();
     expect(cs.version).toBeGreaterThan(v2);
+  });
+});
+
+describe('api-messages version cache', () => {
+  it('rebuilds only when the conversation version changes', async () => {
+    initializeState();
+    const mock = new MockLLMClient();
+    mock.setResponses([{ content: 'one' }, { content: 'two' }]);
+    const engine = new QueryEngine(
+      // sandboxFailIfNoSandbox: false — Windows dev boxes have no sandbox
+      // backend; aligns with the bench scripts' KC_SANDBOX_FAIL_IF_NO_SANDBOX.
+      { model: 'm', provider: 'anthropic', apiKey: 'k', maxTurns: 5, maxBudgetUsd: null, sandboxFailIfNoSandbox: false },
+      [],
+    );
+    // QueryEngineDeps has no apiClient slot — the constructor always builds a
+    // real client. Existing tests swap the field post-construction instead
+    // (see test/query/QueryEngineStreaming.test.ts).
+    (engine as unknown as { apiClient: unknown }).apiClient = mock;
+    for await (const _e of engine.submitMessage('first')) { /* drain */ }
+    const firstRequest = mock.getCallLog().at(-1)!;
+    for await (const _e of engine.submitMessage('second')) { /* drain */ }
+    const secondRequest = mock.getCallLog().at(-1)!;
+    // Second request contains the first turn's messages — rebuilt after mutation.
+    expect(secondRequest.messages.length).toBeGreaterThan(firstRequest.messages.length);
   });
 });

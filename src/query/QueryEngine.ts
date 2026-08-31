@@ -127,6 +127,9 @@ export class QueryEngine {
   // Cache prefix service for byte-stable prompt prefixes
   private cachePrefix: CachePrefixService;
 
+  /** Cached buildApiMessages output, keyed by conversation version. */
+  private apiMessagesCache: { version: number; messages: ChatMessage[] } | null = null;
+
   // Dual-queue steering system
   private steerQueue: ChatMessage[] = [];
   private followUpQueue: ChatMessage[] = [];
@@ -820,7 +823,18 @@ export class QueryEngine {
       if (this._aborted) {
         throw new Error('Query aborted during streaming');
       }
-      const apiMessages = buildApiMessages(this.conversation.getMessagesCopy());
+      // Version-cached: retries within a turn reuse the built array; any
+      // conversation mutation (addMessage/setMessages/trim/branch/checkout)
+      // bumps the version and forces a rebuild. The cached array is treated
+      // as read-only downstream (API clients only serialize it).
+      const conversationVersion = this.conversation.version;
+      let apiMessages: ChatMessage[];
+      if (this.apiMessagesCache !== null && this.apiMessagesCache.version === conversationVersion) {
+        apiMessages = this.apiMessagesCache.messages;
+      } else {
+        apiMessages = buildApiMessages(this.conversation.getMessages());
+        this.apiMessagesCache = { version: conversationVersion, messages: apiMessages };
+      }
 
       const requestConfig: LLMRequestConfig = {
         model: this.config.model,
