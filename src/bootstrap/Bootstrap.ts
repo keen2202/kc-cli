@@ -29,6 +29,7 @@ import {
   loadMCPConfig,
   evaluateTrust,
   type MCPServerConfig,
+  type LoadedMCPConfig,
 } from '../mcp';
 import { logger } from '../services/logger';
 import { getErrorMessage } from '../utils/errors';
@@ -286,10 +287,11 @@ export class Bootstrap {
 
     // ── Phase 3b: Initialize MCP servers (parallel connections) ──
     let mcpManager: MCPClientManager | null = null;
-    let mcpConfigCache: Awaited<ReturnType<typeof loadMCPConfig>> | null = null;
+    let mcpConfigCache: LoadedMCPConfig | null = null;
     if (!bareMode) {
       try {
         mcpConfigCache = await loadMCPConfig(cwd);
+        // Local alias for the Phase 3b body; the cache persists for Phase 3c.5.
         const mcpConfig = mcpConfigCache;
 
         // Trust gate (round4 §2-S6): a project-scoped `.mcp.json` ships with the
