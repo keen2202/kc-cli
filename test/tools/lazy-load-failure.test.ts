@@ -2,6 +2,9 @@
 // Verifies that load failures are logged instead of being silently swallowed
 // at both layers: src/tools/registry.ts loadToolModule (import/extract failure)
 // and src/tools.ts ensureTool (load returned undefined).
+//
+// Built-ins are all eager after Task 1.8, so ensureTool's lazy path is
+// exercised through a synthetic non-eager manifest entry.
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { logger } from '../../src/services/logger';
@@ -11,7 +14,19 @@ const loadToolModuleMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../src/tools/registry', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/tools/registry')>();
-  return { ...actual, loadToolModule: loadToolModuleMock };
+  return {
+    ...actual,
+    loadToolModule: loadToolModuleMock,
+    TOOL_MANIFEST: [
+      ...actual.TOOL_MANIFEST,
+      {
+        name: 'LazyBroken',
+        modulePath: './BrokenTool/index.js',
+        priority: actual.ToolPriority.LOW,
+        eager: false,
+      },
+    ],
+  };
 });
 
 // Imported after vi.mock so ensureTool uses the mocked loadToolModule
@@ -53,15 +68,15 @@ describe('ensureTool failure logging', () => {
     const warnSpy = vi.spyOn(logger.tools, 'warn').mockImplementation(() => {});
     loadToolModuleMock.mockResolvedValueOnce(undefined);
 
-    const result = await toolRegistry.ensureTool('Sql');
+    const result = await toolRegistry.ensureTool('LazyBroken');
 
     expect(result).toBeUndefined();
     expect(loadToolModuleMock).toHaveBeenCalledTimes(1);
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Sql'),
-      expect.objectContaining({ modulePath: './SqlTool/index.js' })
+      expect.stringContaining('LazyBroken'),
+      expect.objectContaining({ modulePath: './BrokenTool/index.js' })
     );
     // Failure must not consume the manifest entry — the tool stays retryable
-    expect(toolRegistry.getLazyToolNames()).toContain('Sql');
+    expect(toolRegistry.getLazyToolNames()).toContain('LazyBroken');
   });
 });
