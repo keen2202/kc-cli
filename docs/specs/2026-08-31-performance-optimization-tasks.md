@@ -1,6 +1,6 @@
 # kc-cli 性能优化实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 按路线 A（基线先行 + 分阶段热点消除）优化 kc-cli 的启动速度、每轮响应与长会话稳定性，每项改动独立可回滚、数据可验证。
 
@@ -58,7 +58,7 @@
 **Files:**
 - Modify: `src/bootstrap/Bootstrap.ts:16`（import）与 `src/bootstrap/Bootstrap.ts:645-647`（compose 结尾）
 
-- [ ] **Step 1: 添加 bench 退出点**
+- [x] **Step 1: 添加 bench 退出点**
 
 `src/bootstrap/Bootstrap.ts:16` 的 profiler import 扩展：
 
@@ -77,17 +77,17 @@ import { profileCheckpoint, getProfileReport } from './profiler';
     }
 ```
 
-- [ ] **Step 2: 构建并手工验证**
+- [x] **Step 2: 构建并手工验证**
 
 Run: `npm run build && KC_BENCH_STARTUP=1 node dist/main.js`
 Expected: 进程以退出码 0 结束，stderr 输出 `Performance Profile:` 表格，含 `state_init`…`failure_bridging_wired` 共 12 个 checkpoint 与 Total 行；不出现任何交互界面。
 
-- [ ] **Step 3: 类型检查与回归**
+- [x] **Step 3: 类型检查与回归**
 
 Run: `npm run typecheck && npx vitest run test/bootstrap`
 Expected: 全部通过（对照任务开始前的失败基线，不新增失败）。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/bootstrap/Bootstrap.ts
@@ -103,7 +103,7 @@ git commit -m "feat(bench): add KC_BENCH_STARTUP exit point for startup profilin
 - Create: `scripts/perf-baseline.json`（由脚本生成后提交）
 - Modify: `package.json`（scripts 节）
 
-- [ ] **Step 1: 写 startup.mjs**
+- [x] **Step 1: 写 startup.mjs**
 
 ```javascript
 #!/usr/bin/env node
@@ -176,7 +176,7 @@ if (process.argv.includes('--update')) {
 }
 ```
 
-- [ ] **Step 2: package.json 增加 bench 脚本**
+- [x] **Step 2: package.json 增加 bench 脚本**
 
 在 `scripts` 节追加（保持现有项不动）：
 
@@ -187,12 +187,12 @@ if (process.argv.includes('--update')) {
 "perf:ratchet": "node scripts/perf-ratchet.mjs"
 ```
 
-- [ ] **Step 3: 运行并落库基线**
+- [x] **Step 3: 运行并落库基线**
 
 Run: `npm run bench:startup -- --update`
 Expected: 输出 `[bench:startup] baseline updated: p50=…ms p95=…ms`；生成 `scripts/perf-baseline.json` 含 `startup` 节。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/bench/startup.mjs scripts/perf-baseline.json package.json
@@ -206,7 +206,7 @@ git commit -m "feat(bench): startup benchmark script + initial baseline"
 **Files:**
 - Create: `scripts/bench/turn-overhead.ts`
 
-- [ ] **Step 1: 写 turn-overhead.ts**
+- [x] **Step 1: 写 turn-overhead.ts**
 
 ```typescript
 // Per-turn overhead benchmark: measures buildApiMessages and full token
@@ -272,12 +272,12 @@ for (const n of [50, 200, 800]) {
 console.log(JSON.stringify({ metric: 'turn_overhead', results, timestamp: new Date().toISOString() }, null, 2));
 ```
 
-- [ ] **Step 2: 运行验证**
+- [x] **Step 2: 运行验证**
 
 Run: `npm run bench:turn`
 Expected: 输出 JSON，三档消息数各有 `buildApiMessages_ms` 与 `estimateTokens_ms` 数值（量级应在亚毫秒~几十毫秒；记录进任务日志作为阶段 2 的对比基线）。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add scripts/bench/turn-overhead.ts
@@ -291,7 +291,7 @@ git commit -m "feat(bench): per-turn overhead benchmark (buildApiMessages + toke
 **Files:**
 - Create: `scripts/bench/long-session.ts`
 
-- [ ] **Step 1: 写 long-session.ts**
+- [x] **Step 1: 写 long-session.ts**
 
 ```typescript
 // Long-session benchmark: drives QueryEngine with MockLLMClient for N turns,
@@ -331,12 +331,12 @@ console.log(JSON.stringify({ metric: 'long_session', turns: TURNS, curve, timest
 
 注意：`{ apiClient }` 作为第三参 deps 注入，与 `test/` 下现有 QueryEngine 测试的注入方式一致（构造器内 `d.apiClient` 优先生效）。若实际测试用的是别的注入字段，以 `test/QueryEngine.test.ts` 现有写法为准对齐。
 
-- [ ] **Step 2: 运行验证**
+- [x] **Step 2: 运行验证**
 
 Run: `npm run bench:long`
 Expected: 输出 JSON 增长曲线（12 个采样点）；记录数值作为阶段 3 的决策依据。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add scripts/bench/long-session.ts
@@ -350,7 +350,7 @@ git commit -m "feat(bench): long-session memory growth benchmark"
 **Files:**
 - Create: `scripts/perf-ratchet.mjs`
 
-- [ ] **Step 1: 写 perf-ratchet.mjs**
+- [x] **Step 1: 写 perf-ratchet.mjs**
 
 语义对齐 `scripts/coverage-ratchet.mjs`：回归超阈值失败、显著改善自动收紧基线。
 
@@ -406,12 +406,12 @@ if (deltaPct <= -RATCHET_PCT) {
 }
 ```
 
-- [ ] **Step 2: 端到端验证棘轮**
+- [x] **Step 2: 端到端验证棘轮**
 
 Run: `npm run bench:startup && npm run perf:ratchet`
 Expected: 输出 `delta=…%`（接近 0），以 `OK` 结束、退出码 0。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add scripts/perf-ratchet.mjs
@@ -427,7 +427,7 @@ git commit -m "feat(bench): perf ratchet guarding startup p50 against regression
 **Files:**
 - Modify: `src/bootstrap/Bootstrap.ts:230-266`
 
-- [ ] **Step 1: 修改 compose 的 Phase 2 / 2.5**
+- [x] **Step 1: 修改 compose 的 Phase 2 / 2.5**
 
 把 `Bootstrap.ts:230-266` 区域改为先发起 git 探测、后在消费点 await：
 
@@ -447,12 +447,12 @@ Phase 2.5 处的 `const isGitRepo = await isInsideGitRepo(cwd);` 改为：
     const isGitRepo = await gitProbe;
 ```
 
-- [ ] **Step 2: 验证**
+- [x] **Step 2: 验证**
 
 Run: `npm run typecheck && npx vitest run test/bootstrap && npm run build && npm run bench:startup`
 Expected: 类型与测试通过；`perf-current.json` 中 `git_detect` checkpoint 的 delta 明显变小（探测耗时被并入 `config_load` 的并行窗口），p50 不劣化。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/bootstrap/Bootstrap.ts
@@ -467,7 +467,7 @@ git commit -m "perf(bootstrap): run git probe concurrently with config load"
 - Modify: `src/bootstrap/config.ts:271-330`
 - Create: `test/bootstrap/dotenv.test.ts`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```typescript
 // test/bootstrap/dotenv.test.ts
@@ -508,12 +508,12 @@ describe('loadDotEnv idempotency', () => {
 });
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `npx vitest run test/bootstrap/dotenv.test.ts`
 Expected: FAIL（`resetDotEnvForTesting` 未导出 / 第二次调用重读文件得到 `second`）。
 
-- [ ] **Step 3: 实现幂等**
+- [x] **Step 3: 实现幂等**
 
 在 `src/bootstrap/config.ts` 的 `loadDotEnv` 上方加模块级标记，并包裹函数体：
 
@@ -534,12 +534,12 @@ export function loadDotEnv(cwd: string): void {
 
 （函数体其余部分原样保留；`app.ts:15` 的首次调用完成实际加载，`config.ts:332`（loadConfig 内）的第二次调用变为无操作。）
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `npx vitest run test/bootstrap/dotenv.test.ts`
 Expected: PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/bootstrap/config.ts test/bootstrap/dotenv.test.ts
@@ -553,7 +553,7 @@ git commit -m "perf(bootstrap): make loadDotEnv idempotent (was reading .env twi
 **Files:**
 - Modify: `src/bootstrap/Bootstrap.ts:285-409`
 
-- [ ] **Step 1: 提升变量并复用**
+- [x] **Step 1: 提升变量并复用**
 
 在 Phase 3b 开始处（`let mcpManager: MCPClientManager | null = null;` 附近）增加：
 
@@ -574,12 +574,12 @@ Phase 3c.5 内（:409）的 `const mcpConfig = await loadMCPConfig(cwd);` 改为
         const mcpConfig = mcpConfigCache ?? await loadMCPConfig(cwd);
 ```
 
-- [ ] **Step 2: 验证**
+- [x] **Step 2: 验证**
 
 Run: `npm run typecheck && npx vitest run test/bootstrap test/mcp`
 Expected: 通过，无新增失败。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/bootstrap/Bootstrap.ts
@@ -593,7 +593,7 @@ git commit -m "perf(bootstrap): reuse loadMCPConfig result across phases (was ca
 **Files:**
 - Modify: `src/bootstrap/Bootstrap.ts:453-490`
 
-- [ ] **Step 1: 仅在 evolution 启用时执行 loadState**
+- [x] **Step 1: 仅在 evolution 启用时执行 loadState**
 
 将 :470-473 的：
 
@@ -617,12 +617,12 @@ git commit -m "perf(bootstrap): reuse loadMCPConfig result across phases (was ca
         }
 ```
 
-- [ ] **Step 2: 验证**
+- [x] **Step 2: 验证**
 
 Run: `npm run typecheck && npx vitest run test/bootstrap`
 Expected: 通过。注意：默认配置下（`evolution.enabled ?? false`）此改动跳过磁盘读取；若存在依赖启动恢复的 AGP 测试（检查 `test/` 下 agp 相关），确认其显式开启 evolution 配置。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/bootstrap/Bootstrap.ts
@@ -636,7 +636,7 @@ git commit -m "perf(bootstrap): skip AGP disk restore when evolution is disabled
 **Files:**
 - Modify: `src/bootstrap/Bootstrap.ts:378-490`
 
-- [ ] **Step 1: 抽取 AGP 块为私有方法**
+- [x] **Step 1: 抽取 AGP 块为私有方法**
 
 在 `Bootstrap` 类中新增（放在 `resolveNoninteractiveAskPolicy` 附近）：
 
@@ -659,7 +659,7 @@ git commit -m "perf(bootstrap): skip AGP disk restore when evolution is disabled
 
 > 实施提示：直接剪切 `// ── Phase 3d: Initialize AGP ...` 到 `profileCheckpoint('agp_initialized');` 之前的代码块作为方法体；`updateState({ agpRegistry })` 改为通过参数调用。`createSurfacePromptRecords` 等 import 已在文件顶部，无需改动。
 
-- [ ] **Step 2: 在 compose 中并行发起**
+- [x] **Step 2: 在 compose 中并行发起**
 
 在 Phase 3c（插件）块**之前**插入：
 
@@ -679,12 +679,12 @@ git commit -m "perf(bootstrap): skip AGP disk restore when evolution is disabled
 
 （注意：IM 初始化依赖 `pluginManager`，保持在插件阶段之后不动。）
 
-- [ ] **Step 3: 验证**
+- [x] **Step 3: 验证**
 
 Run: `npm run typecheck && npx vitest run test/bootstrap && npm run build && npm run bench:startup`
 Expected: 通过；`plugins_initialized` 与 `agp_initialized` 两段合计耗时下降（并行窗口重叠），p50 不劣化。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/bootstrap/Bootstrap.ts
@@ -699,7 +699,7 @@ git commit -m "perf(bootstrap): run AGP init concurrently with plugin init"
 - Create: `src/tools/SqlTool/impl.ts`
 - Modify: `src/tools/SqlTool/index.ts`
 
-- [ ] **Step 1: 创建 impl.ts**
+- [x] **Step 1: 创建 impl.ts**
 
 把当前 `index.ts` 中**除**以下内容之外的全部代码搬入 `impl.ts`：
 - `SqlInputSchema` / `SqlInput` 定义
@@ -735,7 +735,7 @@ export async function executeSql(
 }
 ```
 
-- [ ] **Step 2: 重写 index.ts 为轻量入口**
+- [x] **Step 2: 重写 index.ts 为轻量入口**
 
 ```typescript
 // SQL tool — lightweight entry: metadata + permission scan only. The runtime
@@ -779,13 +779,13 @@ export const tool = buildTool<SqlInput, string>({
 });
 ```
 
-- [ ] **Step 3: 运行现有 Sql 工具测试**
+- [x] **Step 3: 运行现有 Sql 工具测试**
 
 Run: `npm run typecheck && npx vitest run test/tools --testNamePattern "Sql"`
 （若无 Sql 专项测试文件，则运行 `npx vitest run test/tools`。）
 Expected: 全绿——动态导入路径经现有测试覆盖（调用即加载）。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/tools/SqlTool/index.ts src/tools/SqlTool/impl.ts
@@ -814,13 +814,13 @@ git commit -m "perf(tools): split SqlTool — lazy better-sqlite3 runtime via dy
 
 验证与提交：
 
-- [ ] **Step 1: 三个文件分别完成拆分**
-- [ ] **Step 2: 验证**
+- [x] **Step 1: 三个文件分别完成拆分**
+- [x] **Step 2: 验证**
 
 Run: `npm run typecheck && npx vitest run test/tools test/orchestrator test/lsp`
 Expected: 全绿，无新增失败。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/tools/AgentTool src/orchestrator/team-create-tool.ts src/orchestrator/team-create-impl.ts src/lsp/tool.ts src/lsp/tool-impl.ts
@@ -835,7 +835,7 @@ git commit -m "perf(tools): split Agent/TeamCreate/LSP — heavy graphs load on 
 - Modify: `src/tools/registry.ts:47-76`、`src/tools.ts`、`src/bootstrap/Bootstrap.ts:268-282,558-561`、`src/main.ts:400,547`、`src/acp/handlers.ts:51`
 - Create: `test/tools/lazy-split.test.ts`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```typescript
 // test/tools/lazy-split.test.ts
@@ -869,16 +869,16 @@ describe('eager registration after lazy split', () => {
 });
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `npx vitest run test/tools/lazy-split.test.ts`
 Expected: FAIL —— 未预热时 12 个懒加载工具不在 `getAllTools()` 里。
 
-- [ ] **Step 3: TOOL_MANIFEST 全部转 eager**
+- [x] **Step 3: TOOL_MANIFEST 全部转 eager**
 
 `src/tools/registry.ts:47-76`：把每个条目的 `eager: false` 改为 `eager: true`（含注释行 `// DEFERRED — advanced tools, always lazy` 更新为 `// DEFERRED — advanced tools; entries are lightweight, heavy code lives in impl modules`）。
 
-- [ ] **Step 4: tools.ts 静态导入全部工具**
+- [x] **Step 4: tools.ts 静态导入全部工具**
 
 `src/tools.ts` 顶部导入区追加：
 
@@ -901,27 +901,27 @@ import { tool as LSPTool } from './lsp/tool.js';
 
 `registerBuiltInTools()` 的 `eagerTools` 数组追加这 12 个工具。函数顶部注释更新为「All built-in tools register eagerly; heavy runtimes are split into impl modules loaded on first call.」
 
-- [ ] **Step 5: Bootstrap 移除预热与 join**
+- [x] **Step 5: Bootstrap 移除预热与 join**
 
 `Bootstrap.ts`：
 - 删除 :269 的 `let toolsPreheat: Promise<void> | null = null;`
 - :270-281 保留 `if (!bareMode) { await registerBuiltInTools(); }`，删除其后的 T22 注释块与 `toolsPreheat = toolRegistry.preloadAllTools()...`
 - :558-560 删除 `// T22: join ...` 注释与 `if (toolsPreheat) await toolsPreheat;`
 
-- [ ] **Step 6: 清理失效的预热调用**
+- [x] **Step 6: 清理失效的预热调用**
 
 - `src/main.ts:400`（`/tools` 命令）：删除 `await toolRegistry.preloadAllTools();` 及其上一行注释。
 - `src/main.ts:547`（`listTools()`）：同上删除。
 - `src/acp/handlers.ts:51`：同上删除。
 
-- [ ] **Step 7: 运行测试与基准**
+- [x] **Step 7: 运行测试与基准**
 
 Run: `npx vitest run test/tools/lazy-split.test.ts && npm run typecheck && npm test`
 Expected: 新测试通过；全量套件无新增失败。
 Run: `npm run build && npm run bench:startup`
 Expected: p50 较基线下降（记录数值；若下降 ≥10%，棘轮会在 ratchet 时提示收紧基线）。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/tools/registry.ts src/tools.ts src/bootstrap/Bootstrap.ts src/main.ts src/acp/handlers.ts test/tools/lazy-split.test.ts
@@ -935,7 +935,7 @@ git commit -m "perf(startup): register all tools eagerly, drop preheat join from
 **Files:**
 - Modify: `agents.md`（Quick Commands 或新增 Perf 小节）
 
-- [ ] **Step 1: 测量编译缓存收益**
+- [x] **Step 1: 测量编译缓存收益**
 
 Run（Git Bash）:
 ```bash
@@ -945,11 +945,11 @@ NODE_COMPILE_CACHE=.cache/node-compile-cache npm run bench:startup   # 记录 p5
 ```
 Expected: 两组 p50 数值。
 
-- [ ] **Step 2: 记录结论**
+- [x] **Step 2: 记录结论**
 
 若热缓存收益 ≥10%：在 `agents.md` Quick Commands 下新增一行说明（开发模式可用 `NODE_COMPILE_CACHE` 提速），并把 `.cache/` 加入 `.gitignore`。若 <10%：在本任务提交信息中记录「评估无显著收益，不启用」。
 
-- [ ] **Step 3: Commit（仅当启用时）**
+- [x] **Step 3: Commit（仅当启用时）**
 
 ```bash
 git add agents.md .gitignore
@@ -966,7 +966,7 @@ git commit -m "docs: enable NODE_COMPILE_CACHE hint after benchmark validation"
 - Modify: `src/query/QueryEngineState.ts`
 - Create: `test/query/conversation-version.test.ts`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```typescript
 // test/query/conversation-version.test.ts
@@ -1029,12 +1029,12 @@ describe('ConversationState version counter', () => {
 });
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `npx vitest run test/query/conversation-version.test.ts`
 Expected: FAIL（`version` 不存在）。
 
-- [ ] **Step 3: 实现版本号**
+- [x] **Step 3: 实现版本号**
 
 `src/query/QueryEngineState.ts` 类字段区新增：
 
@@ -1059,12 +1059,12 @@ Expected: FAIL（`version` 不存在）。
 - `branch`
 - `checkout`
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `npx vitest run test/query/conversation-version.test.ts`
 Expected: PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/query/QueryEngineState.ts test/query/conversation-version.test.ts
@@ -1079,7 +1079,7 @@ git commit -m "feat(query): conversation version counter for O(1) cache invalida
 - Modify: `src/query/QueryEngine.ts`（字段区 + :823）
 - Test: `test/query/conversation-version.test.ts`（追加）
 
-- [ ] **Step 1: 追加失败测试**
+- [x] **Step 1: 追加失败测试**
 
 在 `test/query/conversation-version.test.ts` 追加：
 
@@ -1111,12 +1111,12 @@ describe('api-messages version cache', () => {
 
 （`getCallLog` 记录的是 `chat` 调用；若 MockLLMClient 的流式路径单独记录，则改为断言流式调用日志——以 `test/utils/mock-llm.ts` 的实际记录点为准。）
 
-- [ ] **Step 2: 运行确认当前行为**
+- [x] **Step 2: 运行确认当前行为**
 
 Run: `npx vitest run test/query/conversation-version.test.ts`
 Expected: 该用例应直接 PASS（它验证的是行为不变，而非缓存命中）——保留为回归护栏。
 
-- [ ] **Step 3: 实现缓存**
+- [x] **Step 3: 实现缓存**
 
 `src/query/QueryEngine.ts` 私有字段区新增：
 
@@ -1148,17 +1148,17 @@ Expected: 该用例应直接 PASS（它验证的是行为不变，而非缓存�
       }
 ```
 
-- [ ] **Step 4: 验证**
+- [x] **Step 4: 验证**
 
 Run: `npx vitest run test/query && npm run typecheck && npm run bench:turn`
 Expected: query 套件全绿；`bench:turn` 的 `buildApiMessages_ms` 仅作记录（该基准测纯函数，缓存收益体现在重试路径——以步骤 5 的复测为准）。
 
-- [ ] **Step 5: 重试路径复测（对照基准）**
+- [x] **Step 5: 重试路径复测（对照基准）**
 
 Run: `npm test`（全量，确认无新增失败）
 记录：重试时不再重复构建（代码路径保证），数值证据来自 `bench:turn` 前后对比记录入任务日志。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/query/QueryEngine.ts test/query/conversation-version.test.ts
@@ -1173,7 +1173,7 @@ git commit -m "perf(query): cache buildApiMessages by conversation version (retr
 - Modify: `src/query/QueryEngineState.ts:153-198`
 - Test: `test/query/conversation-version.test.ts`（追加）
 
-- [ ] **Step 1: 追加失败测试**
+- [x] **Step 1: 追加失败测试**
 
 ```typescript
 import { estimateMessageTokensArray } from '../../src/utils/tokenEstimation';
@@ -1190,12 +1190,12 @@ describe('incremental token accounting', () => {
 });
 ```
 
-- [ ] **Step 2: 运行确认通过与否**
+- [x] **Step 2: 运行确认通过与否**
 
 Run: `npx vitest run test/query/conversation-version.test.ts`
 Expected: 当前实现（全量重算）本应通过——此测试是**等价性护栏**，确保增量化改写后数值不变。
 
-- [ ] **Step 3: 增量化改写**
+- [x] **Step 3: 增量化改写**
 
 把 `trimIfNeeded` 中三处裁减路径都改为先算出被移除消息、再增量扣减。将 :167-187（自 `const excess` 起）替换为：
 
@@ -1235,12 +1235,12 @@ Expected: 当前实现（全量重算）本应通过——此测试是**等价�
 
 并删除原 :195-196 的全量重算两行（`this.runningTokenTotal = estimateMessageTokensArray(...)` / `this.recomputed = true;` 中的重算行），保留树节点同步与 `recomputed` 标记、`return excess`。
 
-- [ ] **Step 4: 运行确认通过**
+- [x] **Step 4: 运行确认通过**
 
 Run: `npx vitest run test/query/conversation-version.test.ts && npx vitest run test/query`
 Expected: 全部 PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/query/QueryEngineState.ts test/query/conversation-version.test.ts
@@ -1255,7 +1255,7 @@ git commit -m "perf(query): incremental token accounting in trimIfNeeded"
 - Modify: `src/query/QueryEngineState.ts`（setMessages）、`src/services/compaction/functional.ts`、`src/query/QueryEngineCompaction.ts`、`src/query/QueryEngine.ts:519-523,859-871`
 - Test: `test/query/conversation-version.test.ts`（追加）
 
-- [ ] **Step 1: 追加失败测试**
+- [x] **Step 1: 追加失败测试**
 
 ```typescript
 describe('setMessages knownTotal', () => {
@@ -1275,12 +1275,12 @@ describe('setMessages knownTotal', () => {
 });
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `npx vitest run test/query/conversation-version.test.ts`
 Expected: FAIL（setMessages 忽略第二参数）。
 
-- [ ] **Step 3: setMessages 接受 knownTotal**
+- [x] **Step 3: setMessages 接受 knownTotal**
 
 ```typescript
   /** Set all messages (e.g., after compaction). When the caller already knows
@@ -1297,7 +1297,7 @@ Expected: FAIL（setMessages 忽略第二参数）。
   }
 ```
 
-- [ ] **Step 4: 压缩结果附带 totalTokensAfter**
+- [x] **Step 4: 压缩结果附带 totalTokensAfter**
 
 `src/services/compaction/functional.ts`：
 - 结果类型（`CompactionResult` 或等价接口，:51 附近）增加可选字段 `totalTokensAfter?: number`。
@@ -1307,7 +1307,7 @@ Expected: FAIL（setMessages 忽略第二参数）。
 
 `src/query/QueryEngineCompaction.ts`：透传该字段——所有把压缩结果交给上层的位置（含 `drainPendingCompactResult` 的返回）保留 `totalTokensAfter`。
 
-- [ ] **Step 5: 消费点接线**
+- [x] **Step 5: 消费点接线**
 
 `src/query/QueryEngine.ts`：
 - :519-523 的 drain 应用处：
@@ -1324,14 +1324,14 @@ Expected: FAIL（setMessages 忽略第二参数）。
 
   「减半」分支（`messages.slice(...)`）无已知总量，保持不传（回退全量估算——该路径极少触发）。
 
-- [ ] **Step 6: 验证**
+- [x] **Step 6: 验证**
 
 Run: `npx vitest run test/query test/services && npm run typecheck`
 Expected: 全绿（含现有 `test/services/compaction.test.ts`）。
 Run: `npm test`
 Expected: 无新增失败。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/query/QueryEngineState.ts src/services/compaction/functional.ts src/query/QueryEngineCompaction.ts src/query/QueryEngine.ts test/query/conversation-version.test.ts
@@ -1344,16 +1344,16 @@ git commit -m "perf(query): skip token recounts — setMessages accepts knownTot
 
 ### Task 2.5: 复测基准并收紧棘轮
 
-- [ ] **Step 1: 全量基准复测**
+- [x] **Step 1: 全量基准复测**
 
 Run: `npm run build && npm run bench:startup && npm run bench:turn && npm run perf:ratchet`
 Expected: 三项输出数值；棘轮 `OK` 或提示 `RATCHETED DOWN`。
 
-- [ ] **Step 2: 记录收益并更新基线**
+- [x] **Step 2: 记录收益并更新基线**
 
 若棘轮提示收紧：`git add scripts/perf-baseline.json` 一并提交。把「优化前 → 优化后」的启动 p50、turn-overhead 数值写入提交说明。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add scripts/perf-current.json scripts/perf-baseline.json
@@ -1366,18 +1366,18 @@ git commit -m "chore(bench): post-optimization measurements + baseline update"
 
 ### Task 3.1: 长会话基准决策门
 
-- [ ] **Step 1: 运行长会话基准**
+- [x] **Step 1: 运行长会话基准**
 
 Run: `npm run bench:long`
 记录增长曲线：`heapUsedMb` 随 turn 的变化。
 
-- [ ] **Step 2: 按判据决策**
+- [x] **Step 2: 按判据决策**
 
 判据（与 spec §6 一致）：
 - **堆内存随轮数持续线性增长且无收敛**（例如 60 轮后仍在每 5 轮 >1MB 增长）→ 立项处理，优先排查 `frozenChains` Map 无上限增长（`src/ui/hooks/useStreamingEvents.ts:296`）与会话树节点累积；为该项单独写后续计划（新 brainstorm → spec → plan），不并入本计划。
 - **曲线趋平**（后期每 5 轮增长 <0.5MB）→ 记录「长会话稳定，无需改动」，关闭该维度。
 
-- [ ] **Step 3: 记录结论**
+- [x] **Step 3: 记录结论**
 
 把曲线数据与决策写入任务日志/提交说明。此任务不改产品代码。
 
@@ -1385,11 +1385,11 @@ Run: `npm run bench:long`
 
 ### Task 3.2: 构建层决策门（条件触发）
 
-- [ ] **Step 1: 检查启动耗时构成**
+- [x] **Step 1: 检查启动耗时构成**
 
 Run: `KC_BENCH_STARTUP=1 node dist/main.js`，查看各 checkpoint 占比。
 
-- [ ] **Step 2: 按判据决策**
+- [x] **Step 2: 按判据决策**
 
 - 若启动 p50 中模块加载（`state_init`→`tools_registered` 段）仍占 >50% 且绝对值仍不满足预期 → 评估 esbuild 单文件打包（better-sqlite3 external、懒工具保持动态 import），另立计划。
 - 否则记录「打包不立项」，本计划收尾。
@@ -1403,3 +1403,27 @@ Run: `KC_BENCH_STARTUP=1 node dist/main.js`，查看各 checkpoint 占比。
 - [ ] `npm run perf:ratchet` 通过
 - [ ] 启动、单轮、长会话三项基准数值记录在案，收益写入最终提交说明
 - [ ] 权限系统、沙箱、受保护路径相关代码零改动（`git log --stat` 抽查确认）
+
+---
+
+## 完成记录（2026-08-31）
+
+**启动基准（同机同时段对比，wall-clock 含 tsx 转换）：**
+- 优化前代码（1c5edf0）p50 = 4119.9ms；优化后（cd9e685）p50 = 4025.6ms（−2.3%）
+- 原 2079ms 锚点在当前机器条件不可复现（同代码同日实测 ~2x），基线已重锚至 4120ms，见 `scripts/bench/README.md`
+- bootstrap 内部阶段（profiler）：git_detect 188.8ms（已与 config_load 并行）、tools_registered 0.17ms（预热 join 已移除）、engine_created 1122.6ms 为最大内部项
+
+**单轮开销（buildApiMessages / estimateTokens 单次调用，前后一致——收益在调用次数）：**
+- 63 消息：0.009ms / 0.043ms；250 消息：0.007ms / 0.148ms；1000 消息：0.02ms / 0.328ms
+- 重试循环内 buildApiMessages 由每次重试 O(n) 重建降为版本命中 O(1)（Task 2.2）
+- trimIfNeeded 与压缩路径的 token 估算由全量重算降为增量扣减（Task 2.3/2.4，等价性有属性测试护栏）
+
+**Task 3.1 长会话决策门：** 60 轮堆内存曲线 25→28→22→25MB，趋平（后期每 5 轮增长 <0.5MB）→「长会话稳定，无需改动」，该维度关闭， frozenChains/渲染窗口化不立项。
+
+**Task 3.2 构建层决策门：** 启动 wall-time 中 tsx 转换+模块加载占 ~65%（>50% 判据触发），已评估 esbuild 单文件打包：本机测量噪声 ±10%，打包对 tsx 转换路径的真实收益无法在当前环境可靠验证；NODE_COMPILE_CACHE 实测无收益（4027.6 → 4025.6ms）。结论：打包暂不立项，维持条件触发（待 CI 时序数据或 dist 运行路径成为主路径时重估）。
+
+**实施期偏差记录（相对任务文档，均已按要求处理）：**
+- Task 2.2/0.4：QueryEngineDeps 无 apiClient 注入槽，测试与 bench 改为构造后替换 `engine.apiClient` 字段（与 test/query 现有写法一致）；Windows 下引擎测试需 `sandboxFailIfNoSandbox: false`。
+- Task 2.3：fast-check 非项目依赖，属性测试改用确定性 PRNG（mulberry32，50 迭代）覆盖同一输入空间。
+- Task 2.4：采用设计文档允许的替代方案——导出 `estimateTokensAfterCompaction()` 辅助函数而非给 CompactionResult 加字段；knownTotal = 运行中估算值 − tokensSaved（加法性保证精确）。
+- 分支 `perf/optimization` 在本环境嵌套引用写入异常（git 每次提交后丢失 `.git/refs/heads/perf/optimization`），已更名为单层名 `perf-optimization`，提交历史不变。
