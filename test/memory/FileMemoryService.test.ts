@@ -5,12 +5,35 @@ import * as os from 'os';
 import { FileMemoryService } from '../../src/memory/FileMemoryService';
 import type { MemoryEntry, MemoryType } from '../../src/memory/types';
 
+// Redirect ~/.kc-cli to a per-run temp dir so these integration tests never
+// touch the real (possibly read-only) home directory. Same mutable-homedir
+// pattern as test/memory/addMemory-signature.test.ts and
+// test/bootstrap/config.test.ts.
+const homedirMock = vi.hoisted(() => {
+  let _value = '/tmp/kc-memory-file-default-home';
+  return {
+    getHomedir: () => _value,
+    setHomedir: (v: string) => {
+      _value = v;
+    },
+  };
+});
+
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>();
+  return {
+    ...actual,
+    homedir: homedirMock.getHomedir,
+  };
+});
+
 // Use a temp directory for tests
 let tempDir: string;
 let service: FileMemoryService;
 
 beforeEach(async () => {
   tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kc-memory-test-'));
+  homedirMock.setHomedir(tempDir);
   service = new FileMemoryService();
 });
 

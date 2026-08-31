@@ -193,7 +193,7 @@ describe('ToolExecutor', () => {
           makeToolCall({ id: 'tc-bad', toolName: 'BadTool' }),
         ],
         makeContext(),
-        (id, result) => settled.push([id, result instanceof Error ? 'error' : 'ok']),
+        (id, result) => settled.push([id, result instanceof Error || result.isError ? 'error' : 'ok']),
       );
       expect(results.size).toBe(2);
       expect(settled).toContainEqual(['tc-ok', 'ok']);
@@ -213,7 +213,7 @@ describe('ToolExecutor', () => {
       const executor = new ToolExecutor([tool], '/tmp');
       const settledIds: string[] = [];
       await executor.executeParallel(
-        [makeToolCall({ id: 's1' }), makeToolCall({ id: 's2' })],
+        [makeToolCall({ id: 's1', toolName: 'SeqTool' }), makeToolCall({ id: 's2', toolName: 'SeqTool' })],
         makeContext(),
         (id) => settledIds.push(id),
       );
