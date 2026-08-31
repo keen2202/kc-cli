@@ -268,7 +268,17 @@ export interface ConfigLayer {
  *
  * Safe to call multiple times; a missing .env file is a no-op.
  */
+let dotEnvLoaded = false;
+
+/** Test-only: clear the single-load guard. */
+export function resetDotEnvForTesting(): void {
+  dotEnvLoaded = false;
+}
+
 export function loadDotEnv(cwd: string): void {
+  if (dotEnvLoaded) return;
+  dotEnvLoaded = true;
+
   const envPath = path.join(cwd, '.env');
   let content: string;
   try {

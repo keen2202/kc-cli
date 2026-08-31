@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { loadDotEnv } from '../../src/bootstrap/config';
+import { loadDotEnv, resetDotEnvForTesting } from '../../src/bootstrap/config';
 
 const TEST_KEYS = [
   'DOTENV_TEST_KEY',
@@ -26,6 +26,7 @@ const TEST_KEYS = [
 let tmpDir: string;
 
 beforeEach(() => {
+  resetDotEnvForTesting();
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kc-dotenv-'));
   for (const key of TEST_KEYS) delete process.env[key];
 });
@@ -33,6 +34,7 @@ beforeEach(() => {
 afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
   for (const key of TEST_KEYS) delete process.env[key];
+  resetDotEnvForTesting();
 });
 
 function writeEnv(content: string): void {
@@ -100,5 +102,35 @@ describe('loadDotEnv', () => {
   it('is a no-op when the .env file does not exist', () => {
     expect(() => loadDotEnv(tmpDir)).not.toThrow();
     expect(process.env.DOTENV_TEST_KEY).toBeUndefined();
+  });
+});
+
+describe('loadDotEnv idempotency', () => {
+  let dir: string;
+  const KEY = 'KC_DOTENV_IDEMPOTENCE_PROBE';
+
+  beforeEach(() => {
+    resetDotEnvForTesting();
+    delete process.env[KEY];
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dotenv-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    delete process.env[KEY];
+    resetDotEnvForTesting();
+  });
+
+  it('reads .env only once across repeated calls', () => {
+    fs.writeFileSync(path.join(dir, '.env'), `${KEY}=first\n`);
+    loadDotEnv(dir);
+    expect(process.env[KEY]).toBe('first');
+
+    // If a second call re-read the file it would be ignored anyway (env wins),
+    // so prove single-read by changing the file BEFORE the second call:
+    fs.writeFileSync(path.join(dir, '.env'), `${KEY}=second\n`);
+    delete process.env[KEY]; // remove env precedence so a re-read would surface
+    loadDotEnv(dir);
+    expect(process.env[KEY]).toBeUndefined(); // no re-read happened
   });
 });
