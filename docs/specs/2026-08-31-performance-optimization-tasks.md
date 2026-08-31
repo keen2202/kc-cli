@@ -13,6 +13,8 @@
 **与设计文档的偏差（实施前确认）：**
 1. §5.2 中 `branch`/`checkout` 的 O(1) token 切换**降级保留全量重算**——二者是低频用户命令（`/branch`、`/checkout`），不在热路径；若长会话基准证明其有影响再跟进。
 2. §4.2 工具拆分范围收窄为**实际导入重图的 4 个工具**（Sql/Agent/TeamCreate/LSP）；Docker/Deploy 经核实静态导入很轻（仅 child_process / errors），直接转 eager 注册即可，无需拆分。
+3. **启动基准运行方式（Task 0.1 实证修订）**：`dist/` 产物相对导入不带扩展名，Node ESM 无法直接加载（`ERR_MODULE_NOT_FOUND`）；bench 改用 `node --import tsx src/main.ts`（与 `npm run kc` 一致的运行路径）。测量包含 tsx 转换开销，但所有测量同路径，相对比较（棘轮）仍有效。
+4. **Windows bench 环境（Task 0.1 实证修订）**：本机无沙箱后端，`compose()` 会在退出点前抛错，bench 必须设 `KC_SANDBOX_FAIL_IF_NO_SANDBOX=false`（有后端的平台无副作用）；退出点输出用 `process.stderr.write` 而非 `console.error`（`startup-console-routing.test.ts` 对 Bootstrap.ts 有禁 console.error 的源码扫描约束）。
 
 **运行环境注意：** 本机为 Windows + Git Bash。`npm test` 有少量已知环境性失败（sandbox/路径分隔符，以 CI ubuntu 为准，见 `docs/specs/optimization-tasks.md` 末尾对账记录）——开始任何任务前先跑一次 `npm test` 记录本机失败基线，后续以「不新增失败」为门槛。
 
@@ -105,8 +107,10 @@ git commit -m "feat(bench): add KC_BENCH_STARTUP exit point for startup profilin
 
 ```javascript
 #!/usr/bin/env node
-// Startup benchmark: cold-starts dist/main.js with KC_BENCH_STARTUP=1,
-// records wall-clock p50/p95, writes scripts/perf-current.json.
+// Startup benchmark: cold-starts the CLI from source (via tsx, matching the
+// npm run kc path) with KC_BENCH_STARTUP=1, records wall-clock p50/p95,
+// writes scripts/perf-current.json. Wall time includes tsx transform
+// overhead; every run pays it equally, so relative comparisons stay valid.
 // Pass --update to (re)write the committed scripts/perf-baseline.json.
 
 import { spawnSync } from 'node:child_process';
@@ -115,17 +119,20 @@ import path from 'node:path';
 
 const RUNS = 10;
 const repoRoot = path.resolve(import.meta.dirname, '../..');
-const entry = path.join(repoRoot, 'dist', 'main.js');
-if (!fs.existsSync(entry)) {
-  console.error('[bench:startup] dist/main.js not found — run `npm run build` first');
-  process.exit(1);
-}
+const entry = path.join(repoRoot, 'src', 'main.ts');
 
 const samples = [];
 for (let i = 0; i < RUNS; i++) {
   const t0 = performance.now();
-  const res = spawnSync(process.execPath, [entry], {
-    env: { ...process.env, KC_BENCH_STARTUP: '1', LOG_LEVEL: 'error' },
+  const res = spawnSync(process.execPath, ['--import', 'tsx', entry], {
+    env: {
+      ...process.env,
+      KC_BENCH_STARTUP: '1',
+      LOG_LEVEL: 'error',
+      // Windows has no sandbox backend; without this flag compose() aborts
+      // before the bench exit point. No-op where a backend exists (CI linux).
+      KC_SANDBOX_FAIL_IF_NO_SANDBOX: 'false',
+    },
     encoding: 'utf8',
     cwd: repoRoot,
     timeout: 60_000,
@@ -182,7 +189,7 @@ if (process.argv.includes('--update')) {
 
 - [ ] **Step 3: 运行并落库基线**
 
-Run: `npm run build && npm run bench:startup -- --update`
+Run: `npm run bench:startup -- --update`
 Expected: 输出 `[bench:startup] baseline updated: p50=…ms p95=…ms`；生成 `scripts/perf-baseline.json` 含 `startup` 节。
 
 - [ ] **Step 4: Commit**
