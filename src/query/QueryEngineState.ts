@@ -179,8 +179,10 @@ export class ConversationState {
     }
 
     const excess = this.messages.length - this.maxMessages;
+    let removed: ChatMessage[];
 
     if (firstSystemIdx === -1 && firstUserIdx === -1) {
+      removed = this.messages.slice(0, excess);
       this.messages = this.messages.slice(excess);
     } else {
       const protectedIndices = new Set<number>();
@@ -194,8 +196,10 @@ export class ConversationState {
 
       if (removable.length >= excess) {
         const toRemove = new Set(removable.slice(0, excess));
+        removed = this.messages.filter((_, idx) => toRemove.has(idx));
         this.messages = this.messages.filter((_, idx) => !toRemove.has(idx));
       } else {
+        removed = this.messages.slice(0, excess);
         this.messages = this.messages.slice(excess);
       }
     }
@@ -206,8 +210,11 @@ export class ConversationState {
       activeNode.messages = this.messages;
     }
 
-    this.runningTokenTotal = estimateMessageTokensArray(this.messages);
-    this.recomputed = true;
+    // Incremental: subtract only the removed messages' estimates. The counter
+    // is additive (countMessages reduces over per-message counts), so this is
+    // exact — no full O(n) recompute.
+    this.runningTokenTotal -= estimateMessageTokensArray(removed);
+    this.recomputed = false;
     this.versionCounter++;
     return excess;
   }

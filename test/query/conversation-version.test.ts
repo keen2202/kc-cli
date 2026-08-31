@@ -6,6 +6,7 @@ import { QueryEngine } from '../../src/query/QueryEngine';
 import { MockLLMClient } from '../../test/utils/mock-llm';
 import type { BaseApiClient } from '../../src/api/BaseApiClient';
 import { initializeState } from '../../src/bootstrap/state';
+import { estimateMessageTokensArray } from '../../src/utils/tokenEstimation';
 
 function msg(role: 'user' | 'assistant', content: string): ChatMessage {
   return { id: `${role}-${Math.random()}`, role, content, timestamp: Date.now() } as ChatMessage;
@@ -82,5 +83,36 @@ describe('api-messages version cache', () => {
     const secondRequest = mock.getCallLog().at(-1)!;
     // Second request contains the first turn's messages — rebuilt after mutation.
     expect(secondRequest.messages.length).toBeGreaterThan(firstRequest.messages.length);
+  });
+});
+
+// Property-style equivalence: incremental trim accounting must match a full
+// recompute for arbitrary message mixes. (fast-check is not a project
+// dependency; a seeded PRNG loop covers the same input space.)
+describe('trimIfNeeded incremental token accounting', () => {
+  it('incremental estimate equals full recompute across random transcripts', () => {
+    // mulberry32 — deterministic PRNG
+    let rngState = 42;
+    const rand = () => {
+      rngState |= 0; rngState = (rngState + 0x6D2B79F5) | 0;
+      let t = Math.imul(rngState ^ (rngState >>> 15), 1 | rngState);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    for (let iter = 0; iter < 50; iter++) {
+      const cs = new ConversationState({ maxMessages: 10 });
+      const n = 10 + Math.floor(rand() * 21); // 10..30 messages
+      for (let i = 0; i < n; i++) {
+        cs.addMessage({
+          id: `m-${iter}-${i}`,
+          role: i === 0 ? 'system' : i % 2 === 0 ? 'user' : 'assistant',
+          content: `msg ${i} ${'x'.repeat(Math.floor(rand() * 40))}`,
+          timestamp: 0,
+        } as ChatMessage);
+      }
+      cs.trimIfNeeded();
+      const after = estimateMessageTokensArray(cs.getMessages());
+      expect(cs.getTokenEstimate(), `iteration ${iter}`).toBe(after);
+    }
   });
 });
