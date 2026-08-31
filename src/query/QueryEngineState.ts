@@ -90,14 +90,18 @@ export class ConversationState {
     return [...this.messages];
   }
 
-  /** Set all messages (e.g., after compaction) -- replaces active branch messages */
-  setMessages(messages: ChatMessage[]): void {
+  /**
+   * Set all messages (e.g., after compaction) -- replaces active branch messages.
+   * `knownTotal` lets the compactor pass the token total it already derived,
+   * skipping the full O(n) re-estimate; omitted → full recompute.
+   */
+  setMessages(messages: ChatMessage[], knownTotal?: number): void {
     const activeNode = this.tree.getNode(this.tree.getActiveNodeId());
     if (activeNode) {
       activeNode.messages = messages;
     }
     this.messages = messages;
-    this.runningTokenTotal = estimateMessageTokensArray(this.messages);
+    this.runningTokenTotal = knownTotal ?? estimateMessageTokensArray(this.messages);
     this.recomputed = true;
     this.versionCounter++;
   }
