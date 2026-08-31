@@ -198,7 +198,6 @@ export class Bootstrap {
     config: Config,
     cwd: string,
     verbose: boolean,
-    updateStateFn: (patch: Partial<GlobalState>) => void,
   ): Promise<void> {
     try {
       const { getGlobalRegistry } = await import('../agp/registry');
@@ -215,7 +214,7 @@ export class Bootstrap {
           persistState: agpConfig?.evolution?.persistState ?? true,
         },
       });
-      updateStateFn({ agpRegistry });
+      updateState({ agpRegistry });
       // Disk restore only matters when evolution is on; the default config
       // keeps evolution disabled, so skip the startup disk IO entirely.
       if (agpConfig?.evolution?.enabled ?? false) {
@@ -435,7 +434,7 @@ export class Bootstrap {
 
     // Phase 3d runs concurrently with plugin init: the two are independent.
     const agpInit = (!bareMode && (config.agp?.enabled ?? true))
-      ? this.initAgpPhase(config, cwd, verbose, (patch) => updateState(patch))
+      ? this.initAgpPhase(config, cwd, verbose)
       : Promise.resolve();
 
     // ── Phase 3c: Initialize plugins ──
