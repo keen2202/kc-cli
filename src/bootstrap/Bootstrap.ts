@@ -13,7 +13,7 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import chalk from 'chalk';
 
-import { profileCheckpoint } from './profiler';
+import { profileCheckpoint, getProfileReport } from './profiler';
 import type { GlobalState } from './state';
 import { initializeState, getState, updateState, runWithScopedState } from './state';
 import { loadConfig, type Config, type ConfigLayer } from './config';
@@ -643,6 +643,13 @@ export class Bootstrap {
       })());
     }
     profileCheckpoint('failure_bridging_wired');
+
+    // Perf-benchmark exit point: KC_BENCH_STARTUP=1 runs the full bootstrap,
+    // dumps the phase profile to stderr, and exits before any UI/REPL starts.
+    if (process.env.KC_BENCH_STARTUP === '1') {
+      process.stderr.write(getProfileReport() + '\n');
+      process.exit(0);
+    }
 
     return {
       queryEngine,
