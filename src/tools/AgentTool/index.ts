@@ -5,7 +5,12 @@
 import { z } from 'zod';
 import { buildTool } from '../../Tool';
 import type { PermissionResult } from '../../permissions/protocol';
-import { listAgentTypes } from '../../orchestrator/agent-definitions.js';
+
+// Static metadata only. The runtime list remains available in impl.ts for
+// validation error messages; this entry must not import the orchestrator at
+// startup (Task 1.7).
+const AGENT_TYPE_LIST =
+  'researcher, implementer, verifier, explorer, general, frontend, backend, fullstack, code-reviewer, tester, architect, product-manager';
 
 const AgentInputSchema = z.object({
   prompt: z.string().describe('Instructions for the sub-agent'),
@@ -14,7 +19,7 @@ const AgentInputSchema = z.object({
   agent_type: z
     .string()
     .optional()
-    .describe(`Pre-defined agent type: ${listAgentTypes().join(', ')}`),
+    .describe(`Pre-defined agent type: ${AGENT_TYPE_LIST}`),
   background: z
     .boolean()
     .default(false)
@@ -27,7 +32,7 @@ export const tool = buildTool<AgentInput, string>({
   name: 'Agent',
   description:
     'Spawn sub-agents for parallel task execution. Use agent_type for pre-configured specialists ' +
-    `(${listAgentTypes().join(', ')}).`,
+    `(${AGENT_TYPE_LIST}).`,
 
   inputSchema: AgentInputSchema,
 

@@ -5,14 +5,19 @@
 import { z } from 'zod';
 import { buildTool } from '../Tool.js';
 import type { PermissionResult } from '../permissions/protocol.js';
-import { listAgentTypes } from './agent-definitions.js';
+
+// Static metadata only. The runtime list remains available in
+// team-create-impl.ts for validation error messages; this entry must not
+// import the orchestrator at startup (Task 1.7).
+const AGENT_TYPE_LIST =
+  'researcher, implementer, verifier, explorer, general, frontend, backend, fullstack, code-reviewer, tester, architect, product-manager';
 
 const TeamAgentConfigSchema = z.object({
   name: z.string().describe('Unique name for this sub-agent'),
   agent_type: z
     .string()
     .optional()
-    .describe(`Pre-defined agent type: ${listAgentTypes().join(', ')}`),
+    .describe(`Pre-defined agent type: ${AGENT_TYPE_LIST}`),
   prompt: z.string().describe('Task instruction for this agent'),
   tools_allow: z
     .array(z.string())
