@@ -191,6 +191,57 @@ export class Bootstrap {
   }
 
   /**
+   * Phase 3d extracted: initializes the AGP registry. Errors are swallowed
+   * (logged) exactly as before so the returned promise never rejects.
+   */
+  private async initAgpPhase(
+    config: Config,
+    cwd: string,
+    verbose: boolean,
+    updateStateFn: (patch: Partial<GlobalState>) => void,
+  ): Promise<void> {
+    try {
+      const { getGlobalRegistry } = await import('../agp/registry');
+      const agpConfig = config.agp;
+      const agpRegistry = getGlobalRegistry({
+        persistDir: path.join(cwd, '.kc-cli', 'agp'),
+        tracingEnabled: agpConfig?.tracingEnabled ?? true,
+        evolution: {
+          enabled: agpConfig?.evolution?.enabled ?? false,
+          budget: agpConfig?.evolution?.budget ?? 3,
+          targetResources: [],
+          safetyInvariants: [],
+          autoRollback: agpConfig?.evolution?.autoRollback ?? true,
+          persistState: agpConfig?.evolution?.persistState ?? true,
+        },
+      });
+      updateStateFn({ agpRegistry });
+      // Disk restore only matters when evolution is on; the default config
+      // keeps evolution disabled, so skip the startup disk IO entirely.
+      if (agpConfig?.evolution?.enabled ?? false) {
+        const loaded = agpRegistry.loadState();
+        if (verbose && loaded.loaded > 0) {
+          console.log(chalk.gray(`  AGP: ${loaded.loaded} resources restored from disk`));
+        }
+      }
+      // harness-evolution T1: register evolvable instruction surfaces as AGP
+      // Prompt resources so the registry can list/evolve them (idempotent —
+      // records already restored from disk are left untouched).
+      for (const record of createSurfacePromptRecords()) {
+        if (!agpRegistry.get('Prompt', record.entity.name)) {
+          agpRegistry.register('Prompt', record);
+        }
+      }
+    } catch (_err) {
+      if (verbose) {
+        logger.services.warn(
+          `AGP: initialization skipped (${_err instanceof Error ? _err.message : String(_err)})`,
+        );
+      }
+    }
+  }
+
+  /**
    * Run the full initialization sequence and return wired services.
    *
    * Phases:
@@ -382,6 +433,11 @@ export class Bootstrap {
     }
     profileCheckpoint('mcp_initialized');
 
+    // Phase 3d runs concurrently with plugin init: the two are independent.
+    const agpInit = (!bareMode && (config.agp?.enabled ?? true))
+      ? this.initAgpPhase(config, cwd, verbose, (patch) => updateState(patch))
+      : Promise.resolve();
+
     // ── Phase 3c: Initialize plugins ──
     let pluginManager: import('../plugins/plugin-manager').PluginManager | null = null;
     if (!bareMode) {
@@ -454,50 +510,8 @@ export class Bootstrap {
     }
     profileCheckpoint('plugin_mcp_initialized');
 
-    // ── Phase 3d: Initialize AGP (Autogenesis Protocol) system ──
-    // The AGP subsystem is loaded lazily (dynamic import) so the bootstrap has
-    // no compile/load-time dependency on src/agp — it stays a pluggable module.
-    if (!bareMode && (config.agp?.enabled ?? true)) {
-      try {
-        const { getGlobalRegistry } = await import('../agp/registry');
-        const agpConfig = config.agp;
-        const agpRegistry = getGlobalRegistry({
-          persistDir: path.join(cwd, '.kc-cli', 'agp'),
-          tracingEnabled: agpConfig?.tracingEnabled ?? true,
-          evolution: {
-            enabled: agpConfig?.evolution?.enabled ?? false,
-            budget: agpConfig?.evolution?.budget ?? 3,
-            targetResources: [],
-            safetyInvariants: [],
-            autoRollback: agpConfig?.evolution?.autoRollback ?? true,
-            persistState: agpConfig?.evolution?.persistState ?? true,
-          },
-        });
-        updateState({ agpRegistry });
-        // Disk restore only matters when evolution is on; the default config
-        // keeps evolution disabled, so skip the startup disk IO entirely.
-        if (agpConfig?.evolution?.enabled ?? false) {
-          const loaded = agpRegistry.loadState();
-          if (verbose && loaded.loaded > 0) {
-            console.log(chalk.gray(`  AGP: ${loaded.loaded} resources restored from disk`));
-          }
-        }
-        // harness-evolution T1: register evolvable instruction surfaces as AGP
-        // Prompt resources so the registry can list/evolve them (idempotent —
-        // records already restored from disk are left untouched).
-        for (const record of createSurfacePromptRecords()) {
-          if (!agpRegistry.get('Prompt', record.entity.name)) {
-            agpRegistry.register('Prompt', record);
-          }
-        }
-      } catch (_err) {
-        if (verbose) {
-          logger.services.warn(
-            `AGP: initialization skipped (${_err instanceof Error ? _err.message : String(_err)})`,
-          );
-        }
-      }
-    }
+    // Join AGP init (fired before Phase 3c; errors already swallowed inside).
+    await agpInit;
     profileCheckpoint('agp_initialized');
 
     // ── Phase 3e: Initialize IM bridge (if configured) ──
