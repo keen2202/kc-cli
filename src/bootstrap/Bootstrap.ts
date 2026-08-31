@@ -228,6 +228,9 @@ export class Bootstrap {
     profileCheckpoint('state_init');
 
     // ── Phase 2: Load configuration ──
+    // Fire the git probe concurrently: it is independent of config loading and
+    // tool registration; awaited only where its result is consumed (below).
+    const gitProbe = isInsideGitRepo(cwd);
     const { config, layers } = await loadConfig(cwd);
     updateState({ config });
 
@@ -251,7 +254,7 @@ export class Bootstrap {
     // recovery history. Surface a one-time warning so the user knows rollback
     // depends solely on the T2 `.kc-cli/backups/` snapshots (via FileRestore),
     // instead of the safety net failing silently.
-    const isGitRepo = await isInsideGitRepo(cwd);
+    const isGitRepo = await gitProbe;
     updateState({ isGitRepo });
     if (!isGitRepo && !bareMode) {
       // M9a: failure-path warnings go through the logger (stderr, structured),
