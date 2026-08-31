@@ -59,20 +59,20 @@ export const TOOL_MANIFEST = [
   { name: 'Git', modulePath: './GitTool/index.js', priority: ToolPriority.HIGH, eager: true },
   { name: 'Run', modulePath: './RunTool/index.js', priority: ToolPriority.HIGH, eager: true },
   // MEDIUM — system tools
-  { name: 'Sql', modulePath: './SqlTool/index.js', priority: ToolPriority.MEDIUM, eager: false },
-  { name: 'Docker', modulePath: './DockerTool/index.js', priority: ToolPriority.MEDIUM, eager: false },
-  { name: 'Monitor', modulePath: './MonitorTool/index.js', priority: ToolPriority.MEDIUM, eager: false },
-  { name: 'Config', modulePath: './ConfigTool/index.js', priority: ToolPriority.MEDIUM, eager: false },
+  { name: 'Sql', modulePath: './SqlTool/index.js', priority: ToolPriority.MEDIUM, eager: true },
+  { name: 'Docker', modulePath: './DockerTool/index.js', priority: ToolPriority.MEDIUM, eager: true },
+  { name: 'Monitor', modulePath: './MonitorTool/index.js', priority: ToolPriority.MEDIUM, eager: true },
+  { name: 'Config', modulePath: './ConfigTool/index.js', priority: ToolPriority.MEDIUM, eager: true },
   // LOW — task management
-  { name: 'TodoWrite', modulePath: './TodoWriteTool/index.js', priority: ToolPriority.LOW, eager: false },
-  { name: 'TaskCreate', modulePath: './TaskCreateTool/index.js', priority: ToolPriority.LOW, eager: false },
-  { name: 'TaskGet', modulePath: './TaskGetTool/index.js', priority: ToolPriority.LOW, eager: false },
-  { name: 'AskUser', modulePath: './AskUserTool/index.js', priority: ToolPriority.LOW, eager: false },
-  // DEFERRED — advanced tools, always lazy
-  { name: 'Agent', modulePath: './AgentTool/index.js', priority: ToolPriority.DEFERRED, eager: false },
-  { name: 'Deploy', modulePath: './DeployTool/index.js', priority: ToolPriority.DEFERRED, eager: false },
-  { name: 'TeamCreate', modulePath: '../orchestrator/team-create-tool.js', priority: ToolPriority.DEFERRED, eager: false },
-  { name: 'LSP', modulePath: '../lsp/tool.js', priority: ToolPriority.DEFERRED, eager: false },
+  { name: 'TodoWrite', modulePath: './TodoWriteTool/index.js', priority: ToolPriority.LOW, eager: true },
+  { name: 'TaskCreate', modulePath: './TaskCreateTool/index.js', priority: ToolPriority.LOW, eager: true },
+  { name: 'TaskGet', modulePath: './TaskGetTool/index.js', priority: ToolPriority.LOW, eager: true },
+  { name: 'AskUser', modulePath: './AskUserTool/index.js', priority: ToolPriority.LOW, eager: true },
+  // DEFERRED — advanced tools; entries are lightweight, heavy code lives in impl modules
+  { name: 'Agent', modulePath: './AgentTool/index.js', priority: ToolPriority.DEFERRED, eager: true },
+  { name: 'Deploy', modulePath: './DeployTool/index.js', priority: ToolPriority.DEFERRED, eager: true },
+  { name: 'TeamCreate', modulePath: '../orchestrator/team-create-tool.js', priority: ToolPriority.DEFERRED, eager: true },
+  { name: 'LSP', modulePath: '../lsp/tool.js', priority: ToolPriority.DEFERRED, eager: true },
 ] as const;
 
 /**

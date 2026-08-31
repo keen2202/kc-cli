@@ -320,18 +320,8 @@ export class Bootstrap {
     profileCheckpoint('git_detect');
 
     // ── Phase 3a: Register built-in tools ──
-    let toolsPreheat: Promise<void> | null = null;
     if (!bareMode) {
       await registerBuiltInTools();
-      // T22 (P1): start warming the lazily-registered tool modules (Sql imports
-      // the native better-sqlite3; LSP/Docker pull big graphs) *concurrently*
-      // with the remaining init phases instead of serially blocking here.
-      // The promise is joined at Phase 4 — the prompt/executor tool list is
-      // assembled statically there, so preheat MUST have completed before it;
-      // `ensureTool`'s pendingLoads dedup makes the join idempotent.
-      toolsPreheat = toolRegistry.preloadAllTools().catch((e) =>
-        logger.tools.warn('tool preheat failed', { reason: String(e) }),
-      );
     }
     profileCheckpoint('tools_registered');
 
@@ -579,9 +569,6 @@ export class Bootstrap {
     profileCheckpoint('im_initialized');
 
     // ── Phase 4: Create query engine ──
-    // T22: join the background tool preheat before assembling the static tool
-    // list (a no-op when preheat already finished during phases 3b–3i).
-    if (toolsPreheat) await toolsPreheat;
     const tools = toolRegistry.getAllTools();
 
     const systemPrompt = buildSystemPrompt(tools);

@@ -396,8 +396,6 @@ async function handleCommand(
     }
 
     case '/tools': {
-      // Load lazily-registered tools so the full set is listed, not just eager ones.
-      await toolRegistry.preloadAllTools();
       const tools = toolRegistry.getAllTools();
       console.log(chalk.bold('\n🔧 Available Tools:'));
       for (const tool of tools) {
@@ -542,9 +540,6 @@ function evalToolFlag(fn: ((input: any) => boolean) | undefined, fallback: boole
 
 async function listTools() {
   await registerBuiltInTools();
-  // Load lazily-registered tools (Sql, Docker, Config, Agent, LSP, …) so the full
-  // tool set is listed, not just the eagerly-registered ones.
-  await toolRegistry.preloadAllTools();
   const tools = toolRegistry.getAllTools();
 
   console.log(chalk.bold('\n🔧 Available Tools:\n'));

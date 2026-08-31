@@ -47,8 +47,6 @@ export async function handleInitialize(request: ACPRequest, state: ACPHandlerSta
   // Also set global state for backward-compatible downstream code
   initializeState({ cwd, verbose: false, printMode: false, bareMode: false, permissionMode: 'default' });
   await registerBuiltInTools();
-  // Preload lazily-registered tools so the full tool set is available to the model.
-  await toolRegistry.preloadAllTools();
 
   state.sendResult(request.id, {
     protocolVersion: '1.0',

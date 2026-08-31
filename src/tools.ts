@@ -25,9 +25,21 @@ import { tool as GlobTool } from './tools/GlobTool/index.js';
 import { tool as WebFetchTool } from './tools/WebFetchTool/index.js';
 import { tool as GitTool } from './tools/GitTool/index.js';
 import { tool as RunTool } from './tools/RunTool/index.js';
-
-// MEDIUM, LOW, and DEFERRED priority tools are lazily loaded on first use
-// via the TOOL_MANIFEST and loadToolModule(). See getTool() below.
+// MEDIUM / LOW / DEFERRED — entries are lightweight after the lazy split;
+// heavy runtimes (better-sqlite3, orchestrator, LSP clients) live in impl
+// modules loaded on first call.
+import { tool as SqlTool } from './tools/SqlTool/index.js';
+import { tool as DockerTool } from './tools/DockerTool/index.js';
+import { tool as MonitorTool } from './tools/MonitorTool/index.js';
+import { tool as ConfigTool } from './tools/ConfigTool/index.js';
+import { tool as TodoWriteTool } from './tools/TodoWriteTool/index.js';
+import { tool as TaskCreateTool } from './tools/TaskCreateTool/index.js';
+import { tool as TaskGetTool } from './tools/TaskGetTool/index.js';
+import { tool as AskUserTool } from './tools/AskUserTool/index.js';
+import { tool as AgentTool } from './tools/AgentTool/index.js';
+import { tool as DeployTool } from './tools/DeployTool/index.js';
+import { tool as TeamCreateTool } from './orchestrator/team-create-tool.js';
+import { tool as LSPTool } from './lsp/tool.js';
 
 class ToolRegistryImpl implements ToolRegistry {
   tools: Map<ToolName, ToolDefinition> = new Map();
@@ -203,17 +215,22 @@ export const toolRegistry = new ToolRegistryImpl();
 
 /**
  * Register all built-in tools.
- * Eagerly loaded tools (CRITICAL + HIGH priority) are registered immediately.
- * MEDIUM, LOW, and DEFERRED tools are lazily loaded on first use via getTool().
+ * All built-in tools register eagerly; heavy runtimes are split into impl
+ * modules loaded on first call.
  */
 export async function registerBuiltInTools(): Promise<void> {
-  // Eagerly register critical and high-priority tools
   const eagerTools = [
     // CRITICAL
     BashTool, FileReadTool,
     // HIGH
     FileWriteTool, WebSearchTool, FileEditTool, FileRestoreTool, GrepTool, GlobTool,
     WebFetchTool, GitTool, RunTool,
+    // MEDIUM
+    SqlTool, DockerTool, MonitorTool, ConfigTool,
+    // LOW
+    TodoWriteTool, TaskCreateTool, TaskGetTool, AskUserTool,
+    // DEFERRED
+    AgentTool, DeployTool, TeamCreateTool, LSPTool,
   ];
 
   for (const tool of eagerTools) {
@@ -223,8 +240,4 @@ export async function registerBuiltInTools(): Promise<void> {
       logger.tools.warn(`Warning: Failed to register tool ${tool.name}: ` + String(error));
     }
   }
-
-  // Remaining tools (Sql, Docker, Monitor, Config, TodoWrite, TaskCreate,
-  // TaskGet, AskUser, Agent, Deploy, TeamCreate, LSP) are registered in
-  // the lazy manifest and loaded on first use via getTool().
 }
