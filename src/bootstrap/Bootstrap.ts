@@ -286,9 +286,11 @@ export class Bootstrap {
 
     // ── Phase 3b: Initialize MCP servers (parallel connections) ──
     let mcpManager: MCPClientManager | null = null;
+    let mcpConfigCache: Awaited<ReturnType<typeof loadMCPConfig>> | null = null;
     if (!bareMode) {
       try {
-        const mcpConfig = await loadMCPConfig(cwd);
+        mcpConfigCache = await loadMCPConfig(cwd);
+        const mcpConfig = mcpConfigCache;
 
         // Trust gate (round4 §2-S6): a project-scoped `.mcp.json` ships with the
         // repository, so its `command` is an arbitrary process a clone can ask
@@ -409,7 +411,7 @@ export class Bootstrap {
             this.emitMcpServerUnavailable(serverId, reason);
           });
         }
-        const mcpConfig = await loadMCPConfig(cwd);
+        const mcpConfig = mcpConfigCache ?? await loadMCPConfig(cwd);
         for (const pluginServer of pluginServers) {
           if (mcpConfig.servers[pluginServer.serverId]) {
             if (verbose) {
