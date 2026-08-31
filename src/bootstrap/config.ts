@@ -255,6 +255,13 @@ export interface ConfigLayer {
   config: Partial<Config>;
 }
 
+let dotEnvLoaded = false;
+
+/** Test-only: clear the single-load guard. */
+export function resetDotEnvForTesting(): void {
+  dotEnvLoaded = false;
+}
+
 /**
  * Load environment variables from `<cwd>/.env` into process.env.
  *
@@ -266,15 +273,9 @@ export interface ConfigLayer {
  * - Never overwrites variables already present in process.env,
  *   preserving the env > .env precedence
  *
- * Safe to call multiple times; a missing .env file is a no-op.
+ * Reads `.env` once per process, from the first `cwd` passed; subsequent
+ * calls (with any cwd) are no-ops. A missing .env file is a no-op.
  */
-let dotEnvLoaded = false;
-
-/** Test-only: clear the single-load guard. */
-export function resetDotEnvForTesting(): void {
-  dotEnvLoaded = false;
-}
-
 export function loadDotEnv(cwd: string): void {
   if (dotEnvLoaded) return;
   dotEnvLoaded = true;
