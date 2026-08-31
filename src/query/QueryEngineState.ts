@@ -34,6 +34,17 @@ export class ConversationState {
   private maxMessages: number;
   private turnTags = new Map<string, TurnTag>();
 
+  /**
+   * Monotonic version of the active transcript. Bumped on every mutation so
+   * derived caches (e.g. the built API-messages array) can validate freshness
+   * in O(1).
+   */
+  private versionCounter = 0;
+
+  get version(): number {
+    return this.versionCounter;
+  }
+
   constructor(config: ConversationStateConfig = {}) {
     this.maxMessages = config.maxMessages ?? DEFAULT_MAX_MESSAGES;
     this.tree = new SessionTree();
@@ -63,6 +74,7 @@ export class ConversationState {
     }
     this.runningTokenTotal += estimateMessageTokens(msg);
     this.recomputed = false;
+    this.versionCounter++;
   }
 
   /** Get all messages for the active branch (reconstructs root→active path) */
@@ -87,6 +99,7 @@ export class ConversationState {
     this.messages = messages;
     this.runningTokenTotal = estimateMessageTokensArray(this.messages);
     this.recomputed = true;
+    this.versionCounter++;
   }
 
   /** Get the last message in the active branch */
@@ -100,6 +113,7 @@ export class ConversationState {
     this.messages = this.getActiveNodeMessages();
     this.runningTokenTotal = 0;
     this.recomputed = true;
+    this.versionCounter++;
   }
 
   /** Get the number of messages in the active branch */
@@ -194,6 +208,7 @@ export class ConversationState {
 
     this.runningTokenTotal = estimateMessageTokensArray(this.messages);
     this.recomputed = true;
+    this.versionCounter++;
     return excess;
   }
 
@@ -205,6 +220,7 @@ export class ConversationState {
     this.syncMessagesRef();
     this.runningTokenTotal = estimateMessageTokensArray(this.messages);
     this.recomputed = true;
+    this.versionCounter++;
     return nodeId;
   }
 
@@ -214,6 +230,7 @@ export class ConversationState {
     this.syncMessagesRef();
     this.runningTokenTotal = estimateMessageTokensArray(this.messages);
     this.recomputed = true;
+    this.versionCounter++;
   }
 
   /** Get the full tree structure. */
