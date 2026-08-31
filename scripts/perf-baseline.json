@@ -2,20 +2,21 @@
   "startup": {
     "metric": "startup_ms",
     "runs": 10,
-    "p50": 2079,
-    "p95": 2292.5,
+    "p50": 4120,
+    "p95": 4343.3,
     "samples": [
-      1978.3,
-      2041.8,
-      2054.7,
-      2074.2,
-      2079,
-      2109.9,
-      2040,
-      2132.9,
-      2292.5,
-      2203.2
+      4343.3,
+      4242.6,
+      4329.1,
+      4119.9,
+      4124.3,
+      4087.5,
+      4044,
+      4066.3,
+      4112.1,
+      4067.5
     ],
-    "timestamp": "2026-08-31T02:04:05.858Z"
+    "timestamp": "2026-08-31T13:10:00.000Z",
+    "note": "Re-anchored 2026-08-31: measured on pre-optimization code (1c5edf0) on the current machine. Original 2079ms anchor (2026-08-31T02:04) not reproducible under current machine conditions (same code measured ~2x). See scripts/bench/README.md."
   }
 }
