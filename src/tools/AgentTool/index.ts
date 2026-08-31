@@ -1,14 +1,11 @@
-// Agent Tool - Spawn sub-agents for parallel work via the orchestrator
+// Agent Tool - Lightweight entry: schema + metadata + permission check + delegating call.
+// Heavy runtime (orchestrator, agent config factory, tool registry) is deferred to impl.ts
+// and loaded on first Agent invocation via dynamic import.
 
 import { z } from 'zod';
-import { buildTool, toolResult, toolError } from '../../Tool';
-import type { ToolResult as ToolResultType } from '../protocol';
+import { buildTool } from '../../Tool';
 import type { PermissionResult } from '../../permissions/protocol';
-import type { SubAgentSpawnConfig } from '../../orchestrator/types';
-import { getOrchestrator } from '../../orchestrator/agent-orchestrator.js';
-import { createAgentConfig, listAgentTypes } from '../../orchestrator/agent-definitions.js';
-import { toolRegistry } from '../../tools.js';
-import { secondsToMs } from '../../utils/timeout';
+import { listAgentTypes } from '../../orchestrator/agent-definitions.js';
 
 const AgentInputSchema = z.object({
   prompt: z.string().describe('Instructions for the sub-agent'),
@@ -24,7 +21,7 @@ const AgentInputSchema = z.object({
     .describe('Run in background (return immediately with agent ID)'),
 });
 
-type AgentInput = z.infer<typeof AgentInputSchema>;
+export type AgentInput = z.infer<typeof AgentInputSchema>;
 
 export const tool = buildTool<AgentInput, string>({
   name: 'Agent',
@@ -34,68 +31,9 @@ export const tool = buildTool<AgentInput, string>({
 
   inputSchema: AgentInputSchema,
 
-  call: async (input, context): Promise<ToolResultType<string>> => {
-    try {
-      const tools = toolRegistry.getAllTools();
-      const orchestrator = getOrchestrator(tools);
-
-      let config: SubAgentSpawnConfig;
-
-      if (input.agent_type) {
-        const agentConfig = createAgentConfig(input.agent_type, input.prompt, {
-          timeoutSeconds: input.timeout,
-        });
-        if (!agentConfig) {
-          return toolError(
-            `Unknown agent type: ${input.agent_type}. Available types: ${listAgentTypes().join(', ')}`
-          );
-        }
-        config = agentConfig;
-      } else {
-        config = {
-          name: input.description || `agent-${Date.now()}`,
-          prompt: input.prompt,
-          systemPromptMode: 'default',
-          timeoutSeconds: input.timeout,
-        };
-      }
-
-      const agentId = await orchestrator.spawn(config, context);
-
-      // If background mode, return immediately with the agent ID
-      if (input.background) {
-        return toolResult(
-          `Sub-agent spawned in background.\nAgent ID: ${agentId}\nTask: ${input.description || input.prompt.slice(0, 100)}`,
-          {
-            metadata: {
-              agent_id: agentId,
-              agent_type: input.agent_type || 'general',
-              background: true,
-              status: 'running',
-            },
-          }
-        );
-      }
-
-      // Wait for the sub-agent to complete
-      const result = await orchestrator.waitForCompletion(
-        agentId,
-        secondsToMs(input.timeout, 300_000)
-      );
-
-      return toolResult(result.output, {
-        metadata: {
-          agent_id: agentId,
-          agent_type: input.agent_type || 'general',
-          success: result.success,
-          duration_ms: result.duration,
-          tool_use_count: result.toolUseCount,
-          total_tokens_used: result.totalTokensUsed,
-        },
-      });
-    } catch (error) {
-      return toolError(`Agent spawn failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  call: async (input, context, onProgress) => {
+    const { executeAgent } = await import('./impl.js');
+    return executeAgent(input, context, onProgress);
   },
 
   checkPermissions: (input, context): PermissionResult => ({
