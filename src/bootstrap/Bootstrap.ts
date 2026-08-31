@@ -474,9 +474,13 @@ export class Bootstrap {
           },
         });
         updateState({ agpRegistry });
-        const loaded = agpRegistry.loadState();
-        if (verbose && loaded.loaded > 0) {
-          console.log(chalk.gray(`  AGP: ${loaded.loaded} resources restored from disk`));
+        // Disk restore only matters when evolution is on; the default config
+        // keeps evolution disabled, so skip the startup disk IO entirely.
+        if (agpConfig?.evolution?.enabled ?? false) {
+          const loaded = agpRegistry.loadState();
+          if (verbose && loaded.loaded > 0) {
+            console.log(chalk.gray(`  AGP: ${loaded.loaded} resources restored from disk`));
+          }
         }
         // harness-evolution T1: register evolvable instruction surfaces as AGP
         // Prompt resources so the registry can list/evolve them (idempotent —
