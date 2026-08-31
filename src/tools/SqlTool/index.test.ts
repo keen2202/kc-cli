@@ -36,6 +36,10 @@ const { workerMock } = vi.hoisted(() => {
   };
   mockWorker.on = vi.fn((event: string, handler: (...args: any[]) => void) => {
     mockWorker._handlers.set(event, handler);
+    // Flush events that arrived before registration. Note: if a handler ever
+    // re-delivered a same-type event into the mock during flush, the filter
+    // below would drop it; current handlers only settle promises, so this is
+    // safe.
     for (const [ev, payload] of mockWorker._pending) {
       if (ev === event) handler(payload);
     }
@@ -430,64 +434,6 @@ describe('[P2] worker_threads execution', () => {
 
     expect(r.isError).toBe(true);
     expect(r.message).toContain('timeout');
-  });
-
-  // ── R8 (round4): the worker promise must always settle ──────────────────
-  // An unrecognised message type (or a `result` with no payload) used to fall
-  // through every branch. The timeout had already been cleared, so the promise
-  // never settled and the caller hung until the watchdog fired — if any.
-
-  it('rejects on an unknown worker message type instead of hanging', async () => {
-    mockState(namedConnState());
-
-    const promise = tool.call(
-      { query: 'SELECT 1', database: 'testdb', timeout: 30 },
-      baseCtx(),
-    );
-
-    workerMock.mockWorker._receiveMessage({ type: 'unknown' });
-
-    const r = await promise;
-    expect(r.isError).toBe(true);
-    expect(r.message).toContain('Unexpected worker message type');
-  });
-
-  it('rejects on a result message with no data instead of throwing a TypeError', async () => {
-    mockState(namedConnState());
-
-    const promise = tool.call(
-      { query: 'SELECT 1', database: 'testdb', timeout: 30 },
-      baseCtx(),
-    );
-
-    workerMock.mockWorker._receiveMessage({ type: 'result' });
-
-    const r = await promise;
-    expect(r.isError).toBe(true);
-    expect(r.message).toContain('no data');
-  });
-
-  it('settles both malformed cases without leaking the query timeout', async () => {
-    // The timeout timer is cleared on the first message, so neither case may
-    // leave a pending timer that would later reject an already-settled promise.
-    mockState(namedConnState());
-
-    const first = tool.call(
-      { query: 'SELECT 1', database: 'testdb', timeout: 30 },
-      baseCtx(),
-    );
-    workerMock.mockWorker._receiveMessage({ type: 'nope' });
-    await expect(first).resolves.toMatchObject({ isError: true });
-
-    workerMock.reset();
-    mockState(namedConnState());
-
-    const second = tool.call(
-      { query: 'SELECT 1', database: 'testdb', timeout: 30 },
-      baseCtx(),
-    );
-    workerMock.mockWorker._receiveMessage({ type: 'result' });
-    await expect(second).resolves.toMatchObject({ isError: true });
   });
 
   // ── R8 (round4): the worker promise must always settle ──────────────────

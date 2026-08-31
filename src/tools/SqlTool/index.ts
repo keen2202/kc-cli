@@ -24,7 +24,7 @@ export type SqlInput = z.infer<typeof SqlInputSchema>;
  * (e.g. `SELECT '; DROP TABLE x'` or `SELECT * FROM log WHERE msg = 'ATTACH failed'`).
  * Replaces string content with empty quotes so detection never fires on literals.
  */
-export function stripSqlNoise(query: string): string {
+function stripSqlNoise(query: string): string {
   return query
     .replace(/--[^\n]*/g, ' ')                 // line comments
     .replace(/\/\*[\s\S]*?\*\//g, ' ')         // block comments
@@ -59,7 +59,7 @@ export function isReadOnlyQuery(query: string): boolean {
   );
 }
 
-export function isDestructiveQuery(query: string): boolean {
+function isDestructiveQuery(query: string): boolean {
   const normalized = query.trim().toLowerCase();
   return (
     normalized.startsWith('delete') ||
@@ -149,9 +149,9 @@ export const tool = buildTool<SqlInput, string>({
 
   inputSchema: SqlInputSchema,
 
-  call: async (input, context) => {
+  call: async (input, context, onProgress) => {
     const { executeSql } = await import('./impl.js');
-    return executeSql(input, context);
+    return executeSql(input, context, onProgress);
   },
 
   checkPermissions: (input): PermissionResult => {

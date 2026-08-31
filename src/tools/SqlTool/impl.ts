@@ -234,6 +234,9 @@ async function executeQuery(
 export async function executeSql(
   input: SqlInput,
   context: ToolUseContext,
+  // Accepted for ToolDefinition.call conformance; SQL execution reports no
+  // incremental progress.
+  _onProgress?: (progress: unknown) => void,
 ): Promise<ToolResultType<string>> {
   try {
     const state = getState();
