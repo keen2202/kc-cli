@@ -28,7 +28,11 @@
     "lint:fix": "eslint src --fix",
     "format": "eslint src --fix",
     "knip": "knip",
-    "coverage:ratchet": "node scripts/coverage-ratchet.mjs"
+    "coverage:ratchet": "node scripts/coverage-ratchet.mjs",
+    "bench:startup": "node scripts/bench/startup.mjs",
+    "bench:turn": "npx tsx scripts/bench/turn-overhead.ts",
+    "bench:long": "npx tsx scripts/bench/long-session.ts",
+    "perf:ratchet": "node scripts/perf-ratchet.mjs"
   },
   "keywords": [
     "cli",
