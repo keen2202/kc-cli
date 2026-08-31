@@ -14,18 +14,32 @@ const { workerMock } = vi.hoisted(() => {
     postMessage: vi.fn(),
     terminate: vi.fn(),
     _handlers: new Map<string, (...args: any[]) => void>(),
+    // Events fed before their handler registered are buffered and flushed on
+    // registration. Needed since the lazy impl registers handlers one (or
+    // more) microtask(s) after tool.call() returns; mirrors real workers,
+    // whose responses always arrive after the handler is attached.
+    _pending: [] as Array<[string, any]>,
+    _deliver(event: string, payload: any) {
+      const handler = mockWorker._handlers.get(event);
+      if (handler) handler(payload);
+      else mockWorker._pending.push([event, payload]);
+    },
     _receiveMessage(data: any) {
-      mockWorker._handlers.get('message')?.(data);
+      mockWorker._deliver('message', data);
     },
     _receiveError(err: Error) {
-      mockWorker._handlers.get('error')?.(err);
+      mockWorker._deliver('error', err);
     },
     _receiveExit(code: number) {
-      mockWorker._handlers.get('exit')?.(code);
+      mockWorker._deliver('exit', code);
     },
   };
   mockWorker.on = vi.fn((event: string, handler: (...args: any[]) => void) => {
     mockWorker._handlers.set(event, handler);
+    for (const [ev, payload] of mockWorker._pending) {
+      if (ev === event) handler(payload);
+    }
+    mockWorker._pending = mockWorker._pending.filter(([ev]) => ev !== event);
   });
 
   // Must use `function` keyword (not arrow) so `new Worker()` works:
@@ -40,6 +54,7 @@ const { workerMock } = vi.hoisted(() => {
       mockWorker,
       reset() {
         mockWorker._handlers.clear();
+        mockWorker._pending = [];
         vi.clearAllMocks();
         Worker.mockClear();
         // Re-bind the factory after clearAllMocks resets implementation
