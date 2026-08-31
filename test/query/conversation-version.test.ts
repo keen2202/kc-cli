@@ -116,3 +116,22 @@ describe('trimIfNeeded incremental token accounting', () => {
     }
   });
 });
+
+describe('setMessages knownTotal', () => {
+  it('uses caller-provided total instead of a full recompute', () => {
+    const cs = new ConversationState();
+    cs.addMessage(msg('user', 'old conversation'));
+    const compacted = [msg('user', 'summary')];
+    // knownTotal is authoritative even when it differs from a fresh estimate
+    // (the compactor derives it from the tokens it actually dropped).
+    cs.setMessages(compacted, 123);
+    expect(cs.getTokenEstimate()).toBe(123);
+  });
+
+  it('falls back to full recompute when knownTotal is omitted', () => {
+    const cs = new ConversationState();
+    const compacted = [msg('user', 'summary')];
+    cs.setMessages(compacted);
+    expect(cs.getTokenEstimate()).toBe(estimateMessageTokensArray(compacted));
+  });
+});

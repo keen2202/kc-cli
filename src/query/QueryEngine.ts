@@ -36,7 +36,7 @@ import {
 // Sub-modules
 import { ConversationState } from './QueryEngineState';
 import { CompactionHandler } from './QueryEngineCompaction';
-import { forceTruncate } from '../services/compaction/functional';
+import { forceTruncate, estimateTokensAfterCompaction } from '../services/compaction/functional';
 import { isContextOverflowError } from '../services/error-classifier';
 import { MemoryHandler } from './QueryEngineMemory';
 import { ErrorHandler } from './QueryEngineError';
@@ -523,7 +523,13 @@ export class QueryEngine {
               this.conversation.getMessages()
             );
             if (asyncCompactResult) {
-              this.conversation.setMessages(asyncCompactResult.messages);
+              // knownTotal: the running estimate already includes any messages
+              // added while compaction ran; subtracting the compaction's
+              // savings yields the merged total without a full re-estimate.
+              this.conversation.setMessages(
+                asyncCompactResult.messages,
+                estimateTokensAfterCompaction(this.conversation.getTokenEstimate(), asyncCompactResult),
+              );
             }
 
             yield* this.streamingPhase();
@@ -873,7 +879,11 @@ export class QueryEngine {
           const messages = this.conversation.getMessagesCopy();
           const truncated = forceTruncate(messages);
           if (truncated.wasCompacted) {
-            this.conversation.setMessages(truncated.messages);
+            // knownTotal: running estimate minus what force-truncate dropped.
+            this.conversation.setMessages(
+              truncated.messages,
+              estimateTokensAfterCompaction(this.conversation.getTokenEstimate(), truncated),
+            );
             changedAfterOverflow = true;
             logger.query.info(`[QueryEngine] Overflow recovery dropped ${truncated.tokensSaved} estimated tokens`);
           } else if (messages.length > 1) {

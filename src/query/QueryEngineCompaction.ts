@@ -35,6 +35,8 @@ export class CompactionHandler {
   private pendingCompactPromise: Promise<void> | null = null;
   /** Compacted messages from a completed async compaction */
   private pendingCompactMessages: ChatMessage[] | null = null;
+  /** Tokens saved by the completed async compaction (0 when none/failed) */
+  private pendingCompactTokensSaved = 0;
   /** Whether the pending async compaction has finished */
   private pendingCompactDone = false;
   /** Error message from a failed async compaction, null if no error or success */
@@ -263,8 +265,9 @@ export class CompactionHandler {
     // in the background without blocking the caller.
     this.pendingCompactPromise = this.#runFullCompactAsync(
       messages, apiClient, compactConfig, config,
-    ).then(messages => {
-      this.pendingCompactMessages = messages;
+    ).then(result => {
+      this.pendingCompactMessages = result?.messages ?? null;
+      this.pendingCompactTokensSaved = result?.tokensSaved ?? 0;
       this.pendingCompactDone = true;
     }).catch((err) => {
       this.pendingCompactError = getErrorMessage(err);
@@ -288,7 +291,7 @@ export class CompactionHandler {
    */
   drainPendingCompactResult(
     currentMessages: ChatMessage[],
-  ): { messages: ChatMessage[]; method: string } | null {
+  ): { messages: ChatMessage[]; method: string; tokensSaved: number } | null {
     if (this.pendingCompactPromise === null || !this.pendingCompactDone) {
       return null;
     }
@@ -297,7 +300,9 @@ export class CompactionHandler {
     this.pendingCompactDone = false;
 
     const compactedMessages = this.pendingCompactMessages;
+    const tokensSaved = this.pendingCompactTokensSaved;
     this.pendingCompactMessages = null;
+    this.pendingCompactTokensSaved = 0;
 
     if (compactedMessages === null) {
       this.pendingCompactMsgCount = 0;
@@ -316,7 +321,7 @@ export class CompactionHandler {
     const newMessages = currentMessages.slice(triggerCount);
     const merged = [...compactedMessages, ...newMessages];
 
-    return { messages: merged, method: 'fullcompact' as const };
+    return { messages: merged, method: 'fullcompact' as const, tokensSaved };
   }
 
   /**
@@ -329,7 +334,7 @@ export class CompactionHandler {
     apiClient: BaseApiClient,
     compactConfig: { contextWindow: number; model: string },
     config: CompactionConfig,
-  ): Promise<ChatMessage[] | null> {
+  ): Promise<{ messages: ChatMessage[]; tokensSaved: number } | null> {
     try {
       const result = await fullCompact(
         messages,
@@ -341,7 +346,7 @@ export class CompactionHandler {
 
       if (result.wasCompacted) {
         this.compactFailureCount = 0;
-        return result.messages;
+        return { messages: result.messages, tokensSaved: result.tokensSaved };
       }
 
       this.compactFailureCount = 0;

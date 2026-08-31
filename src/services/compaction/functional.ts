@@ -54,6 +54,18 @@ export interface CompactionResult {
 }
 
 /**
+ * Derive the post-compaction token total from a pre-compaction total and a
+ * compaction result, without re-estimating the whole transcript. The token
+ * counter is additive over messages, so subtraction is exact.
+ */
+export function estimateTokensAfterCompaction(
+  originalTokens: number,
+  result: { tokensSaved: number },
+): number {
+  return Math.max(0, originalTokens - result.tokensSaved);
+}
+
+/**
  * Check if auto-compaction should be triggered
  */
 export function shouldCompact(
