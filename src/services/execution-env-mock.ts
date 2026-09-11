@@ -10,6 +10,7 @@ import type {
   AtomicWriteOptions,
   AtomicWriteResult,
 } from './execution-env';
+import { createTracedExecutionEnv } from './execution-env';
 
 interface MockFile {
   content: string;
@@ -140,9 +141,9 @@ export class MockShell implements Shell {
 }
 
 export function createMockExecutionEnv(cwd: string = '/mock'): ExecutionEnv {
-  return {
+  return createTracedExecutionEnv({
     fs: new MockFileSystem(),
     shell: new MockShell(),
     cwd,
-  };
+  });
 }

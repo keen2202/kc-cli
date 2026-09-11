@@ -41,6 +41,93 @@ export interface SubAgentSpawnConfig {
   model?: string; // Model override
   permissions?: PermissionMode; // Permission mode (cannot exceed parent)
   cwd?: string; // Working directory
+  /** Controller checkpoint questions that must be answered explicitly. */
+  checkpoints?: string[];
+  /**
+   * Zero-trust report policy for this sub-agent. Omit to keep the legacy
+   * (pre-integrity) path: no report validation and no follow-up turns.
+   */
+  reportPolicy?: ReportPolicy;
+}
+
+// ─── Agent Report Integrity (RI-SPEC v1.0) ──────────────────────────────
+
+/** A completed command reported by a sub-agent, with optional verbatim evidence. */
+export interface CommandRunClaim {
+  command: string;
+  exitCode: number;
+  /** Exact output line used as evidence for numeric claims. */
+  evidenceLine?: string;
+}
+
+/**
+ * Structured completion claim. Numeric conclusions must cite an
+ * `evidenceLine`; process obligations must cite where they came from.
+ */
+export interface CompletionClaim {
+  filesCreated: string[];
+  filesModified: string[];
+  commands: CommandRunClaim[];
+  /** Each process obligation → source (message index / section id). */
+  obligationCitations: string[];
+}
+
+/** Sections the validator must find in a completion report. */
+export interface RequiredSections {
+  /** Canonical required section names. */
+  requiredSections?: string[];
+  /** Alias used by callers that build the object from a named list. */
+  sections?: string[];
+  /** Alias matching the spec signature field name. */
+  required?: string[];
+  /** Controller checkpoint questions that must be answered explicitly. */
+  checkpoints?: string[];
+}
+
+/** Report validation rule identifiers (R1–R5 in RI-SPEC §3). */
+export type ReportFindingRule = 'R1' | 'R2' | 'R3' | 'R4' | 'R5';
+
+export type ReportFindingSeverity = 'blocker' | 'warning';
+
+/** A deterministic finding produced by `validateReport()`. */
+export interface ReportFinding {
+  rule: ReportFindingRule;
+  severity: ReportFindingSeverity;
+  /** Stable machine-readable code, e.g. `missing_section`. */
+  code: string;
+  /** Human-readable summary shown to the controller. */
+  message: string;
+  /** Present for R1/R2 findings about a specific required section. */
+  section?: string;
+  /** Raw detail (claimed value, evidence excerpt, path, …). */
+  detail?: string;
+  /** R2 sets this when a numeric claim lacks verifiable evidence. */
+  unsubstantiated?: boolean;
+}
+
+/** Runtime gate policy for a sub-agent completion report. */
+export interface ReportPolicy {
+  /** Required section names (R1). */
+  requiredSections: string[];
+  /** Follow-up budget; default 1, hard-capped at 2 by the orchestrator. */
+  maxFollowUps?: number;
+}
+
+/**
+ * Optional metadata attached to `SubAgentResult`. All fields are optional so
+ * legacy consumers and producers keep compiling.
+ */
+export interface SubAgentReportMeta {
+  /** In-memory execution trace captured in the sub-agent's AsyncLocalStorage scope. */
+  executionTrace?: import('../services/execution-env.js').ExecutionTrace;
+  /** Alias for callers that carry the trace as `meta.trace`. */
+  trace?: import('../services/execution-env.js').ExecutionTrace;
+  /** Findings produced by `validateReport()` for this result. */
+  reportFindings?: ReportFinding[];
+  /** True when blocker findings survived the follow-up budget. */
+  unresolved?: boolean;
+  /** Number of report follow-up turns already consumed. */
+  followUpsUsed?: number;
 }
 
 /**
@@ -85,6 +172,14 @@ export interface AggregatedResult {
   totalTokensUsed: number;
   totalToolUses: number;
   summary: string; // Natural language summary for LLM
+  /** All report-integrity findings collected from gated sub-agent results. */
+  findings?: ReportFinding[];
+  /** Alias for `findings` used by callers wired to `SubAgentResult.meta`. */
+  reportFindings?: ReportFinding[];
+  /** Agent IDs whose report still has unresolved blocker findings. */
+  unresolvedAgents?: string[];
+  /** Convenience flag: true when at least one agent is unresolved. */
+  unresolved?: boolean;
 }
 
 /**

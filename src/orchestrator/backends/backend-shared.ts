@@ -68,6 +68,11 @@ export class TerminalEventGuard {
     return this.sent.has(agentId);
   }
 
+  /** Allow a completed agent to be resumed as a new reporting turn. */
+  reset(agentId: string): void {
+    this.sent.delete(agentId);
+  }
+
   /** Emit `event` on `eventBus` unless a terminal event already went out for this agent. */
   emitOnce(agentId: string, eventBus: EventBus, event: AgentEvent): boolean {
     if (this.sent.has(agentId)) return false;

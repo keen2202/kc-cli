@@ -20,6 +20,7 @@ import { logger } from './logger';
 import { getErrorMessage, isAbortError } from '../utils/errors';
 import { buildSafeEnv } from '../utils/env-sanitize';
 import { withFileLock } from './file-lock';
+import { createTracedExecutionEnv } from './execution-env';
 
 const execAsync = promisify(exec);
 
@@ -237,10 +238,10 @@ export class LocalShell implements Shell {
 }
 
 export function createLocalExecutionEnv(cwd: string): ExecutionEnv {
-  return {
+  return createTracedExecutionEnv({
     fs: new LocalFileSystem(),
     shell: new LocalShell(),
     cwd,
     withFileLock,
-  };
+  });
 }

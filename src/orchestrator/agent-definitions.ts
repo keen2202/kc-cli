@@ -177,6 +177,29 @@ const PRODUCT_MANAGER_TOOLS: ToolName[] = [
 ];
 
 /**
+ * RI-SPEC §3.2 T05: reporting obligations are a separate section, appended to
+ * the task/identity prompt instead of being buried in task-specific text.
+ */
+export const REPORTING_OBLIGATIONS_PROMPT = [
+  '## Reporting obligations',
+  '- End the task with a verifiable completion report. Required sections: 交付物清单 (deliverables), 命令+退出码 (command + exit code), 检查站作答 (checkpoint answers).',
+  '- Every completion claim must cite its source. When a process obligation applies, cite the obligation text (message index / section id) in `obligationCitations`.',
+  '- For every command actually run, report the command and its exit code. Numeric conclusions (e.g. test counts) are only allowed when you can quote the exact output line as `evidenceLine`; otherwise do not report a precise number.',
+  '- When command output is unavailable, report only that the result is based on the exit code (`依据退出码`), state why output was unavailable, and do not fabricate counts or stdout.',
+  '- Answer every controller checkpoint question explicitly in the final report. Do not write "作答见消息开头" or otherwise deflect.',
+].join('\n');
+
+/**
+ * Append the dedicated reporting-obligations section without modifying the
+ * existing task-specific prompt text or ordering.
+ */
+export function appendReportingObligations(prompt: string | undefined): string {
+  const base = prompt?.trim() ?? '';
+  if (base.includes('## Reporting obligations')) return base;
+  return base ? `${base}\n\n${REPORTING_OBLIGATIONS_PROMPT}` : REPORTING_OBLIGATIONS_PROMPT;
+}
+
+/**
  * Built-in agent definitions
  */
 export const BUILTIN_AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
@@ -372,6 +395,13 @@ export const BUILTIN_AGENT_DEFINITIONS: Record<string, AgentDefinition> = {
   },
 };
 
+// RI-SPEC T05: bake the dedicated reporting-obligations section into every
+// built-in definition as well, so direct consumers of an AgentDefinition see
+// the same obligation contract as callers of createAgentConfig().
+for (const definition of Object.values(BUILTIN_AGENT_DEFINITIONS)) {
+  definition.systemPrompt = appendReportingObligations(definition.systemPrompt);
+}
+
 /**
  * Get a pre-defined agent configuration
  *
@@ -411,7 +441,7 @@ export function createAgentConfig(
   return {
     name: overrides?.name || `${type}-${Date.now()}`,
     prompt: userPrompt,
-    systemPrompt: def.systemPrompt,
+    systemPrompt: appendReportingObligations(overrides?.systemPrompt ?? def.systemPrompt),
     systemPromptMode: overrides?.systemPromptMode || 'default',
     tools: overrides?.tools || def.allowedTools,
     deniedTools: overrides?.deniedTools || def.deniedTools,

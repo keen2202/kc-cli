@@ -6,6 +6,7 @@ import type {
   SubAgentResult,
   AggregatedResult,
   SubAgentStatus,
+  ReportFinding,
 } from './types.js';
 import type { AgentEvent } from '../state/types.js';
 import type { MultiAgentEvent } from '../state/events.js';
@@ -17,6 +18,8 @@ import { InProcessBackend } from './backends/in-process.js';
 import { ResultAggregator } from './result-aggregator.js';
 import { deriveChildPermissions } from './permission-cascader.js';
 import { getState } from '../bootstrap/state.js';
+import { buildReportFollowUpMessage, validateReport } from './report-validator.js';
+import { appendReportingObligations } from './agent-definitions.js';
 
 /**
  * How long `spawn()` will wait for a permit before failing.
@@ -34,6 +37,22 @@ const TERMINAL_EVENT_TYPES: ReadonlySet<string> = new Set([
   'agent:subagent_timed_out',
   'agent:subagent_cancelled',
 ]);
+
+interface TrackedCompletion {
+  config: SubAgentSpawnConfig;
+  promise: Promise<SubAgentResult>;
+  resolve: (result: SubAgentResult) => void;
+  reject: (error: Error) => void;
+  followUpsUsed: number;
+  settled: boolean;
+  processing: boolean;
+  /** True when waitForCompletion gave up on this agent. */
+  abandoned: boolean;
+  /** Completion event that raced a report-gate turn. */
+  pendingCompletion?: SubAgentResult;
+  /** Detach this agent's tracker listener once the promise settles. */
+  unsubscribe?: () => void;
+}
 
 /**
  * AgentOrchestrator - Manages sub-agent lifecycle
@@ -53,6 +72,12 @@ export class AgentOrchestrator {
    * terminal-event listener never saw.
    */
   private releaseHooks = new Map<string, (reason: string) => void>();
+  /** Event-bus detach handles for terminal-event permit listeners. */
+  private releaseUnsubscribes = new Map<string, () => void>();
+  /** Completion promises tracked for report validation and waitForAll. */
+  private trackedCompletions = new Map<string, TrackedCompletion>();
+  /** Wakens waitForAll when the aggregator may have reached all-done. */
+  private aggregateWaiters = new Set<() => void>();
 
   constructor(allTools: ToolDefinition[], maxConcurrentAgents: number = 8) {
     this.semaphore = new Semaphore(maxConcurrentAgents, SPAWN_PERMIT_TIMEOUT_MS);
@@ -79,6 +104,14 @@ export class AgentOrchestrator {
     config: SubAgentSpawnConfig,
     parentContext: ToolUseContext
   ): Promise<string> {
+    // RI-SPEC T05: every sub-agent gets the dedicated reporting-obligations
+    // section, including generic (non-built-in) agents. Built-in configs are
+    // already normalized by createAgentConfig, so the helper is idempotent.
+    config = {
+      ...config,
+      systemPrompt: appendReportingObligations(config.systemPrompt),
+    };
+
     // Acquire semaphore permit — bounds concurrent sub-agents. Times out so a
     // leaked permit degrades into a diagnosable error instead of a deadlock.
     await this.semaphore.acquire();
@@ -98,6 +131,8 @@ export class AgentOrchestrator {
       if (released) return;
       released = true;
       this.releaseHooks.delete(agentId);
+      this.releaseUnsubscribes.get(agentId)?.();
+      this.releaseUnsubscribes.delete(agentId);
       this.semaphore.release();
       logger.orchestrator.debug('[AgentOrchestrator] released spawn permit', {
         agentId,
@@ -116,16 +151,26 @@ export class AgentOrchestrator {
     agentId = spawnResult.agentId;
     this.releaseHooks.set(agentId, releaseOnce);
 
-    // Register listener to release permit when agent reaches terminal state
+    // Register listener to release permit when agent reaches terminal state.
+    // Gated agents keep the permit across report follow-up turns; the tracker
+    // releases it once the report is finally settled (accepted or unresolved).
     const unsubscribe = this.eventBus.on(agentId, (event: AgentEvent | MultiAgentEvent) => {
       if (!TERMINAL_EVENT_TYPES.has(event.type)) return;
+      const tracked = this.trackedCompletions.get(agentId);
+      const gated = Boolean(tracked?.config.reportPolicy) ||
+        (Array.isArray(tracked?.config.checkpoints) && tracked!.config.checkpoints!.length > 0);
+      if (event.type === 'agent:subagent_completed' && gated) {
+        return;
+      }
       releaseOnce(event.type.replace('agent:subagent_', ''));
       unsubscribe();
     });
+    this.releaseUnsubscribes.set(agentId, unsubscribe);
 
     try {
       // Register with aggregator
       this.aggregator.register(agentId, config);
+      this.trackCompletion(agentId, config);
 
       return agentId;
     } catch (error) {
@@ -173,6 +218,253 @@ export class AgentOrchestrator {
     agentId: string,
     timeoutMs: number = 300000
   ): Promise<SubAgentResult> {
+    const tracked = this.trackedCompletions.get(agentId);
+    if (tracked) {
+      return this.waitForTrackedCompletion(agentId, tracked, timeoutMs);
+    }
+    return this.waitForUntrackedCompletion(agentId, timeoutMs);
+  }
+
+  /**
+   * Register a completion promise for a spawned agent. The event listener is
+   * the single place where report validation, follow-up, aggregator recording
+   * and `waitForAll` wakeups happen, regardless of whether the caller uses
+   * `waitForCompletion` or `waitForAll`.
+   */
+  private trackCompletion(agentId: string, config: SubAgentSpawnConfig): void {
+    let resolve!: (result: SubAgentResult) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<SubAgentResult>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    // There may be no waitForCompletion caller (e.g. waitForAll only or a
+    // background agent). A rejection handler keeps Node from treating that as
+    // an unhandled rejection while still allowing later waiters to observe it.
+    void promise.catch(() => {});
+
+    const tracked: TrackedCompletion = {
+      config,
+      promise,
+      resolve,
+      reject,
+      followUpsUsed: 0,
+      settled: false,
+      processing: false,
+      abandoned: false,
+    };
+    this.trackedCompletions.set(agentId, tracked);
+
+    tracked.unsubscribe = this.eventBus.on(agentId, (event: AgentEvent | MultiAgentEvent) => {
+      if (event.type === 'agent:subagent_completed') {
+        void this.handleTrackedCompletion(agentId, event.result);
+      } else if (event.type === 'agent:subagent_failed') {
+        this.settleTrackedError(
+          agentId,
+          new Error(`Agent ${agentId} failed: ${event.error}`),
+          () => this.aggregator.recordFailure(agentId, event.error),
+        );
+      } else if (event.type === 'agent:subagent_timed_out') {
+        this.settleTrackedError(
+          agentId,
+          new Error(`Agent ${agentId} timed out after ${event.elapsed}s`),
+          () => this.aggregator.recordTimeout(agentId, event.elapsed),
+        );
+      } else if (event.type === 'agent:subagent_cancelled') {
+        this.settleTrackedError(
+          agentId,
+          new Error(`Agent ${agentId} was cancelled`),
+          () => this.aggregator.recordCancellation(agentId),
+        );
+      }
+    });
+  }
+
+  /** Validate a completed report and either resume or settle the agent. */
+  private async handleTrackedCompletion(
+    agentId: string,
+    result: SubAgentResult,
+  ): Promise<void> {
+    const tracked = this.trackedCompletions.get(agentId);
+    if (!tracked || tracked.settled || tracked.abandoned) return;
+    if (!result || typeof result !== 'object') return;
+    if (tracked.processing) {
+      // The resumed agent can complete before the previous handler's await
+      // unwinds; queue it instead of dropping a terminal event.
+      tracked.pendingCompletion = result;
+      return;
+    }
+
+    tracked.processing = true;
+    try {
+      const outcome = await this.applyReportGate(agentId, tracked, result);
+      if (outcome.kind === 'followup') {
+        return;
+      }
+
+      tracked.settled = true;
+      tracked.unsubscribe?.();
+      this.aggregator.recordResult(outcome.result);
+      this.notifyAggregateWaiters();
+      this.releaseReportContext(agentId);
+      this.releaseHooks.get(agentId)?.('report-gate-final');
+      tracked.resolve(outcome.result);
+    } catch (error) {
+      tracked.settled = true;
+      tracked.unsubscribe?.();
+      const message = error instanceof Error ? error.message : String(error);
+      this.aggregator.recordFailure(agentId, `report gate error: ${message}`);
+      this.notifyAggregateWaiters();
+      this.releaseReportContext(agentId);
+      this.releaseHooks.get(agentId)?.('report-gate-error');
+      tracked.reject(new Error(`Agent ${agentId} report validation failed: ${message}`));
+    } finally {
+      tracked.processing = false;
+      const pending = tracked.pendingCompletion;
+      tracked.pendingCompletion = undefined;
+      if (pending && !tracked.settled && !tracked.abandoned) {
+        void this.handleTrackedCompletion(agentId, pending);
+      }
+    }
+  }
+
+  /**
+   * Run R1–R5 and, when blockers remain inside budget, ask the same sub-agent
+   * to resume with one follow-up turn.
+   */
+  private async applyReportGate(
+    agentId: string,
+    tracked: TrackedCompletion,
+    result: SubAgentResult,
+  ): Promise<{ kind: 'final'; result: SubAgentResult } | { kind: 'followup' }> {
+    const config = tracked.config;
+    const checkpoints = Array.isArray(config.checkpoints) ? config.checkpoints : [];
+    const policy = config.reportPolicy;
+    const gated = Boolean(policy) || checkpoints.length > 0;
+    if (!gated) {
+      return { kind: 'final', result };
+    }
+
+    const requiredSections = Array.isArray(policy?.requiredSections)
+      ? policy!.requiredSections
+      : checkpoints.length > 0
+        ? ['检查站作答']
+        : [];
+    const findings = validateReport(result, {
+      requiredSections,
+      checkpoints,
+    });
+
+    const blockers = findings.filter((f) => f.severity === 'blocker');
+    const maxFollowUps = Math.max(0, Math.min(2, policy?.maxFollowUps ?? 1));
+
+    if (blockers.length > 0 && tracked.followUpsUsed < maxFollowUps) {
+      tracked.followUpsUsed++;
+      const followUpMessage = buildReportFollowUpMessage(findings, { checkpoints });
+      const resumed = await this.resumeAgent(agentId, followUpMessage);
+      if (!resumed) {
+        // A synthetic/manual completion event has no live backend to resume.
+        // Keep waiting: the next completion event (if any) is validated too.
+        logger.orchestrator.debug(
+          '[AgentOrchestrator] follow-up requested but backend cannot resume',
+          { agentId },
+        );
+      }
+      return { kind: 'followup' };
+    }
+
+    return { kind: 'final', result: this.attachFindings(result, findings, tracked, blockers.length > 0) };
+  }
+
+  /** Attach findings/resolution metadata without mutating the input result. */
+  private attachFindings(
+    result: SubAgentResult,
+    findings: ReportFinding[],
+    tracked: TrackedCompletion,
+    unresolved: boolean,
+  ): SubAgentResult {
+    if (findings.length === 0 && !unresolved) return result;
+    const meta = {
+      ...(result.meta ?? {}),
+      reportFindings: findings,
+      followUpsUsed: tracked.followUpsUsed,
+      ...(unresolved ? { unresolved: true } : {}),
+    };
+    return {
+      ...result,
+      ...(unresolved
+        ? {
+            success: false,
+            error:
+              result.error ??
+              `Report integrity unresolved: ${findings
+                .filter((f) => f.severity === 'blocker')
+                .map((f) => f.code)
+                .join(', ')}`,
+          }
+        : {}),
+      meta,
+    };
+  }
+
+  private settleTrackedError(agentId: string, error: Error, record: () => void): void {
+    const tracked = this.trackedCompletions.get(agentId);
+    if (!tracked || tracked.settled || tracked.abandoned) return;
+    tracked.settled = true;
+    tracked.processing = false;
+    tracked.unsubscribe?.();
+    record();
+    this.releaseReportContext(agentId);
+    this.notifyAggregateWaiters();
+    tracked.reject(error);
+  }
+
+  private waitForTrackedCompletion(
+    agentId: string,
+    tracked: TrackedCompletion,
+    timeoutMs: number,
+  ): Promise<SubAgentResult> {
+    return new Promise((resolve, reject) => {
+      let done = false;
+      const timeoutId = setTimeout(() => {
+        if (done) return;
+        done = true;
+        tracked.abandoned = true;
+        tracked.unsubscribe?.();
+        this.aggregator.recordTimeout(agentId, timeoutMs / 1000);
+        this.releaseReportContext(agentId);
+        this.notifyAggregateWaiters();
+        // The caller gave up on this agent: if the backend never emits a
+        // terminal event, its permit would be held forever.
+        this.releaseHooks.get(agentId)?.('wait-completion-timeout');
+        reject(new Error(`Agent ${agentId} timed out after ${timeoutMs / 1000}s`));
+      }, timeoutMs);
+
+      tracked.promise.then(
+        (result) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timeoutId);
+          resolve(result);
+        },
+        (error) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timeoutId);
+          reject(error);
+        },
+      );
+    });
+  }
+
+  /**
+   * Existing event-based path for manually-emitted events on unregistered
+   * agent IDs (kept exactly as before to preserve the public contract).
+   */
+  private waitForUntrackedCompletion(
+    agentId: string,
+    timeoutMs: number,
+  ): Promise<SubAgentResult> {
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         this.aggregator.recordTimeout(agentId, timeoutMs / 1000);
@@ -216,6 +508,48 @@ export class AgentOrchestrator {
     });
   }
 
+  /** Resume a completed sub-agent for one reporting follow-up turn. */
+  private async resumeAgent(agentId: string, message: string): Promise<boolean> {
+    const backend = this.backend as InProcessBackend & {
+      resume?: (agentId: string, message: string) => Promise<boolean>;
+    };
+    if (typeof backend.resume === 'function') {
+      try {
+        return await backend.resume(agentId, message);
+      } catch (error) {
+        logger.orchestrator.warn('[AgentOrchestrator] report follow-up resume failed', {
+          agentId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+      }
+    }
+    // Generic backend fallback: queue a user message as a best effort.
+    try {
+      await this.backend.sendMessage(agentId, {
+        type: 'user_message',
+        from: 'parent',
+        payload: { message, reportFollowUp: true },
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private notifyAggregateWaiters(): void {
+    for (const waiter of Array.from(this.aggregateWaiters)) {
+      waiter();
+    }
+  }
+
+  private releaseReportContext(agentId: string): void {
+    const backend = this.backend as InProcessBackend & {
+      releaseReportContext?: (id: string) => void;
+    };
+    backend.releaseReportContext?.(agentId);
+  }
+
   /**
    * Wait for all spawned agents to complete
    *
@@ -228,10 +562,30 @@ export class AgentOrchestrator {
       return this.aggregator.generateSummary();
     }
 
-    // Event-based wait instead of polling: resolve when all agents complete
-    await new Promise<void>((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
+    // Event-based wait instead of polling: resolve when all agents complete.
+    // `aggregateWaiters` covers asynchronous report-gate settlement, which
+    // happens after the terminal event and therefore not inside onAny.
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      let unsubscribe: () => void = () => {};
+      const onChanged = (): void => {
+        if (!settled && this.aggregator.isAllDone()) {
+          finish();
+        }
+      };
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId) clearTimeout(timeoutId);
         unsubscribe();
+        this.aggregateWaiters.delete(onChanged);
+        resolve();
+      };
+
+      this.aggregateWaiters.add(onChanged);
+
+      timeoutId = setTimeout(() => {
         // Cancel any remaining agents
         const activeAgents = this.backend.listActive();
         const elapsed = timeoutMs / 1000;
@@ -240,22 +594,14 @@ export class AgentOrchestrator {
           this.releaseHooks.get(agentId)?.('wait-all-timeout');
           this.backend.shutdown(agentId, true).catch(err => { logger.orchestrator.error('[AgentOrchestrator] Failed to shutdown agent', err); });
         }
-        resolve(); // Continue to get results (with timeouts recorded)
+        finish(); // Continue to get results (with timeouts recorded)
       }, timeoutMs);
 
-      const unsubscribe = this.eventBus.onAny(() => {
-        if (this.aggregator.isAllDone()) {
-          clearTimeout(timeoutId);
-          unsubscribe();
-          resolve();
-        }
-      });
+      unsubscribe = this.eventBus.onAny(onChanged);
 
       // Double-check in case agents completed between our initial check and subscription
       if (this.aggregator.isAllDone()) {
-        clearTimeout(timeoutId);
-        unsubscribe();
-        resolve();
+        finish();
       }
     });
 
@@ -284,6 +630,7 @@ export class AgentOrchestrator {
   async cancel(agentId: string): Promise<void> {
     await this.backend.shutdown(agentId, true);
     this.aggregator.recordCancellation(agentId);
+    this.notifyAggregateWaiters();
     // A cancelled backend may never emit a terminal event of its own.
     this.releaseHooks.get(agentId)?.('cancelled');
   }
@@ -344,6 +691,9 @@ export class AgentOrchestrator {
     await this.backend.shutdownAll();
     this.eventBus.clear();
     this.releaseHooks.clear();
+    this.releaseUnsubscribes.clear();
+    this.trackedCompletions.clear();
+    this.aggregateWaiters.clear();
   }
 
   /**

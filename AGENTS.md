@@ -23,7 +23,7 @@ npm run kc             # Start interactive REPL
 - **API clients**: `src/api/` — 11 provider endpoints served by 3 client classes (`AnthropicClient`, `OpenAICompatibleClient`, `OllamaClient`); the other 8 providers (OpenAI, DeepSeek, Qwen, GLM, Mimo, Kimi, Step, Gemini) are OpenAI-compatible configuration endpoints; extend `BaseApiClient`; protocol types in `api/protocol.ts`
 - **Permissions**: `src/permissions/` — 6-step deny-first with bypass-immune protected paths + plugin-contributed rules (Step 3.5)
 - **Sandbox**: `src/services/sandbox*.ts` — Docker/Bubblewrap/seccomp backends with fallback chain
-- **Orchestrator**: `src/orchestrator/` — Multi-agent with `AsyncLocalStorage` isolation; protocol types in `orchestrator/protocol.ts`
+- **Orchestrator**: `src/orchestrator/` — Multi-agent with `AsyncLocalStorage` isolation; protocol types in `orchestrator/protocol.ts`. Zero-trust reporting layer: `report-validator.ts` (deterministic R1–R5 findings), optional `reportPolicy`/`checkpoints` gate with bounded resume follow-ups in `agent-orchestrator.ts`, and a bounded in-memory ExecutionEnv trace attached to `SubAgentResult.meta`.
 - **Memory**: `src/memory/` — File-based persistent memory with YAML frontmatter, 4 types (user/feedback/project/reference), relevance search, LLM auto-extraction (consolidation parked — see `docs/specs/memory-consolidation-pending.md`)
 - **UI**: `src/ui/` — ink/React terminal UI with theme system, focus-stack dialogs, multi-panel layout, steer mode (Ctrl+I)
 - **LSP**: `src/lsp/` — Language server integration (TS, Go, Python, Rust, Java, C++, Ruby)
@@ -68,6 +68,14 @@ What the permission system (`src/permissions/`) actually enforces on agent behav
 - **System write directories are denied** for write-capable tools (FileWrite/FileEdit/Bash/Run/NotebookEdit): `/etc/`, `/usr/`, `/bin/`, `/sbin/`, `C:\Windows\`, `C:\Program Files*\`, `C:\ProgramData\`.
 - **Destructive command categories are auto-denied** (`classifier.ts` `DESTRUCTIVE_PATTERNS`): recursive/force delete (`rm -rf`), filesystem format (`mkfs`), raw disk write (`dd of=`), partitioning (`fdisk`/`parted`), recursive `chmod`/`chown`, firewall (`iptables`), service control (`systemctl stop|disable|mask`), bootloader changes, LVM creation, shutdown/reboot.
 - **Engine order** (`engine.ts`, deny-first): deny rules → tool check → security-critical (bypass-immune) → plugin rules (Step 3.5, can tighten but never loosen) → bypass → allow rules → ask rules → mode default. Bypass mode requires explicit `KC_ALLOW_BYPASS=1` and never overrides security-critical checks. `WebFetch` to internal/private network URLs is denied (SSRF guard).
+
+### Zero-trust reporting (RI-SPEC v1.0)
+
+- Sub-agent completion reports are not trusted by default. When a spawn sets `reportPolicy` and/or `checkpoints`, `validateReport()` runs R1–R5 deterministically: required sections, numeric-claim→`evidenceLine` binding, obligation citations, declared files vs ExecutionEnv writes, and environment-claim cross-checks.
+- Blocker findings trigger at most one resume follow-up by default (hard cap 2). Warning findings never trigger follow-up; they are attached to `SubAgentResult.meta.reportFindings`.
+- If blockers survive the follow-up budget, the result is marked `meta.unresolved`, `success` is forced to `false`, and `AggregatedResult` must expose the findings/unresolved agent. It is never rendered as completed.
+- Execution traces are memory-only: command + exit code + stdout/stderr truncated to 4 KB, plus an observed file-write list. They are attached to `SubAgentResult.meta.executionTrace` and never persisted to disk.
+- Main-agent post-turn output gets the same R1/R2-style audit via the registered reporting-integrity hook in `src/hooks/postTurnHooks.ts`; findings are attached as message metadata for controller display.
 
 ## Key Types
 

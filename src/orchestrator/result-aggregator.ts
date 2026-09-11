@@ -1,6 +1,6 @@
 // Result aggregation system for multi-agent coordination
 
-import type { SubAgentResult, AggregatedResult, SubAgentSpawnConfig } from './types.js';
+import type { SubAgentResult, AggregatedResult, SubAgentSpawnConfig, ReportFinding } from './types.js';
 
 interface ExpectedAgent {
   config: SubAgentSpawnConfig;
@@ -24,6 +24,11 @@ export class ResultAggregator {
       config,
       status: 'pending',
     });
+  }
+
+  /** Spawn configuration for a registered agent (used by the report gate). */
+  getConfig(agentId: string): SubAgentSpawnConfig | undefined {
+    return this.expectedAgents.get(agentId)?.config;
   }
 
   /**
@@ -130,12 +135,25 @@ export class ResultAggregator {
       }
     }
 
+    const findings: ReportFinding[] = [];
+    const unresolvedAgents: string[] = [];
+    for (const result of results) {
+      if (result.meta?.reportFindings?.length) {
+        findings.push(...result.meta.reportFindings);
+      }
+      if (result.meta?.unresolved) {
+        unresolvedAgents.push(result.agentId);
+      }
+    }
+
     return {
       results,
       totalDuration,
       totalTokensUsed,
       totalToolUses,
       summary: this.generateNaturalLanguageSummary(results),
+      ...(findings.length > 0 ? { findings, reportFindings: findings } : {}),
+      ...(unresolvedAgents.length > 0 ? { unresolvedAgents, unresolved: true } : {}),
     };
   }
 
@@ -200,8 +218,13 @@ export class ResultAggregator {
     const lines: string[] = ['=== Sub-Agent Results ===', ''];
 
     for (const result of results) {
-      const statusIcon = result.success ? '✓' : '✗';
-      const statusText = result.success ? 'completed' : `failed: ${result.error || 'unknown'}`;
+      const unresolved = result.meta?.unresolved === true;
+      const statusIcon = unresolved ? '!' : result.success ? '✓' : '✗';
+      const statusText = unresolved
+        ? `UNRESOLVED report-integrity findings: ${result.meta?.reportFindings?.filter((f: ReportFinding) => f.severity === 'blocker').map((f: ReportFinding) => f.code).join(', ') || 'blocker'}`
+        : result.success
+          ? 'completed'
+          : `failed: ${result.error || 'unknown'}`;
       const stats = `${result.toolUseCount} tools, ${result.totalTokensUsed} tokens, ${(result.duration / 1000).toFixed(1)}s`;
 
       lines.push(`[${result.name}] ${statusIcon} (${statusText}, ${stats})`);
@@ -210,11 +233,15 @@ export class ResultAggregator {
     }
 
     // Add aggregate statistics
-    const successCount = results.filter((r) => r.success).length;
+    const successCount = results.filter((r) => r.success && !r.meta?.unresolved).length;
+    const unresolvedCount = results.filter((r) => r.meta?.unresolved).length;
     lines.push(`=== Summary ===`);
     lines.push(
       `${successCount}/${results.length} sub-agents completed successfully.`
     );
+    if (unresolvedCount > 0) {
+      lines.push(`${unresolvedCount}/${results.length} sub-agent report(s) unresolved (report integrity).`);
+    }
 
     const totalDuration = Math.max(...results.map((r) => r.duration));
     const totalTokens = results.reduce((sum, r) => sum + r.totalTokensUsed, 0);

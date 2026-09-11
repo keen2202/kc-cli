@@ -23,6 +23,7 @@ import {
   createChildPermissionContext,
 } from '../permission-cascader.js';
 import { ResultAggregator } from '../result-aggregator.js';
+import { createExecutionTrace, runWithExecutionTrace, type ExecutionTrace } from '../../services/execution-env';
 import { createScopedState, runWithScopedState, getState } from '../../bootstrap/state';
 import {
   BaseSubAgentBackend,
@@ -64,6 +65,12 @@ export class InProcessBackend extends BaseSubAgentBackend implements SubAgentBac
   private parentPermissionMode: PermissionMode;
   private parentCwd: string;
   private nextAgentId = createAgentIdCounter();
+  /** Completed runtimes retained briefly so the report gate can resume them. */
+  private completedAgents = new Map<string, SubAgentRuntime>();
+  /** Parent context retained for resume() calls. */
+  private parentContexts = new Map<string, ToolUseContext>();
+  /** Per-agent trace reused across report follow-up turns. */
+  private executionTraces = new Map<string, ExecutionTrace>();
 
   constructor(
     eventBus: EventBus,
@@ -122,6 +129,7 @@ export class InProcessBackend extends BaseSubAgentBackend implements SubAgentBac
 
       // Store runtime
       this.activeAgents.set(agentId, runtime);
+      this.parentContexts.set(agentId, parentContext);
 
       // Update status
       runtime.status = 'running';
@@ -209,14 +217,18 @@ export class InProcessBackend extends BaseSubAgentBackend implements SubAgentBac
    */
   private async runAgentLoop(
     runtime: SubAgentRuntime,
-    parentContext: ToolUseContext,
-    queryEngine: QueryEngineLike
+    _parentContext: ToolUseContext,
+    queryEngine: QueryEngineLike,
+    promptOverride?: string,
   ): Promise<void> {
     const { config, abortController } = runtime;
     const agentId = runtime.identity.agentId;
+    const executionTrace = this.executionTraces.get(agentId) ?? createExecutionTrace(config.cwd ?? this.parentCwd);
+    this.executionTraces.set(agentId, executionTrace);
 
-    // Wrap in AsyncLocalStorage for context isolation
-    await agentContextStore.run(runtime, async () => {
+    // Wrap in AsyncLocalStorage for context isolation and install the bounded
+    // RI-SPEC §3.3 execution trace for all tool calls in this async chain.
+    await runWithExecutionTrace(executionTrace, () => agentContextStore.run(runtime, async () => {
       try {
         // Set up timeout
         const timeoutMs = resolveTimeoutMs(config.timeoutSeconds);
@@ -225,7 +237,7 @@ export class InProcessBackend extends BaseSubAgentBackend implements SubAgentBac
         }, timeoutMs);
 
         // Submit message and collect events
-        const eventGenerator = queryEngine.submitMessage(config.prompt);
+        const eventGenerator = queryEngine.submitMessage(promptOverride ?? config.prompt);
 
         let lastAssistantMessage = '';
         let hasToolCalls = false;
@@ -283,6 +295,7 @@ export class InProcessBackend extends BaseSubAgentBackend implements SubAgentBac
             toolUseCount: runtime.toolUseCount,
             totalTokensUsed: runtime.totalTokensUsed,
             duration,
+            meta: { executionTrace, trace: executionTrace },
           };
 
           this.terminalGuard.emitOnce(agentId, this.eventBus, {
@@ -304,10 +317,65 @@ export class InProcessBackend extends BaseSubAgentBackend implements SubAgentBac
             timestamp: Date.now(),
           });
       } finally {
-        // Clean up completed/failed agents from active map immediately
-        this.activeAgents.delete(agentId);
+        // A report-gate follow-up may have synchronously flipped the runtime
+        // back to `running` while the completion event was being dispatched.
+        // Only clean up when this loop is genuinely terminal.
+        if (runtime.status !== 'running') {
+          this.activeAgents.delete(agentId);
+        }
+        const gated = Boolean(config.reportPolicy) ||
+          (Array.isArray(config.checkpoints) && config.checkpoints.length > 0);
+        if (runtime.status === 'completed' && gated) {
+          // Retain just enough state for a possible follow-up resume; the
+          // orchestrator releases it once the report gate reaches a verdict.
+          this.completedAgents.set(agentId, runtime);
+        } else if (runtime.status !== 'running') {
+          this.executionTraces.delete(agentId);
+          this.parentContexts.delete(agentId);
+        }
       }
-    });
+    }));
+  }
+
+  /**
+   * Resume a completed sub-agent with one controller follow-up message. The
+   * QueryEngine keeps its conversation state, so `submitMessage(message)`
+   * appends the follow-up as a new user turn.
+   */
+  async resume(agentId: string, message: string): Promise<boolean> {
+    const runtime = this.activeAgents.get(agentId) ?? this.completedAgents.get(agentId);
+    const parentContext = this.parentContexts.get(agentId);
+    if (!runtime?.queryEngine || !parentContext || runtime.status === 'running') {
+      return false;
+    }
+
+    this.completedAgents.delete(agentId);
+    this.activeAgents.set(agentId, runtime);
+    runtime.status = 'running';
+    runtime.completedAt = undefined;
+    runtime.error = undefined;
+    this.terminalGuard.reset(agentId);
+
+    void this.runAgentLoop(runtime, parentContext, runtime.queryEngine, message);
+    return true;
+  }
+
+  /**
+   * Drop the runtime/trace retained for a report-gate resume. Safe to call
+   * for non-gated agents (no-op).
+   */
+  releaseReportContext(agentId: string): void {
+    this.completedAgents.delete(agentId);
+    this.parentContexts.delete(agentId);
+    this.executionTraces.delete(agentId);
+  }
+
+  /** Clear any retained completion state. */
+  override async shutdownAll(): Promise<void> {
+    await super.shutdownAll();
+    this.completedAgents.clear();
+    this.parentContexts.clear();
+    this.executionTraces.clear();
   }
 
   /** Per-agent message queues for inter-agent communication */

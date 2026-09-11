@@ -1,11 +1,11 @@
 # Spec: 子代理汇报完整性加固（Agent Report Integrity Hardening）
 
 - **文档代号**：RI-SPEC
-- **版本**：v1.0（待批准）
+- **版本**：v1.0（已批准）
 - **日期**：2026-09-11
 - **依据**：`D:\Workespace\kc-cli\.workbuddy\eval\LT1-EVAL-REPORT.md`（LT-1 长任务执行能力评估，总分 35.5/40）
 - **关联任务清单**：`docs/specs/agent-report-integrity-tasks.md`
-- **状态**：RI-T01 评审中（in_progress），批准后方可实施
+- **状态**：已实施（RI-T01–T10；验证记录见 §8）
 
 ---
 
@@ -117,20 +117,22 @@ LT-1 评估表明：受试子代理在**产物层面**表现优秀（规格保�
 
 **不改动**：`src/permissions/`、`src/query/`、受试产物两文件、任何公共 API 签名（仅新增可选字段）。
 
+> 实现落点说明（与原始文件清单的差异）：`SubAgentResult` 的真实定义在 `src/state/events.ts`，`orchestrator/protocol.ts`/`types.ts` 只是 re-export；因此 T02 的 `claim?`/`meta?` 实际加在 `state/events.ts`，保持原有公共契约仅新增可选字段。`execution-env-local.ts` 与 `execution-env-mock.ts` 只是调用 `execution-env.ts` 暴露的 `createTracedExecutionEnv()`，使真实/测试 ExecutionEnv 都能在 ALS 作用域内留痕。
+
 ## 5. 实施进度追踪表
 
 | 任务 | 状态 | blockedBy | blocks | 对应问题 |
 |---|---|---|---|---|
-| RI-T01 评审并批准 RI-SPEC | **in_progress** | — | T02–T08 | 全部 |
-| RI-T02 定义 CompletionClaim 协议类型 | pending | T01 | T03,T04,T05,T06 | P1/P3 |
-| RI-T03 实现 ReportValidator（R1–R3） | blocked | T02 | T07,T08 | P1/P2/P3 |
-| RI-T04 实现数字声明证据绑定（R2 对账） | blocked | T02 | T08 | P3 |
-| RI-T05 系统提示"汇报义务"独立分区 | blocked | T01 | T08 | P2 |
-| RI-T06 ExecutionEnv 留痕 + 边界核验（R4/R5） | blocked | T02 | T08 | P1/P4 |
-| RI-T07 编排层检查站闸门与自动追问 | blocked | T03 | T08 | P1/P2 |
-| RI-T08 回归测试与全量验证 | blocked | T03–T07 | T09 | 全部 |
-| RI-T09 文档更新（AGENTS.md 风险边界章节） | blocked | T08 | — | — |
-| RI-T10 harness 基线落盘与探针脚本化 | pending | — | — | P5 |
+| RI-T01 评审并批准 RI-SPEC | **completed** | — | T02–T08 | 全部 |
+| RI-T02 定义 CompletionClaim 协议类型 | **completed** | T01 | T03,T04,T05,T06 | P1/P3 |
+| RI-T03 实现 ReportValidator（R1–R3） | **completed** | T02 | T07,T08 | P1/P2/P3 |
+| RI-T04 实现数字声明证据绑定（R2 对账） | **completed** | T02 | T08 | P3 |
+| RI-T05 系统提示"汇报义务"独立分区 | **completed** | T01 | T08 | P2 |
+| RI-T06 ExecutionEnv 留痕 + 边界核验（R4/R5） | **completed** | T02 | T08 | P1/P4 |
+| RI-T07 编排层检查站闸门与自动追问 | **completed** | T03 | T08 | P1/P2 |
+| RI-T08 回归测试与全量验证 | **completed**（2 个既有网络超时除外，见 §8.2） | T03–T07 | T09 | 全部 |
+| RI-T09 文档更新（AGENTS.md 风险边界章节） | **completed** | T08 | — | — |
+| RI-T10 harness 基线落盘与探针脚本化 | **completed**（仓库内脚本；外部 skill 只读，见 §8.3） | — | — | P5 |
 
 状态口径：pending=依赖已满足可开始；blocked=存在未满足依赖；in_progress=进行中；completed=验收通过。
 追踪维护：每完成一项即在本文档与 tasks 文件同步勾选，始终保持 ≥1 项 in_progress。
@@ -164,3 +166,39 @@ cd "D:/Workespace/kc-cli" && "C:/Users/22338/.workbuddy/binaries/node/versions/2
 | 自动追问放大成本 | 上限 1（硬顶 2）；仅 blocker 触发 |
 
 回滚：所有改动集中于 orchestrator/hooks/execution-env 三处 + 两个新文件，单 commit 可 revert；`reportPolicy` 提供运行时总开关（默认宽松档）。
+
+---
+
+## 8. 实施记录（RI-T01–T10）
+
+> 本节记录实现与验证四要素（任务 ID、文件、变更、验证输出），并说明无法执行的环境约束。
+
+### 8.1 代码实现
+
+| 任务 | 主要文件 | 变更 |
+|---|---|---|
+| RI-T02 | `src/orchestrator/protocol.ts`、`src/state/events.ts` | 新增 `CommandRunClaim` / `CompletionClaim` / `RequiredSections` / `ReportFinding` / `ReportPolicy` / `SubAgentReportMeta`；`SubAgentSpawnConfig` 新增 `checkpoints?` / `reportPolicy?`；`SubAgentResult` 新增可选 `claim?` / `meta?`（原公共必选字段不变）。 |
+| RI-T03/R04 | `src/orchestrator/report-validator.ts`、`test/orchestrator/report-validator.test.ts` | 纯函数 `validateReport()` 实现 R1–R5；R2 以 `CommandRunClaim.evidenceLine` 对账，无证据/不匹配为 blocker 并标记 `unsubstantiated`，不可解析输出降级 warning；R3 义务引用缺失为 warning；R4 文件写入边界核验；R5 stdout/命令失败声明与留痕核对。 |
+| RI-T05 | `src/orchestrator/agent-definitions.ts`、`src/orchestrator/agent-orchestrator.ts` | 新增独立 `## Reporting obligations` 区与 `appendReportingObligations()`；所有 spawn（含 generic）统一幂等追加，不改任务规格区顺序。 |
+| RI-T06 | `src/services/execution-env.ts`、`execution-env-local.ts`、`execution-env-mock.ts`、`backends/in-process.ts`、`test/services/execution-env-trace.test.ts` | AsyncLocalStorage 内存留痕；命令/退出码/stdout 截断 4KB、写入文件清单；子代理作用域捕获并随 `SubAgentResult.meta.executionTrace` 传递，不落盘。 |
+| RI-T07 | `src/orchestrator/agent-orchestrator.ts`、`backends/in-process.ts`、`backends/backend-shared.ts`、`result-aggregator.ts`、`test/orchestrator/report-followup.test.ts` | 完成事件统一校验；blocker 且未达 `maxFollowUps`（默认 1，硬顶 2）自动 resume 追问一次；耗尽后 `meta.unresolved`、`success=false`，findings 注入 `AggregatedResult`；warning 只注入元数据不追问。 |
+| RI-T08 | `test/orchestrator/*`、`test/services/execution-env-trace.test.ts`、`test/hooks/reportIntegrity.test.ts` | 回归与新增用例、类型检查、覆盖率闸门、基线失败复现（详见 §8.2）。 |
+| RI-T09 | `AGENTS.md` | Orchestrator 架构条目、Risk Boundaries 增加零信任汇报层与行为约束；`CLAUDE.md` 仅确认引用 `@AGENTS.md`，保持单一事实源。 |
+| RI-T10 | `scripts/eval/agent-longtask-harness.mjs`、`scripts/eval/README.md` | 基线落盘、探针关键词校验、数字结论控制者复跑回写脚本化；仓库内记录“已知陷阱”。 |
+
+### 8.2 回归验证输出
+
+| 验证项 | 命令 | 结果 |
+|---|---|---|
+| 类型检查 | `npm run typecheck` | 通过，0 error（仅 Node UNDICI experimental warning）。 |
+| 新增单测 | `npx vitest run test/orchestrator/report-validator.test.ts test/orchestrator/report-followup.test.ts test/services/execution-env-trace.test.ts test/hooks/reportIntegrity.test.ts` | 35/35 通过。 |
+| 编排回归 | `npx vitest run test/orchestrator test/integration/full-workflow.test.ts test/integration/multi-agent.test.ts` | 312/312 通过。 |
+| 覆盖率（orchestrator 全量+集成） | `npx vitest run --coverage --coverage.include='src/orchestrator/**/*.ts' ... test/orchestrator test/integration/full-workflow.test.ts test/integration/multi-agent.test.ts` | lines 93.90% / statements 92.22% / functions 92.72% / branches 81.58%，全部高于仓库门槛（60/60/60/50）且不低于 ratchet baseline（orchestrator lines 93.03%）。 |
+| 全量测试 | `npm test` | 5102 passed / 7 skipped；2 个既有失败：`test/QueryEngine.test.ts > QueryEngine Error Handling` 两例因本环境无法访问 `api.openai.com` 进入 streaming retry 而至 15s 超时。已在基线 commit `a4a98eb` 的独立 worktree 复现同样失败，确认与本次改动无关。 |
+
+端到端 LT-1 harness 重放：本仓库不含 `agent-longtask-eval-harness` 技能/脚本；已提供 `scripts/eval/agent-longtask-harness.mjs` 作为可脚本化的基线、探针与数字回写替代，真实 LLM harness 的端到端重放需在有该技能的环境执行。
+
+### 8.3 环境约束
+
+- 原始 Spec §3.4 要求更新 `~/.workbuddy/skills/agent-longtask-eval-harness/SKILL.md`。当前受控环境不存在该目录，且 `$HOME` 为只读，无法写入；处理方案：把同等的“已知陷阱”维护到受版本控制的 `scripts/eval/README.md`，并由 `agent-longtask-harness.mjs` 执行基线/探针/数字回写。外部 skill 文件在可写环境中应合并同一段内容。
+- 验收命令中的 Windows Node/npm 绝对路径不适用于本 Linux 环境；以等价命令 `npx vitest run ...` 与 `npm run typecheck` 执行并记录。
