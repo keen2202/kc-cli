@@ -13,6 +13,9 @@ build/
 .env.*
 !.env.example
 
+# Local credential helper (never commit)
+token.sh
+
 # IDE
 .vscode/
 .idea/
