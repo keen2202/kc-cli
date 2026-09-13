@@ -7,12 +7,12 @@
 
 | ID | 主题 | 结论 | 关键证据 |
 |---|---|---|---|
-| S5 | commandNormalizer 危险命令绕过 | ⚠️部分 | `commandNormalizer.ts:14-32`、`readonlyCommands.ts:191-220` |
-| Q3 | 静默吞错点 | ⚠️部分 | `acp/handlers.ts:103-106` 已修；残余见下 |
+| S5 | commandNormalizer 危险命令绕过 | ✅已修复（2026-09-13） | `expandShellWordSplits` 覆盖引号拆词 + ANSI-C；测试 `dangerous-command-bypass.test.ts` |
+| Q3 | 静默吞错点 | ✅已修复（2026-09-13） | B3/B4/B5 全部补日志；FileEdit best-effort 保留注释 |
 | Q4 | FileEditTool 错误处理 | ✅已修复 | `FileEditTool/index.ts:146-163` |
 | Q5 | Zod `as any` | ✅已修复 | `zodToJsonSchema.ts:1-29` |
 | P3 | 全局并发信号量 | ✅已修复 | `toolExecutor.ts:111-124,509-514` |
-| P5 | 全量对话常驻 / token 估算 | ⚠️部分 | `QueryEngineState.ts:15,75,98-107,217-220` |
+| P5 | 全量对话常驻 / token 估算 | ⚠️部分（checkout 缓存已修；消息外置仍长期） | `QueryEngineState.ts` pathTokenCache；B7 仍 open |
 | P6 | 压缩额外 LLM 调用主路径 | ✅已修复 | `QueryEngine.ts:724-750`、`QueryEngineCompaction.ts:247-277` |
 | P7 | 每请求重序列化 | ✅已修复 | `BaseApiClient.ts:43-51,154-258,266-293` |
 
@@ -183,15 +183,17 @@ QueryEngine 侧另有按 conversation version 的 `apiMessagesCache`（`src/quer
 
 ## 结构化 Backlog（未修复 / 部分修复残留）
 
-| 编号 | 位置 | 问题 | 建议 | 优先级 |
-|---|---|---|---|---|
-| T6-B1 | `src/permissions/readonlyCommands.ts:18-31` + `:208` | 引号拆词 `r''m` / `r""m` 剥离后不再匹配 `\brm\b` | 剥引号后做相邻段拼接再匹配；或分词 token 匹配高危原语 | P2 |
-| T6-B2 | `src/permissions/commandNormalizer.ts` | 无 `$'...'` ANSI-C 与 `${var}` 展开处理 | 在 normalize 增加 ANSI-C 引号解码步骤 | P3 |
-| T6-B3 | `src/orchestrator/agent-orchestrator.ts:535-536` | resume 兜底 `catch { return false }` 无日志 | 补 `logger.orchestrator.warn` | P3 |
-| T6-B4 | `src/im/im-bridge.ts:66-68` | disconnect 空 catch 无日志 | 补 `logger.services.debug/warn` | P4 |
-| T6-B5 | `src/orchestrator/agent-orchestrator.ts:244` | `void promise.catch(() => {})` 完全静默 | 改为 debug 级日志保留诊断 | P4 |
-| T6-B6 | `src/query/QueryEngineState.ts:232,243` | branch/checkout 触发 token 全量重算 | 子分支复用父 running total 差量更新 | P3 |
-| T6-B7 | `src/query/QueryEngineState.ts:15` | 消息仍全量常驻（上限已降 200） | 大 tool result 外置落盘 + 摘要占位（长期） | P4 |
+> **2026-09-13 修复回写**：T6-B1/B2/B3/B4/B5/B6 已落地；T6-B7 仍为长期项。
+
+| 编号 | 位置 | 问题 | 建议 | 优先级 | 状态 |
+|---|---|---|---|---|---|
+| T6-B1 | `src/permissions/readonlyCommands.ts` + `commandNormalizer.ts` | 引号拆词 `r''m` / `r""m` 剥离后不再匹配 `\brm\b` | `joinEmptyQuoteSplits` + `expandShellWordSplits` 前置 | P2 | ✅已修复（测试 `dangerous-command-bypass.test.ts`） |
+| T6-B2 | `src/permissions/commandNormalizer.ts` | 无 `$'...'` ANSI-C 与 `${var}` 展开处理 | `decodeAnsiCQuotes` 解码 `\xNN`/`\NNN`/简单转义 | P3 | ✅已修复（`${var}` 间接展开仍不做 — 关键字字面量路径已覆盖） |
+| T6-B3 | `src/orchestrator/agent-orchestrator.ts` | resume 兜底 `catch { return false }` 无日志 | 补 `logger.orchestrator.warn` | P3 | ✅已修复 |
+| T6-B4 | `src/im/im-bridge.ts` | disconnect 空 catch 无日志 | 补 `logger.services.warn` | P4 | ✅已修复 |
+| T6-B5 | `src/orchestrator/agent-orchestrator.ts` | `void promise.catch(() => {})` 完全静默 | 改为 debug 级日志保留诊断 | P4 | ✅已修复 |
+| T6-B6 | `src/query/QueryEngineState.ts` | branch/checkout 触发 token 全量重算 | pathTokenCache 按 nodeId 缓存；checkout O(1) 复用 | P3 | ✅已修复（测试 `branch-token-cache.test.ts`） |
+| T6-B7 | `src/query/QueryEngineState.ts:15` | 消息仍全量常驻（上限已降 200） | 大 tool result 外置落盘 + 摘要占位（长期） | P4 | ⏳ backlog（长期，不阻塞） |
 
 ---
 

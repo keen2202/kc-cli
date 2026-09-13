@@ -63,8 +63,9 @@ export class IMBridge {
     const tasks = Array.from(this.adapters.values()).map(async (adapter) => {
       try {
         await adapter.disconnect();
-      } catch {
-        // Ignore disconnect errors
+      } catch (err) {
+        // T6-B4: disconnect is best-effort but must leave a trace.
+        logger.services.warn(`[IMBridge] disconnect error for ${adapter.name}: ${err instanceof Error ? err.message : String(err)}`);
       }
     });
     await Promise.allSettled(tasks);

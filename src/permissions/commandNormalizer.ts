@@ -84,6 +84,58 @@ function removeEscapes(str: string): string {
 }
 
 /**
+ * T6-B1: empty adjacent quotes act as word-glue in POSIX shell.
+ * `r''m` / `r""m` / `rm''` are all `rm` at exec time; stripping quotes with a
+ * space (shellAwareNormalize) would turn them into `r m` and miss `\brm\b`.
+ * Remove empty quote pairs without inserting a separator.
+ */
+export function joinEmptyQuoteSplits(command: string): string {
+  if (!command) return '';
+  return command.replace(/(['"])\1/g, '');
+}
+
+/**
+ * T6-B2: decode ANSI-C `$'...'` quotes so `\n`/`\x41`/etc. become visible
+ * for pattern matching. Only simple C escapes are expanded; unknown escapes
+ * keep the escaped character (still enough to surface `rm` from `$'r\x6d'`
+ * only when hex is decoded — we handle the common `\xNN` and `\NNN` forms).
+ */
+export function decodeAnsiCQuotes(command: string): string {
+  if (!command) return '';
+  return command.replace(/\$'((?:\\.|[^'\\])*)'/g, (_m, body: string) => {
+    return body.replace(
+      /\\(x[0-9a-fA-F]{1,2}|[0-7]{1,3}|.)/g,
+      (_e, esc: string) => {
+        if (esc.startsWith('x')) {
+          const code = parseInt(esc.slice(1), 16);
+          return Number.isFinite(code) && code >= 0 && code <= 0x10ffff
+            ? String.fromCodePoint(code)
+            : '';
+        }
+        if (/^[0-7]+$/.test(esc)) {
+          const code = parseInt(esc, 8);
+          return Number.isFinite(code) && code <= 0xff ? String.fromCharCode(code) : '';
+        }
+        const simple: Record<string, string> = {
+          n: '\n', t: '\t', r: '\r', b: '\b', f: '\f', v: '\v',
+          a: '\x07', '\\': '\\', "'": "'", '"': '"',
+        };
+        return simple[esc] ?? esc;
+      }
+    );
+  });
+}
+
+/**
+ * Pre-pass used by dangerous-command detection: undo shell word-gluing and
+ * ANSI-C quoting so later `shellAwareNormalize` + `normalizeCommand` see the
+ * real command word.
+ */
+export function expandShellWordSplits(command: string): string {
+  return decodeAnsiCQuotes(joinEmptyQuoteSplits(command));
+}
+
+/**
  * Split a compound command into sub-commands at pipe/chain boundaries.
  * Returns all sub-commands that need individual permission checks.
  *

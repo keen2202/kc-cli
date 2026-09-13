@@ -33,6 +33,11 @@ export class ConversationState {
   private recomputed: boolean = true;
   private maxMessages: number;
   private turnTags = new Map<string, TurnTag>();
+  /**
+   * T6-B6: path token total cached per node id. A node's own messages only
+   * change while it is active, so the cache is valid until we return and mutate.
+   */
+  private pathTokenCache = new Map<string, number>();
 
   /**
    * Monotonic version of the active transcript. Bumped on every mutation so
@@ -53,13 +58,18 @@ export class ConversationState {
     this.recomputed = true;
   }
 
-  /** Get the messages array of the active tree node */
+  /** Get the messages array of the active tree node (leaf slice only). */
   private getActiveNodeMessages(): ChatMessage[] {
     const node = this.tree.getNode(this.tree.getActiveNodeId());
     return node ? node.messages : [];
   }
 
-  /** Synchronize the messages reference with the active node */
+  /** Full reconstructed conversation for the active branch (root → leaf). */
+  private getFullActiveMessages(): ChatMessage[] {
+    return this.tree.getActiveMessages();
+  }
+
+  /** Synchronize the messages reference with the active node's leaf slice. */
   private syncMessagesRef(): void {
     this.messages = this.getActiveNodeMessages();
   }
@@ -75,6 +85,7 @@ export class ConversationState {
     this.runningTokenTotal += estimateMessageTokens(msg);
     this.recomputed = false;
     this.versionCounter++;
+    this.pathTokenCache.set(this.tree.getActiveNodeId(), this.runningTokenTotal);
   }
 
   /** Get all messages for the active branch (reconstructs root→active path) */
@@ -104,6 +115,7 @@ export class ConversationState {
     this.runningTokenTotal = knownTotal ?? estimateMessageTokensArray(this.messages);
     this.recomputed = true;
     this.versionCounter++;
+    this.pathTokenCache.set(this.tree.getActiveNodeId(), this.runningTokenTotal);
   }
 
   /** Get the last message in the active branch */
@@ -118,6 +130,7 @@ export class ConversationState {
     this.runningTokenTotal = 0;
     this.recomputed = true;
     this.versionCounter++;
+    this.pathTokenCache.clear();
   }
 
   /** Get the number of messages in the active branch */
@@ -220,6 +233,7 @@ export class ConversationState {
     this.runningTokenTotal -= estimateMessageTokensArray(removed);
     this.recomputed = false;
     this.versionCounter++;
+    this.pathTokenCache.set(this.tree.getActiveNodeId(), this.runningTokenTotal);
     return excess;
   }
 
@@ -227,19 +241,32 @@ export class ConversationState {
 
   /** Create a new branch from the active node. Returns the new branch node ID. */
   branch(): string {
+    // T6-B6: a new branch starts empty at the leaf but inherits the parent
+    // chain — the running token total is already correct. Recomputing from
+    // the leaf-only slice would zero it (leaf.messages === []).
+    const prevTotal = this.runningTokenTotal;
     const nodeId = this.tree.branch();
     this.syncMessagesRef();
-    this.runningTokenTotal = estimateMessageTokensArray(this.messages);
-    this.recomputed = true;
+    this.runningTokenTotal = prevTotal;
+    this.recomputed = false;
     this.versionCounter++;
     return nodeId;
   }
 
   /** Switch to a different branch by node ID. */
   checkout(nodeId: string): void {
+    // Cache the path total for the node we are leaving (messages are frozen
+    // while it is inactive).
+    this.pathTokenCache.set(this.tree.getActiveNodeId(), this.runningTokenTotal);
     this.tree.checkout(nodeId);
-    this.syncMessagesRef();
-    this.runningTokenTotal = estimateMessageTokensArray(this.messages);
+    this.messages = this.getFullActiveMessages();
+    const cached = this.pathTokenCache.get(nodeId);
+    if (cached !== undefined) {
+      this.runningTokenTotal = cached;
+    } else {
+      this.runningTokenTotal = estimateMessageTokensArray(this.messages);
+      this.pathTokenCache.set(nodeId, this.runningTokenTotal);
+    }
     this.recomputed = true;
     this.versionCounter++;
   }

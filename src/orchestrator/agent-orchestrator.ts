@@ -241,7 +241,13 @@ export class AgentOrchestrator {
     // There may be no waitForCompletion caller (e.g. waitForAll only or a
     // background agent). A rejection handler keeps Node from treating that as
     // an unhandled rejection while still allowing later waiters to observe it.
-    void promise.catch(() => {});
+    // T6-B5: log at debug so the swallow is diagnosable without changing semantics.
+    void promise.catch((err: unknown) => {
+      logger.orchestrator.debug('[AgentOrchestrator] completion promise rejected (no waiter yet)', {
+        agentId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
     const tracked: TrackedCompletion = {
       config,
@@ -532,7 +538,12 @@ export class AgentOrchestrator {
         payload: { message, reportFollowUp: true },
       });
       return true;
-    } catch {
+    } catch (err) {
+      // T6-B3: resume fallback used to swallow silently.
+      logger.orchestrator.warn('[AgentOrchestrator] resume fallback sendMessage failed', {
+        agentId,
+        error: err instanceof Error ? err.message : String(err),
+      });
       return false;
     }
   }

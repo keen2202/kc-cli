@@ -201,6 +201,8 @@ Phase 3 (P2 — 清理与依赖收尾):
 >
 > **2026-07-28 T6 复核完成**：八项残项全部核实并归档（`docs/specs/architecture-hardening-t6-residual-re-audit.md`）。结论：Q4/Q5/P3/P6/P7 ✅已修复；S5/Q3/P5 ⚠️部分（残留 7 条结构化 backlog：T6-B1–B7）。
 >
+> **2026-09-13 T6-B1–B6 修复**：引号拆词/ANSI-C 绕过、静默吞错日志、checkout token 缓存全部落地；仅 T6-B7（大 tool result 外置）仍为长期 backlog。测试：`test/permissions/dangerous-command-bypass.test.ts`、`test/query/branch-token-cache.test.ts`。
+>
 > **2026-07-28 长任务稳定性补丁**（四类中断风险修复，独立于 T1–T6）：
 > 1. **turn 硬顶**：`autoExtendTurns` 默认改 `true`、`maxTurnsCeiling` 默认 100→400 且 `<= 0` 表示不封顶（`config.ts` schema + `QueryEngine.ts` ceiling 解析）；活跃进展（近 5 turns 有文件修改或工具调用）持续延长预算，停滞仍会停止。
 > 2. **崩溃丢失窗口**：REPL 在每个 `agent:turn_complete` 上节流落盘（`ReplSessionService.saveThrottled`，默认 15s 间隔），并新增 `uncaughtException`/`unhandledRejection` 兜底保存（`main.ts`）。

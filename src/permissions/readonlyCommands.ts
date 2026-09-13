@@ -1,4 +1,4 @@
-import { normalizeCommand, splitSubCommands } from './commandNormalizer';
+import { normalizeCommand, splitSubCommands, expandShellWordSplits } from './commandNormalizer';
 
 // Centralized read-only and low-risk command patterns
 // Single source of truth used by BashTool, GitTool, and PermissionClassifier
@@ -190,9 +190,13 @@ function hasRecursiveForceFlags(c: string): boolean {
  */
 export function isDangerousBashCommand(command: string): boolean {
   if (!command) return false;
-  // Strip shell string literals and comments FIRST to prevent false positives
-  // where dangerous keywords appear only inside quoted strings (e.g. echo "rm -rf /").
-  const stripped = shellAwareNormalize(command);
+  // T6-B1/B2: undo empty-quote word-glue (`r''m` → `rm`) and ANSI-C `$'...'`
+  // BEFORE stripping non-empty quotes (which must stay stripped to avoid
+  // false positives on `echo "rm -rf /"`).
+  const expanded = expandShellWordSplits(command);
+  // Strip shell string literals and comments to prevent false positives
+  // where dangerous keywords appear only inside quoted strings.
+  const stripped = shellAwareNormalize(expanded);
   const normalized = normalizeCommand(stripped);
   const subs = splitSubCommands(normalized);
   // Check both the full command (cross-sub-command vectors) and each sub-command.
