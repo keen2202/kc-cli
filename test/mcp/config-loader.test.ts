@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
+import * as path from 'path';
 
 // Mock only the I/O boundary (fs and os)
 vi.mock('fs', async () => {
@@ -18,9 +19,10 @@ vi.mock('fs', async () => {
 
 vi.mock('os', async () => {
   const actual = await vi.importActual<typeof import('os')>('os');
+  const pathMod = await vi.importActual<typeof import('path')>('path');
   return {
     ...actual,
-    homedir: vi.fn(() => '/home/testuser'),
+    homedir: vi.fn(() => pathMod.join('/home', 'testuser')),
   };
 });
 
@@ -42,8 +44,9 @@ describe('loadMCPConfig', () => {
   });
 
   it('should load project-level .mcp.json', async () => {
+    const projectConfigPath = path.join('/project', '.mcp.json');
     vi.mocked(fs.existsSync).mockImplementation((p: fs.PathLike) => {
-      return String(p) === '/project/.mcp.json';
+      return String(p) === projectConfigPath;
     });
 
     vi.mocked(fs.promises.readFile).mockResolvedValue(JSON.stringify({
@@ -61,12 +64,13 @@ describe('loadMCPConfig', () => {
     expect(result.servers).toHaveProperty('my-server');
     expect(result.servers['my-server'].type).toBe('stdio');
     expect(result.servers['my-server'].command).toBe('mcp-server');
-    expect(result.sources).toContain('/project/.mcp.json');
+    expect(result.sources).toContain(projectConfigPath);
   });
 
   it('should load user-global ~/.kc-cli/mcp.json', async () => {
+    const userConfigPath = path.join('/home', 'testuser', '.kc-cli', 'mcp.json');
     vi.mocked(fs.existsSync).mockImplementation((p: fs.PathLike) => {
-      return String(p) === '/home/testuser/.kc-cli/mcp.json';
+      return String(p) === userConfigPath;
     });
 
     vi.mocked(fs.promises.readFile).mockResolvedValue(JSON.stringify({
@@ -81,7 +85,7 @@ describe('loadMCPConfig', () => {
     const result = await loadMCPConfig('/project');
 
     expect(result.servers).toHaveProperty('global-server');
-    expect(result.sources).toContain('/home/testuser/.kc-cli/mcp.json');
+    expect(result.sources).toContain(userConfigPath);
   });
 
   it('should merge user and project configs with project overriding', async () => {
@@ -113,8 +117,9 @@ describe('loadMCPConfig', () => {
   });
 
   it('should filter out disabled servers', async () => {
+    const projectConfigPath = path.join('/project', '.mcp.json');
     vi.mocked(fs.existsSync).mockImplementation((p: fs.PathLike) => {
-      return String(p) === '/project/.mcp.json';
+      return String(p) === projectConfigPath;
     });
 
     vi.mocked(fs.promises.readFile).mockResolvedValue(JSON.stringify({

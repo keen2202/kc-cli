@@ -30,7 +30,7 @@ describe('T21: bootstrap failure paths route through logger', () => {
     expect(flat).toContain("logger.plugins.error('Suppressed error during plugin init'");
     expect(flat).toContain("logger.services.warn( 'No Git repository detected");
     expect(flat).toContain('logger.services.error(`IM bridge failed to start');
-    expect(flat).toContain('logger.services.warn( `AGP: initialization skipped');
+    // AGP init logging was removed in experiment-runtime T13.
   });
 
   it('keeps the deliberate user-facing startup banners (not failures)', () => {

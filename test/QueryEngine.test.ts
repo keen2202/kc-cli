@@ -982,6 +982,17 @@ describe('QueryEngine Core Flow', () => {
 // ── QueryEngine.submitMessage with error recovery ──
 
 describe('QueryEngine Error Handling', () => {
+  // Fail-fast network so these don't sit through 10×10s retries on hosts
+  // without outbound access (or with a dummy key).
+  beforeEach(() => {
+    vi.stubGlobal('fetch', async () => {
+      throw new Error('dummy network failure');
+    });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('should transition to error state on fatal error', async () => {
     const { QueryEngine } = await import('../src/query/QueryEngine.js');
     await registerBuiltInTools();
@@ -1006,7 +1017,7 @@ describe('QueryEngine Error Handling', () => {
     }
     // After abort, the state machine should be in a terminal state
     expect(engine.getStateMachine().isTerminal()).toBe(true);
-  });
+  }, 35000);
 
   it('should collect messages after submitMessage', async () => {
     const { QueryEngine } = await import('../src/query/QueryEngine.js');
@@ -1036,5 +1047,6 @@ describe('QueryEngine Error Handling', () => {
     // The user message was added before the API error
     const userMessages = messages.filter(m => m.role === 'user');
     expect(userMessages.length).toBeGreaterThanOrEqual(1);
-  });
+    // Generous timeout: the API client retries with backoff before giving up.
+  }, 35000);
 });

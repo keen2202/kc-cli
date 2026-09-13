@@ -15,6 +15,16 @@ vi.mock('child_process', () => ({
 }));
 
 import { LSPClientManager, detectLanguage } from '../../src/lsp/client';
+import { pathToFileURL, fileURLToPath } from 'url';
+
+/** Platform-correct file URI for a POSIX-style test path. */
+function testFileUri(p = '/test/file.ts'): string {
+  return pathToFileURL(p).href;
+}
+/** Path key used by diagnosticCache after fileURLToPath(testFileUri()). */
+function testFilePath(): string {
+  return fileURLToPath(testFileUri());
+}
 
 /**
  * Create a mock ChildProcess with controllable stdin/stdout.
@@ -314,12 +324,12 @@ describe('LSPClientManager', () => {
       stdout.write(buildLspMessage({
         jsonrpc: '2.0',
         method: 'textDocument/publishDiagnostics',
-        params: { uri: 'file:///test/file.ts', diagnostics },
+        params: { uri: testFileUri(), diagnostics },
       }));
 
       await new Promise((r) => setTimeout(r, 50));
 
-      const result = await manager.getDiagnostics('/test/file.ts', 'const x = 1;');
+      const result = await manager.getDiagnostics(testFilePath(), 'const x = 1;');
       expect(result).toEqual(diagnostics);
     });
   });
@@ -420,12 +430,12 @@ describe('LSPClientManager', () => {
       stdout.write(buildLspMessage({
         jsonrpc: '2.0',
         method: 'textDocument/publishDiagnostics',
-        params: { uri: 'file:///test/file.ts', diagnostics },
+        params: { uri: testFileUri(), diagnostics },
       }));
 
       await new Promise((r) => setTimeout(r, 50));
 
-      const result = await manager.getDiagnostics('/test/file.ts', 'content');
+      const result = await manager.getDiagnostics(testFilePath(), 'content');
       expect(result).toEqual(diagnostics);
     });
   });

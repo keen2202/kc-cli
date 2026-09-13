@@ -1,10 +1,14 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Avoid __dirname (unsupported under Vite's upcoming native config loader).
+const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, 'src'),
+      '@': path.resolve(rootDir, 'src'),
     },
   },
   test: {

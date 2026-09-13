@@ -1,6 +1,7 @@
 // Tests for DocumentManager
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { pathToFileURL } from 'url';
 import { DocumentManager } from '../../src/lsp/document-manager';
 
 // Mock LSPClientManager
@@ -37,7 +38,7 @@ describe('DocumentManager', () => {
     it('should open a document and track it', async () => {
       const doc = await manager.open('/test/file.ts', 'const x = 1;');
 
-      expect(doc.uri).toBe('file:///test/file.ts');
+      expect(doc.uri).toBe(pathToFileURL('/test/file.ts').href);
       expect(doc.filePath).toBe('/test/file.ts');
       expect(doc.languageId).toBe('typescript');
       expect(doc.version).toBe(1);

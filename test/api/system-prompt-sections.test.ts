@@ -1,9 +1,10 @@
 // T28 (M3): system-prompt sections are shared, not duplicated — round4 §6-M3
+// AGP adapter surface was removed in experiment-runtime T13; this file now
+// guards the bootstrap path only.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { GUIDELINES_SECTION, CAPABILITIES_SECTION } from '../../src/api/prompts/system-prompt-sections';
 import { buildSystemPrompt } from '../../src/bootstrap/Bootstrap';
-import { createDefaultSystemPrompt } from '../../src/agp/adapters/prompt-adapter';
 import { initializeState } from '../../src/bootstrap/state';
 import type { ToolDefinition } from '../../src/tools/protocol';
 
@@ -30,20 +31,10 @@ describe('T28: shared system-prompt sections', () => {
     expect(CAPABILITIES_SECTION).toContain('- Compile, test, and run programs');
   });
 
-  it('bootstrap and AGP adapter render the identical shared sections (snapshot)', () => {
+  it('bootstrap renders the shared sections', () => {
     const bootstrapPrompt = buildSystemPrompt([] as ToolDefinition[]);
-
-    // The AGP registration record embeds the template under entity.metadata.
-    const record = createDefaultSystemPrompt(['Bash']) as unknown as {
-      entity?: { metadata?: { template?: string } };
-    };
-    const agpText = record.entity?.metadata?.template ?? '';
-
-    // The shared sections appear byte-identically in both surfaces.
     expect(bootstrapPrompt).toContain(GUIDELINES_SECTION);
     expect(bootstrapPrompt).toContain(CAPABILITIES_SECTION);
-    expect(agpText).toContain(GUIDELINES_SECTION);
-    expect(agpText).toContain(CAPABILITIES_SECTION);
   });
 
   it('bootstrap keeps its security block between the shared sections', () => {

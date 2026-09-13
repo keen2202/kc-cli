@@ -6,6 +6,7 @@
 // Default mock behavior delegates to real fs.existsSync so non-mocked tests work normally.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as path from 'path';
 import { getState, initializeState, updateState, resetState } from '../../src/bootstrap/state';
 
 // ── fs.existsSync Mocking ─────────────────────────────────────────────────
@@ -177,86 +178,95 @@ describe('Global State Management', () => {
     });
 
     it('should return null when no project markers are found', () => {
-      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/tmp');
+      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(path.join('/tmp'));
       const state = initializeState();
       expect(state.projectRoot).toBeNull();
     });
 
     it('should detect project root by package.json marker in cwd', () => {
+      const projectDir = path.join('/tmp', 'my-project');
       mockExistsSync.mockImplementation(
-        (fp: string) => fp === '/tmp/my-project/package.json',
+        (fp: string) => fp === path.join(projectDir, 'package.json'),
       );
-      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/tmp/my-project');
+      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
       const state = initializeState();
-      expect(state.projectRoot).toBe('/tmp/my-project');
+      expect(state.projectRoot).toBe(projectDir);
     });
 
     it('should detect project root by .git marker in cwd', () => {
+      const projectDir = path.join('/tmp', 'repo');
       mockExistsSync.mockImplementation(
-        (fp: string) => fp === '/tmp/repo/.git',
+        (fp: string) => fp === path.join(projectDir, '.git'),
       );
-      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/tmp/repo');
+      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
       const state = initializeState();
-      expect(state.projectRoot).toBe('/tmp/repo');
+      expect(state.projectRoot).toBe(projectDir);
     });
 
     it('should detect project root by .kc-cli marker in cwd', () => {
+      const projectDir = path.join('/tmp', 'custom');
       mockExistsSync.mockImplementation(
-        (fp: string) => fp === '/tmp/custom/.kc-cli',
+        (fp: string) => fp === path.join(projectDir, '.kc-cli'),
       );
-      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/tmp/custom');
+      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
       const state = initializeState();
-      expect(state.projectRoot).toBe('/tmp/custom');
+      expect(state.projectRoot).toBe(projectDir);
     });
 
     it('should detect project root by Cargo.toml marker in cwd', () => {
+      const projectDir = path.join('/tmp', 'rust-project');
       mockExistsSync.mockImplementation(
-        (fp: string) => fp === '/tmp/rust-project/Cargo.toml',
+        (fp: string) => fp === path.join(projectDir, 'Cargo.toml'),
       );
-      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/tmp/rust-project');
+      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
       const state = initializeState();
-      expect(state.projectRoot).toBe('/tmp/rust-project');
+      expect(state.projectRoot).toBe(projectDir);
     });
 
     it('should detect project root by go.mod marker in cwd', () => {
+      const projectDir = path.join('/tmp', 'go-app');
       mockExistsSync.mockImplementation(
-        (fp: string) => fp === '/tmp/go-app/go.mod',
+        (fp: string) => fp === path.join(projectDir, 'go.mod'),
       );
-      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/tmp/go-app');
+      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
       const state = initializeState();
-      expect(state.projectRoot).toBe('/tmp/go-app');
+      expect(state.projectRoot).toBe(projectDir);
     });
 
     it('should detect project root by CMakeLists.txt marker in cwd', () => {
+      const projectDir = path.join('/tmp', 'cmake-project');
       mockExistsSync.mockImplementation(
-        (fp: string) => fp === '/tmp/cmake-project/CMakeLists.txt',
+        (fp: string) => fp === path.join(projectDir, 'CMakeLists.txt'),
       );
-      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/tmp/cmake-project');
+      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
       const state = initializeState();
-      expect(state.projectRoot).toBe('/tmp/cmake-project');
+      expect(state.projectRoot).toBe(projectDir);
     });
 
     it('should detect project root by pyproject.toml marker in cwd', () => {
+      const projectDir = path.join('/tmp', 'python-lib');
       mockExistsSync.mockImplementation(
-        (fp: string) => fp === '/tmp/python-lib/pyproject.toml',
+        (fp: string) => fp === path.join(projectDir, 'pyproject.toml'),
       );
-      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/tmp/python-lib');
+      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(projectDir);
       const state = initializeState();
-      expect(state.projectRoot).toBe('/tmp/python-lib');
+      expect(state.projectRoot).toBe(projectDir);
     });
 
     it('should detect project root in a parent directory', () => {
-      // Only .git exists in /tmp/parent, not in /tmp/parent/child
-      const markerPaths = new Set(['/tmp/parent/.git']);
+      const parentDir = path.join('/tmp', 'parent');
+      const childDir = path.join(parentDir, 'child');
+      // Only .git exists in parent, not in child
+      const markerPaths = new Set([path.join(parentDir, '.git')]);
       mockExistsSync.mockImplementation((fp: string) => markerPaths.has(fp));
-      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/tmp/parent/child');
+      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(childDir);
       const state = initializeState();
-      expect(state.projectRoot).toBe('/tmp/parent');
+      expect(state.projectRoot).toBe(parentDir);
     });
 
     it('should stop at filesystem root without finding markers', () => {
-      // No markers anywhere — loop reaches "/" and returns null
-      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue('/tmp/a/b');
+      // No markers anywhere — loop reaches filesystem root and returns null
+      cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(path.join('/tmp', 'a', 'b'));
       const state = initializeState();
       expect(state.projectRoot).toBeNull();
     });

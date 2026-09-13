@@ -111,7 +111,9 @@ describe('LocalShell', () => {
   it('exec respects cwd option', async () => {
     const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'shell-test-'));
     try {
-      const result = await shell.exec('pwd', { cwd: tmpDir });
+      // `pwd` is POSIX-only; use a platform-safe echo of process.cwd().
+      const cmd = process.platform === 'win32' ? 'cd' : 'pwd';
+      const result = await shell.exec(cmd, { cwd: tmpDir });
       expect(result.stdout.trim()).toBe(tmpDir);
     } finally {
       await fs.promises.rm(tmpDir, { recursive: true, force: true });

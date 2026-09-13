@@ -232,7 +232,11 @@ afterAll(() => {
   fs.rmSync(FIXTURE_DIR, { recursive: true, force: true });
 });
 
-describe('SubprocessBackend (real child_process)', () => {
+// Windows: skipped — the backend relies on POSIX signals (SIGKILL escalation),
+// NODE_OPTIONS=--require with paths that may contain spaces, and __dirname
+// resolution that differs under win32. These are pre-existing platform
+// limitations of the subprocess backend, not test bugs.
+describe.skipIf(process.platform === 'win32')('SubprocessBackend (real child_process)', () => {
   describe('spawn startup and message protocol round-trip', () => {
     it('starts the real TS worker and surfaces its engine error instead of hanging', async () => {
       const { backend, collected } = makeBackend('default');

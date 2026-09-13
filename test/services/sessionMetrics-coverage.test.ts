@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as os from 'os';
+import * as path from 'path';
 import { SessionMetricsCollector } from '../../src/services/sessionMetrics';
 
 // Mock fs for persistence tests
@@ -446,10 +447,10 @@ describe('SessionMetricsCollector - Coverage Tests', () => {
 
       await collector.persist();
 
-      const homeDir = os.homedir();
-      expect(fs.mkdir).toHaveBeenCalledWith(`${homeDir}/.kc-cli/metrics`, { recursive: true });
+      const metricsDir = path.join(os.homedir(), '.kc-cli', 'metrics');
+      expect(fs.mkdir).toHaveBeenCalledWith(metricsDir, { recursive: true });
       expect(fs.writeFile).toHaveBeenCalledWith(
-        `${homeDir}/.kc-cli/metrics/coverage-test-session.json`,
+        path.join(metricsDir, 'coverage-test-session.json'),
         expect.any(String),
         'utf-8'
       );

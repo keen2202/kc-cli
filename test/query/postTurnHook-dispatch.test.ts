@@ -1,11 +1,8 @@
-// QueryEngine → post-turn hook dispatch tests (harness-evolution T8 wiring).
+// QueryEngine → post-turn hook dispatch tests.
 //
-// The query completion point in the 'deciding' phase must fire the global
-// post-turn hook registry (fire-and-forget) so plugin postTurn hooks and the
-// T8 failure-signature → memory bridging hook actually run in production.
-// These tests pin: dispatch happens exactly once per completed query with
-// querySource 'query-engine', the registered failure-bridging hook fires off
-// this path, and hook errors never affect query completion.
+// The query completion point must fire the global post-turn hook registry
+// (fire-and-forget) so plugin postTurn hooks actually run in production.
+// AGP failure-bridging hook was removed in experiment-runtime T13.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -47,12 +44,9 @@ import type { LLMStreamEvent } from '../../src/api/BaseApiClient';
 import { QueryEngine } from '../../src/query/QueryEngine';
 import {
   registerPostTurnHook,
-  registerFailureBridgingHook,
   clearHooks,
   type PostTurnHookContext,
 } from '../../src/hooks/postTurnHooks';
-import { MemoryIntegration } from '../../src/memory/integration';
-import type { EvidenceBundle } from '../../src/agp/sepl/protocol';
 
 function setStream(events: LLMStreamEvent[]) {
   mockStreamChatRef.factory = async function* () { for (const event of events) { yield event; } };
@@ -85,23 +79,6 @@ function drainHooks() {
   return new Promise((r) => setTimeout(r, 50));
 }
 
-function makeBundle(count: number): EvidenceBundle {
-  return {
-    clusters: [
-      {
-        signature: { terminalCause: 'tool_timeout', causalStatus: 'direct', mechanism: 'retry_loop' },
-        count,
-        representativeEvents: [
-          { id: 'e1', source: 'Shell', message: 'command timed out', timestamp: 1 },
-        ],
-        sharedSymptoms: ['timed out after 30s'],
-      },
-    ],
-    totalFailures: count,
-    generatedAt: Date.now(),
-  };
-}
-
 beforeEach(() => {
   initializeState({ cwd: '/tmp', permissionMode: 'bypassPermissions' as any });
   vi.clearAllMocks();
@@ -128,24 +105,6 @@ describe('QueryEngine — post-turn hook dispatch', () => {
     expect(context.querySource).toBe('query-engine');
     expect(context.systemPrompt).toBe('You are helpful.');
     expect(context.messages.length).toBeGreaterThan(0);
-  });
-
-  it('runs the T8 failure-bridging hook off the completion path', async () => {
-    const bridged: unknown[] = [];
-    const integration = new MemoryIntegration({
-      config: { enabled: true, failureBridging: true },
-      getMemoryManifest: async () => [],
-      getMemoryContent: async () => null,
-      saveMemory: async (entry) => { bridged.push(entry); },
-    });
-    registerFailureBridgingHook(integration, () => makeBundle(3), { threshold: 1 });
-
-    const engine = createEngine();
-    await runQuery(engine);
-    await drainHooks();
-
-    // Bridging ran through the real integration and persisted a memory.
-    expect(bridged).toHaveLength(1);
   });
 
   it('a throwing hook never affects query completion', async () => {

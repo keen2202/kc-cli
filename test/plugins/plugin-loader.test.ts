@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
 
 // Mock fs module
 vi.mock('fs', () => {
@@ -15,10 +14,11 @@ vi.mock('fs', () => {
   };
 });
 
-// Mock os.homedir
+// Mock os.homedir — use path.join so the value is platform-native
 vi.mock('os', async (importOriginal) => {
   const actual = await importOriginal<typeof os>();
-  return { ...actual, homedir: vi.fn().mockReturnValue('/home/testuser') };
+  const pathMod = await vi.importActual<typeof import('path')>('path');
+  return { ...actual, homedir: vi.fn().mockReturnValue(pathMod.join('/home', 'testuser')) };
 });
 
 import { discoverPlugins, loadPlugin } from '../../src/plugins/plugin-loader';
@@ -31,12 +31,12 @@ const homedir = vi.mocked(os.homedir);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  homedir.mockReturnValue('/home/testuser');
+  homedir.mockReturnValue(path.join('/home', 'testuser'));
 });
 
 describe('discoverPlugins', () => {
   it('discovers user global plugins in ~/.kc-cli/plugins/', async () => {
-    const userPluginDir = '/home/testuser/.kc-cli/plugins';
+    const userPluginDir = path.join(os.homedir(), '.kc-cli', 'plugins');
     existsSync.mockImplementation((p: any) => p === userPluginDir);
     readdir.mockResolvedValue([
       { name: 'my-plugin', isDirectory: () => true },
@@ -49,7 +49,7 @@ describe('discoverPlugins', () => {
   });
 
   it('discovers project plugins in .kc-cli/plugins/', async () => {
-    const projectPluginDir = '/project/.kc-cli/plugins';
+    const projectPluginDir = path.join('/project', '.kc-cli', 'plugins');
     existsSync.mockImplementation((p: any) => p === projectPluginDir);
     readdir.mockResolvedValue([
       { name: 'proj-plugin', isDirectory: () => true },
@@ -60,7 +60,7 @@ describe('discoverPlugins', () => {
   });
 
   it('discovers npm plugins matching kc-plugin-* prefix', async () => {
-    const nodeModulesDir = '/project/node_modules';
+    const nodeModulesDir = path.join('/project', 'node_modules');
     existsSync.mockImplementation((p: any) => p === nodeModulesDir);
     readdir.mockImplementation(async (p: any) => {
       if (p === nodeModulesDir) {
@@ -80,7 +80,7 @@ describe('discoverPlugins', () => {
   });
 
   it('discovers scoped npm plugins under @scope/kc-plugin-*', async () => {
-    const nodeModulesDir = '/project/node_modules';
+    const nodeModulesDir = path.join('/project', 'node_modules');
     const scopeDir = path.join(nodeModulesDir, '@myscope');
     existsSync.mockImplementation((p: any) => p === nodeModulesDir);
     readdir.mockImplementation(async (p: any) => {
@@ -102,8 +102,8 @@ describe('discoverPlugins', () => {
 
   it('discovers plugins from package.json dependencies', async () => {
     existsSync.mockImplementation((p: any) => {
-      if (p === '/project/package.json') return true;
-      if (p === '/project/node_modules/kc-plugin-dep') return true;
+      if (p === path.join('/project', 'package.json')) return true;
+      if (p === path.join('/project', 'node_modules', 'kc-plugin-dep')) return true;
       return false;
     });
     readFile.mockResolvedValue(JSON.stringify({
@@ -115,14 +115,14 @@ describe('discoverPlugins', () => {
     readdir.mockResolvedValue([]);
 
     const result = await discoverPlugins('/project');
-    expect(result).toContain('/project/node_modules/kc-plugin-dep');
-    expect(result).not.toContain(path.join('/project/node_modules', 'other-dep'));
+    expect(result).toContain(path.join('/project', 'node_modules', 'kc-plugin-dep'));
+    expect(result).not.toContain(path.join('/project', 'node_modules', 'other-dep'));
   });
 
   it('reads devDependencies for kc-plugin-* entries too', async () => {
     existsSync.mockImplementation((p: any) => {
-      if (p === '/project/package.json') return true;
-      if (p === '/project/node_modules/kc-plugin-dev') return true;
+      if (p === path.join('/project', 'package.json')) return true;
+      if (p === path.join('/project', 'node_modules', 'kc-plugin-dev')) return true;
       return false;
     });
     readFile.mockResolvedValue(JSON.stringify({
@@ -133,14 +133,15 @@ describe('discoverPlugins', () => {
     readdir.mockResolvedValue([]);
 
     const result = await discoverPlugins('/project');
-    expect(result).toContain('/project/node_modules/kc-plugin-dev');
+    expect(result).toContain(path.join('/project', 'node_modules', 'kc-plugin-dev'));
   });
 
   it('deduplicates plugin directories', async () => {
-    const pluginPath = '/home/testuser/.kc-cli/plugins/kc-plugin-dupe';
-    existsSync.mockImplementation((p: any) => p === pluginPath || p === '/home/testuser/.kc-cli/plugins');
+    const userPluginDir = path.join(os.homedir(), '.kc-cli', 'plugins');
+    const pluginPath = path.join(userPluginDir, 'kc-plugin-dupe');
+    existsSync.mockImplementation((p: any) => p === pluginPath || p === userPluginDir);
     readdir.mockImplementation(async (p: any) => {
-      if (p === '/home/testuser/.kc-cli/plugins') {
+      if (p === userPluginDir) {
         return [{ name: 'kc-plugin-dupe', isDirectory: () => true }];
       }
       return [];
@@ -160,7 +161,7 @@ describe('discoverPlugins', () => {
   });
 
   it('handles errors reading node_modules gracefully', async () => {
-    existsSync.mockImplementation((p: any) => p === '/project/node_modules');
+    existsSync.mockImplementation((p: any) => p === path.join('/project', 'node_modules'));
     readdir.mockRejectedValue(new Error('permission denied'));
 
     const result = await discoverPlugins('/project');
@@ -168,7 +169,7 @@ describe('discoverPlugins', () => {
   });
 
   it('handles errors reading scoped package directory', async () => {
-    const nodeModulesDir = '/project/node_modules';
+    const nodeModulesDir = path.join('/project', 'node_modules');
     const scopeDir = path.join(nodeModulesDir, '@badscope');
     existsSync.mockImplementation((p: any) => p === nodeModulesDir);
     readdir.mockImplementation(async (p: any) => {
@@ -183,7 +184,7 @@ describe('discoverPlugins', () => {
   });
 
   it('handles invalid package.json gracefully', async () => {
-    existsSync.mockImplementation((p: any) => p === '/project/package.json');
+    existsSync.mockImplementation((p: any) => p === path.join('/project', 'package.json'));
     readFile.mockResolvedValue('not-json');
     readdir.mockResolvedValue([]);
 
@@ -193,7 +194,7 @@ describe('discoverPlugins', () => {
 
   it('skips package.json deps that are not installed', async () => {
     existsSync.mockImplementation((p: any) => {
-      if (p === '/project/package.json') return true;
+      if (p === path.join('/project', 'package.json')) return true;
       return false;
     });
     readFile.mockResolvedValue(JSON.stringify({
@@ -206,7 +207,7 @@ describe('discoverPlugins', () => {
   });
 
   it('skips non-directory entries in node_modules for scoped packages', async () => {
-    const nodeModulesDir = '/project/node_modules';
+    const nodeModulesDir = path.join('/project', 'node_modules');
     existsSync.mockImplementation((p: any) => p === nodeModulesDir);
     readdir.mockResolvedValue([
       { name: '@scope', isDirectory: () => false },
@@ -218,26 +219,37 @@ describe('discoverPlugins', () => {
 });
 
 // For loadPlugin tests, we need REAL files because the dynamic import() cannot be mocked
-// by vi.mock. We create temp plugin directories.
+// by vi.mock. We create temp plugin directories using the real fs (via vi.importActual)
+// so the tests work on Windows as well as Unix.
 describe('loadPlugin', () => {
   const tmpDir = path.join(os.tmpdir(), 'kc-cli-test-plugins');
 
-  beforeAll(() => {
-    execSync(`mkdir -p ${tmpDir}`);
+  // Real fs handles — obtained in beforeAll so they bypass the module-level mock.
+  let realFsMod: typeof import('fs');
+  let realExistsSync: typeof existsSync;
+  let realReadFile: typeof readFile;
+
+  beforeAll(async () => {
+    // Enable dev mode to skip integrity hash requirement in tests
+    process.env.KC_DEV_MODE = 'true';
+    realFsMod = await vi.importActual<typeof import('fs')>('fs');
+    realFsMod.mkdirSync(tmpDir, { recursive: true });
+    realExistsSync = vi.fn((p: any) => realFsMod.existsSync(p)) as any;
+    realReadFile = vi.fn(async (p: any, encoding?: any) => realFsMod.promises.readFile(p, encoding)) as any;
   });
 
   afterAll(async () => {
     // Cleanup with a small delay to allow v8 coverage to finish reading files
     await new Promise(r => setTimeout(r, 100));
-    try { execSync(`rm -rf ${tmpDir}`); } catch { /* ignore */ }
+    try { realFsMod.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
-  // Helper to create a real plugin directory using shell commands (bypasses fs mock)
+  // Helper to create a real plugin directory using real fs (bypasses fs mock)
   function createPluginDir(name: string, manifest: object, moduleContent: string, ext = '.mjs'): string {
     const dir = path.join(tmpDir, name);
-    execSync(`mkdir -p ${dir}`);
-    execSync(`cat > ${path.join(dir, 'package.json')} << 'PLUGINEOF'\n${JSON.stringify(manifest)}\nPLUGINEOF`);
-    execSync(`cat > ${path.join(dir, 'index' + ext)} << 'PLUGINEOF'\n${moduleContent}\nPLUGINEOF`);
+    realFsMod.mkdirSync(dir, { recursive: true });
+    realFsMod.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(manifest));
+    realFsMod.writeFileSync(path.join(dir, 'index' + ext), moduleContent);
     return dir;
   }
 
@@ -246,18 +258,6 @@ describe('loadPlugin', () => {
   // We need a separate test approach: use unmocked fs calls directly.
   // Actually, the easiest approach: for each loadPlugin test, we configure the
   // fs mock to delegate to the real fs for our tmpDir paths.
-
-  // Use vi.importActual to get the real fs module for the tmp directory tests
-  let realExistsSync: typeof existsSync;
-  let realReadFile: typeof readFile;
-
-  beforeAll(async () => {
-    // Enable dev mode to skip integrity hash requirement in tests
-    process.env.KC_DEV_MODE = 'true';
-    const realFs = await vi.importActual<typeof import('fs')>('fs');
-    realExistsSync = vi.fn((p: any) => realFs.existsSync(p)) as any;
-    realReadFile = vi.fn(async (p: any, encoding?: any) => realFs.promises.readFile(p, encoding)) as any;
-  });
 
   function mockFsForTmpDir() {
     existsSync.mockImplementation((p: any) => realExistsSync(p as any));
@@ -317,7 +317,7 @@ describe('loadPlugin', () => {
       main: 'index.mjs',
     }, '');
     // Delete the main file
-    execSync(`rm -f ${path.join(dir, 'index.mjs')}`);
+    realFsMod.rmSync(path.join(dir, 'index.mjs'), { force: true });
 
     mockFsForTmpDir();
     const plugin = await loadPlugin(dir);
@@ -355,7 +355,7 @@ describe('loadPlugin', () => {
       main: 'index.mjs',
     }, 'export default {};');
     // Overwrite package.json with invalid JSON
-    execSync(`echo 'not valid json {{{' > ${path.join(dir, 'package.json')}`);
+    realFsMod.writeFileSync(path.join(dir, 'package.json'), 'not valid json {{{');
 
     mockFsForTmpDir();
     const plugin = await loadPlugin(dir);

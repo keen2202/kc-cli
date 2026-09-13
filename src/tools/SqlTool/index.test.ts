@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve as pathResolve } from 'node:path';
 
 // ── Hoisted mock for worker_threads so tests can control Worker behaviour ──
 const { workerMock } = vi.hoisted(() => {
@@ -159,19 +159,19 @@ describe('[S1] resolveAllowed — AC-S1.1', () => {
   it('allows whitelisted absolute path', () => {
     mockState({ sql: { allowedPaths: ['/tmp/'], allowWrite: false } });
     const r = resolveAllowed(getState(), '/tmp/ok.db', '/test');
-    expect(r).toEqual({ path: '/tmp/ok.db', readonly: true });
+    expect(r).toEqual({ path: pathResolve('/tmp/ok.db'), readonly: true });
   });
 
   it('allows whitelisted relative path (resolved via cwd)', () => {
     mockState({ sql: { allowedPaths: ['/test/data/'], allowWrite: false } });
     const r = resolveAllowed(getState(), 'data/app.db', '/test');
-    expect(r).toEqual({ path: '/test/data/app.db', readonly: true });
+    expect(r).toEqual({ path: pathResolve('/test/data/app.db'), readonly: true });
   });
 
   it('returns readonly=false when allowWrite is true', () => {
     mockState({ sql: { allowedPaths: ['/tmp/'], allowWrite: true } });
     const r = resolveAllowed(getState(), '/tmp/ok.db', '/test');
-    expect(r).toEqual({ path: '/tmp/ok.db', readonly: false });
+    expect(r).toEqual({ path: pathResolve('/tmp/ok.db'), readonly: false });
   });
 });
 
@@ -201,7 +201,7 @@ describe('[C2] resolveAllowed traversal hardening', () => {
   it('allows a target equal to the whitelist entry itself (exact boundary)', () => {
     mockState({ sql: { allowedPaths: ['/data/dbs'], allowWrite: false } });
     expect(resolveAllowed(getState(), '/data/dbs', '/test')).toEqual({
-      path: '/data/dbs',
+      path: pathResolve('/data/dbs'),
       readonly: true,
     });
   });
@@ -209,28 +209,31 @@ describe('[C2] resolveAllowed traversal hardening', () => {
   it('allows a nested path under the whitelist boundary', () => {
     mockState({ sql: { allowedPaths: ['/data/dbs'], allowWrite: false } });
     expect(resolveAllowed(getState(), '/data/dbs/sub/app.db', '/test')).toEqual({
-      path: '/data/dbs/sub/app.db',
+      path: pathResolve('/data/dbs/sub/app.db'),
       readonly: true,
     });
   });
 
-  it('rejects a symlink inside the whitelist pointing outside (real fs)', () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'sqltool-c2-'));
-    try {
-      const inside = join(tmp, 'dbs');
-      const outside = join(tmp, 'outside');
-      mkdirSync(inside);
-      mkdirSync(outside);
-      const secret = join(outside, 'secret.db');
-      writeFileSync(secret, 'not a real database');
-      symlinkSync(secret, join(inside, 'leak.db'));
+  it.skipIf(process.platform === 'win32')(
+    'rejects a symlink inside the whitelist pointing outside (real fs)',
+    () => {
+      const tmp = mkdtempSync(join(tmpdir(), 'sqltool-c2-'));
+      try {
+        const inside = join(tmp, 'dbs');
+        const outside = join(tmp, 'outside');
+        mkdirSync(inside);
+        mkdirSync(outside);
+        const secret = join(outside, 'secret.db');
+        writeFileSync(secret, 'not a real database');
+        symlinkSync(secret, join(inside, 'leak.db'));
 
-      mockState({ sql: { allowedPaths: [inside], allowWrite: false } });
-      expect(resolveAllowed(getState(), join(inside, 'leak.db'), '/test')).toBeNull();
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
+        mockState({ sql: { allowedPaths: [inside], allowWrite: false } });
+        expect(resolveAllowed(getState(), join(inside, 'leak.db'), '/test')).toBeNull();
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
     }
-  });
+  );
 
   it('still allows a real file directly inside the whitelist (real fs)', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'sqltool-c2-'));
@@ -242,7 +245,7 @@ describe('[C2] resolveAllowed traversal hardening', () => {
 
       mockState({ sql: { allowedPaths: [inside], allowWrite: false } });
       expect(resolveAllowed(getState(), legit, '/test')).toEqual({
-        path: legit,
+        path: pathResolve(legit),
         readonly: true,
       });
     } finally {
@@ -250,24 +253,27 @@ describe('[C2] resolveAllowed traversal hardening', () => {
     }
   });
 
-  it('allows an internal symlink whose target stays inside the whitelist (real fs)', () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'sqltool-c2-'));
-    try {
-      const inside = join(tmp, 'dbs');
-      mkdirSync(inside);
-      const real = join(inside, 'real.db');
-      writeFileSync(real, 'not a real database');
-      symlinkSync(real, join(inside, 'alias.db'));
+  it.skipIf(process.platform === 'win32')(
+    'allows an internal symlink whose target stays inside the whitelist (real fs)',
+    () => {
+      const tmp = mkdtempSync(join(tmpdir(), 'sqltool-c2-'));
+      try {
+        const inside = join(tmp, 'dbs');
+        mkdirSync(inside);
+        const real = join(inside, 'real.db');
+        writeFileSync(real, 'not a real database');
+        symlinkSync(real, join(inside, 'alias.db'));
 
-      mockState({ sql: { allowedPaths: [inside], allowWrite: false } });
-      expect(resolveAllowed(getState(), join(inside, 'alias.db'), '/test')).toEqual({
-        path: join(inside, 'alias.db'),
-        readonly: true,
-      });
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
+        mockState({ sql: { allowedPaths: [inside], allowWrite: false } });
+        expect(resolveAllowed(getState(), join(inside, 'alias.db'), '/test')).toEqual({
+          path: pathResolve(join(inside, 'alias.db')),
+          readonly: true,
+        });
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
     }
-  });
+  );
 });
 
 describe('[S1] tool.call rejection paths — AC-S1.1/S1.2/S1.3', () => {

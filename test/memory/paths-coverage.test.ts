@@ -26,9 +26,12 @@ vi.mock('fs/promises', () => ({
   writeFile: mockWriteFile,
 }));
 
-vi.mock('os', () => ({
-  homedir: () => '/home/test',
-}));
+vi.mock('os', async () => {
+  const pathMod = await vi.importActual<typeof import('path')>('path');
+  return {
+    homedir: () => pathMod.join('/home', 'test'),
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Import the module under test
@@ -58,7 +61,7 @@ import {
 // ---------------------------------------------------------------------------
 // Constants used across tests
 // ---------------------------------------------------------------------------
-const KC_CLI_BASE = '/home/test/.kc-cli';
+const KC_CLI_BASE = path.join('/home', 'test', '.kc-cli');
 const MEMORY_BASE = path.join(KC_CLI_BASE, 'memory');
 const SESSION_BASE = path.join(KC_CLI_BASE, 'sessions');
 const ARCHIVE_BASE = path.join(SESSION_BASE, '.archive');
@@ -297,7 +300,7 @@ describe('memory paths', () => {
   // validateMemoryPath
   // -----------------------------------------------------------------------
   describe('validateMemoryPath', () => {
-    const BASE = '/home/test/.kc-cli/memory';
+    const BASE = path.join('/home', 'test', '.kc-cli', 'memory');
 
     it('returns true for a regular file inside the base directory', async () => {
       mockLstat.mockResolvedValue({ isSymbolicLink: () => false });

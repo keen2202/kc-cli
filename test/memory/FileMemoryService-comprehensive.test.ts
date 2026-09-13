@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as path from 'path';
 
 const {
   mockReadFile,
@@ -164,7 +165,7 @@ describe('FileMemoryService (comprehensive, mocked)', () => {
       await service.initialize();
 
       expect(mockPaths.ensureSessionDirs).toHaveBeenCalled();
-      expect(mockMkdir).toHaveBeenCalledWith('/mock/.kc-cli/memory', { recursive: true });
+      expect(mockMkdir).toHaveBeenCalledWith(path.join('/mock/.kc-cli', 'memory'), { recursive: true });
       expect(mockPaths.ensureGitignore).toHaveBeenCalledWith('/mock/.kc-cli');
     });
   });

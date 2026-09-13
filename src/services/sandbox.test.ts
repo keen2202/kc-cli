@@ -151,14 +151,32 @@ describe('SandboxManager', () => {
   });
 });
 
-  it('does not throw with failIfNoSandbox when a real backend is available', () => {
-    const manager = new SandboxManager({
-      enabled: true,
-      backend: 'bubblewrap',
-      workDir: '/workspace',
-      failIfNoSandbox: true,
-    });
-    expect(['bubblewrap', 'seccomp', 'noop']).toContain(manager.getBackendName());
+  it.skipIf(process.platform === 'win32')(
+    'does not throw with failIfNoSandbox when a real backend is available',
+    () => {
+      const manager = new SandboxManager({
+        enabled: true,
+        backend: 'bubblewrap',
+        workDir: '/workspace',
+        failIfNoSandbox: true,
+      });
+      expect(['bubblewrap', 'seccomp', 'noop']).toContain(manager.getBackendName());
+    }
+  );
+
+  it('throws with failIfNoSandbox when no real backend exists (Windows / no Docker)', () => {
+    // On hosts without bubblewrap/seccomp/docker/windows-sandbox this must throw.
+    // Explicitly request a backend that is almost never present so the test is
+    // deterministic across platforms.
+    expect(
+      () =>
+        new SandboxManager({
+          enabled: true,
+          backend: 'seccomp',
+          workDir: '/workspace',
+          failIfNoSandbox: true,
+        })
+    ).toThrow();
   });
 
   it('does not throw with failIfNoSandbox when backend is explicitly noop', () => {

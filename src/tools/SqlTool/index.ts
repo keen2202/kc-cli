@@ -96,6 +96,13 @@ function hasDotDotSegment(p: string): boolean {
  * prefix matching admitted siblings like `/data/dbs-backup` for base `/data/dbs`).
  */
 function isWithin(candidate: string, base: string): boolean {
+  // Windows paths are case-insensitive; realpath may change casing vs the
+  // caller-supplied whitelist entry.
+  if (process.platform === 'win32') {
+    const c = candidate.toLowerCase();
+    const b = base.toLowerCase();
+    return c === b || c.startsWith(b + path.sep);
+  }
   return candidate === base || candidate.startsWith(base + path.sep);
 }
 
@@ -120,8 +127,10 @@ export function resolveAllowed(
   // rejected outright, even if normalization would collapse it back inside
   // the whitelist (e.g. /data/dbs/../dbs/x.db).
   if (hasDotDotSegment(database)) return null;
-  // Normalize before comparing: absolute inputs kept as-is, relative joined with cwd
-  const target = path.resolve(database.startsWith('/') ? database : `${cwd}/${database}`);
+  // Normalize before comparing: absolute inputs (POSIX `/…` or Windows
+  // `C:\…` / `\\server\share`) kept as-is, relative joined with cwd.
+  const isAbsolute = path.isAbsolute(database);
+  const target = path.resolve(isAbsolute ? database : path.join(cwd, database));
   // Defense-in-depth per spec sketch: reject '..' segments that survive normalization
   if (target.split(path.sep).includes('..')) return null;
   // Boundary matching: an entry matches only at a path-segment boundary

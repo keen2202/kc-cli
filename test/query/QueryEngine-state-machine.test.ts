@@ -173,24 +173,6 @@ describe('State Machine — Valid Transitions', () => {
     expect(machine.currentState).toBe('error');
   });
 
-  it('evolving → idle', () => {
-    const evolvingMachine = new AgentStateMachine(store, 'evolving');
-    evolvingMachine.transitionTo('idle');
-    expect(evolvingMachine.currentState).toBe('idle');
-  });
-
-  it('evolving → completed', () => {
-    const evolvingMachine = new AgentStateMachine(store, 'evolving');
-    evolvingMachine.transitionTo('completed');
-    expect(evolvingMachine.currentState).toBe('completed');
-  });
-
-  it('evolving → error', () => {
-    const evolvingMachine = new AgentStateMachine(store, 'evolving');
-    evolvingMachine.transitionTo('error');
-    expect(evolvingMachine.currentState).toBe('error');
-  });
-
   it('error → idle', () => {
     const errorMachine = new AgentStateMachine(store, 'error');
     errorMachine.transitionTo('idle');
@@ -221,9 +203,10 @@ describe('State Machine — Invalid Transitions', () => {
     expect(() => machine.transitionTo('completed')).toThrow(InvalidTransitionError);
   });
 
-  it('completed → idle throws (completed is terminal)', () => {
+  it('completed → idle is allowed (session restart after T13)', () => {
     const doneMachine = new AgentStateMachine(store, 'completed');
-    expect(() => doneMachine.transitionTo('idle')).toThrow(InvalidTransitionError);
+    doneMachine.transitionTo('idle');
+    expect(doneMachine.currentState).toBe('idle');
   });
 
   it('completed → streaming throws', () => {
@@ -422,17 +405,9 @@ describe('Session Tree — state machine integrity', () => {
   });
 });
 
-// ── Integration: Evolution → completed ──
+// ── Integration: full query loops ──
 
-describe('State Machine — Evolution to completed', () => {
-  it('evolving can transition to completed', () => {
-    const store = createStore();
-    const machine = new AgentStateMachine(store, 'evolving');
-    machine.transitionTo('completed');
-    expect(machine.currentState).toBe('completed');
-    expect(store.get().currentState).toBe('completed');
-  });
-
+describe('State Machine — full query loops', () => {
   it('full query loop: idle → compacting → streaming → deciding → executing → streaming → deciding → completed', () => {
     const store = createStore();
     const machine = new AgentStateMachine(store, 'idle');
@@ -471,22 +446,6 @@ describe('State Machine — Evolution to completed', () => {
     machine.transitionTo('compacting');
     expect(machine.currentState).toBe('compacting');
   });
-
-  it('evolution path: evolving → idle (AGP cycle complete)', () => {
-    const store = createStore();
-    // Simulate: session completed, AGP evolution runs, returns to idle
-    const doneMachine = new AgentStateMachine(store, 'completed');
-    // Can't transition from completed normally
-    expect(doneMachine.isTerminal()).toBe(true);
-
-    // Force to evolving (AGP kicks in)
-    doneMachine.forceTransitionTo('evolving');
-    expect(doneMachine.currentState).toBe('evolving');
-
-    // Evolution completes, return to idle
-    doneMachine.transitionTo('idle');
-    expect(doneMachine.currentState).toBe('idle');
-  });
 });
 
 // ── VALID_TRANSITIONS completeness check ──
@@ -494,7 +453,7 @@ describe('State Machine — Evolution to completed', () => {
 describe('VALID_TRANSITIONS — completeness', () => {
   const allStates: AgentStateName[] = [
     'idle', 'planning', 'compacting', 'streaming', 'deciding',
-    'executing', 'completed', 'evolving', 'error',
+    'executing', 'completed', 'error',
   ];
 
   it('every state has a transitions entry', () => {
@@ -503,12 +462,10 @@ describe('VALID_TRANSITIONS — completeness', () => {
     }
   });
 
-  it('completed can transition to evolving (T045 FUN-14)', () => {
-    expect(VALID_TRANSITIONS.completed).toEqual(['evolving']);
-  });
-
-  it('evolving can reach completed (regression for H5 fix)', () => {
-    expect(VALID_TRANSITIONS.evolving).toContain('completed');
+  it('completed has no outgoing transitions (terminal, except error recovery)', () => {
+    // T13 removed the AGP `evolving` state; completed is terminal (except
+    // the documented error/idle recovery path via forceTransitionTo).
+    expect(VALID_TRANSITIONS.completed).not.toContain('evolving');
   });
 
   it('all transitions in the map are valid state names', () => {
@@ -522,7 +479,7 @@ describe('VALID_TRANSITIONS — completeness', () => {
   it('isValidTransition returns correct boolean', () => {
     expect(isValidTransition('idle', 'planning')).toBe(true);
     expect(isValidTransition('idle', 'streaming')).toBe(false);
-    expect(isValidTransition('evolving', 'completed')).toBe(true);
-    expect(isValidTransition('completed', 'idle')).toBe(false);
+    expect(isValidTransition('completed', 'idle')).toBe(true);
+    expect(isValidTransition('completed', 'streaming')).toBe(false);
   });
 });
