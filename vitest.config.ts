@@ -33,7 +33,6 @@ export default defineConfig({
         'src/hooks/**/*.ts',
         'src/plugins/**/*.ts',
         'src/ui/**/*.{ts,tsx}',
-        'src/agp/**/*.ts',
         'src/experiments/**/*.ts',
         'src/im/**/*.ts',
         'src/commands/**/*.ts',
@@ -68,17 +67,6 @@ export default defineConfig({
         // scripts/coverage-ratchet.mjs enforces per-module ratchet baselines
         // (scripts/coverage-baseline.json): regressions below baseline fail
         // CI, modules exceeding baseline by >=1pp auto-raise it.
-        //
-        // agp floor = honest measurement after T09 removed the SEPL suites
-        // that previously inflated this number (audit round3: no more
-        // cosmetic thresholds); the ratchet is expected to lift it now that
-        // real regressions would be visible.
-        'src/agp/**/*.ts': {
-          statements: 22,
-          branches: 17,
-          functions: 22,
-          lines: 23,
-        },
         'src/experiments/**/*.ts': {
           statements: 70,
           branches: 60,

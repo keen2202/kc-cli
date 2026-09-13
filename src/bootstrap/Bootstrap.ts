@@ -37,10 +37,6 @@ import { logger } from '../services/logger';
 import { getErrorMessage } from '../utils/errors';
 import { redactTruncated } from '../utils/redact';
 import { GUIDELINES_SECTION, CAPABILITIES_SECTION } from '../api/prompts/system-prompt-sections';
-import { registerFailureBridgingHook } from '../hooks/postTurnHooks';
-import { createMemoryIntegration } from '../memory/integration';
-import { FileMemoryService } from '../memory/FileMemoryService';
-import { scanMemoryFiles } from '../memory/scanner';
 import { detectProjectLanguage } from '../utils/project-detect';
 import { isInsideGitRepo } from '../utils/git';
 import { withTimeout } from '../utils/async-helpers';
@@ -196,57 +192,12 @@ export class Bootstrap {
   }
 
   /**
-   * Phase 3d extracted: initializes the AGP registry. Errors are swallowed
-   * (logged) exactly as before so the returned promise never rejects.
-   */
-  private async initAgpPhase(
-    config: Config,
-    cwd: string,
-    verbose: boolean,
-  ): Promise<void> {
-    try {
-      const { getGlobalRegistry } = await import('../agp/registry');
-      const agpConfig = config.agp;
-      const agpRegistry = getGlobalRegistry({
-        persistDir: path.join(cwd, '.kc-cli', 'agp'),
-        tracingEnabled: agpConfig?.tracingEnabled ?? true,
-        evolution: {
-          enabled: agpConfig?.evolution?.enabled ?? false,
-          budget: agpConfig?.evolution?.budget ?? 3,
-          targetResources: [],
-          safetyInvariants: [],
-          autoRollback: agpConfig?.evolution?.autoRollback ?? true,
-          persistState: agpConfig?.evolution?.persistState ?? true,
-        },
-      });
-      updateState({ agpRegistry });
-      // Disk restore only matters when evolution is on; the default config
-      // keeps evolution disabled, so skip the startup disk IO entirely.
-      if (agpConfig?.evolution?.enabled ?? false) {
-        const loaded = agpRegistry.loadState();
-        if (verbose && loaded.loaded > 0) {
-          console.log(chalk.gray(`  AGP: ${loaded.loaded} resources restored from disk`));
-        }
-      }
-      // harness-evolution T1 surface registration into AGP was removed in T9:
-      // instruction-surfaces no longer imports src/agp. Overlay path is
-      // src/experiments/** + catalog (see agp-experiment-runtime-spec).
-    } catch (_err) {
-      if (verbose) {
-        logger.services.warn(
-          `AGP: initialization skipped (${_err instanceof Error ? _err.message : String(_err)})`,
-        );
-      }
-    }
-  }
-
-  /**
    * Run the full initialization sequence and return wired services.
    *
    * Phases:
    *   1. Global state init
    *   2. Config loading
-   *   3. Tool/MCP/Plugin/AGP init
+   *   3. Tool/MCP/Plugin init
    *   4. QueryEngine creation
    */
   async compose(): Promise<BootstrapResult> {
@@ -422,11 +373,6 @@ export class Bootstrap {
     }
     profileCheckpoint('mcp_initialized');
 
-    // Phase 3d runs concurrently with plugin init: the two are independent.
-    const agpInit = (!bareMode && (config.agp?.enabled ?? true))
-      ? this.initAgpPhase(config, cwd, verbose)
-      : Promise.resolve();
-
     // ── Phase 3c: Initialize plugins ──
     let pluginManager: import('../plugins/plugin-manager').PluginManager | null = null;
     if (!bareMode) {
@@ -498,10 +444,6 @@ export class Bootstrap {
       }
     }
     profileCheckpoint('plugin_mcp_initialized');
-
-    // Join AGP init (fired before Phase 3c; errors already swallowed inside).
-    await agpInit;
-    profileCheckpoint('agp_initialized');
 
     // ── Phase 3e: Initialize IM bridge (if configured) ──
     let imBridge: IMBridge | null = null;
@@ -644,38 +586,8 @@ export class Bootstrap {
     );
     profileCheckpoint('engine_created');
 
-    // ── Phase 4b: harness-evolution T8 — failure-signature → memory bridging ──
-    // Registered only when the toggle is on so the disabled path stays
-    // zero-cost (no evidence bundle is built per turn). The hook fires from
-    // QueryEngine's post-turn dispatch and persists bridged feedback
-    // memories under ~/.kc-cli/memory/<projectHash>/.
-    if (config.memory?.enabled && config.memory?.failureBridging) {
-      const projectHash = createHash('sha256')
-        .update(path.resolve(cwd))
-        .digest('hex')
-        .slice(0, 16);
-      const memoryService = new FileMemoryService();
-      const bridgeIntegration = createMemoryIntegration({
-        config: config.memory,
-        projectHash,
-        getMemoryManifest: () => scanMemoryFiles(projectHash),
-        getMemoryContent: async (fileName) => {
-          const entry = await memoryService.getMemory(projectHash, fileName);
-          return entry?.content ?? null;
-        },
-        saveMemory: async (memory) => {
-          await memoryService.initialize();
-          await memoryService.addMemory(projectHash, memory);
-        },
-      });
-      registerFailureBridgingHook(bridgeIntegration, await (async () => {
-        // Lazy AGP load keeps failure bridging decoupled from src/agp at
-        // compile time; if AGP cannot load, bridge with an empty provider.
-        const { getTraceManager } = await import('../agp/trace-manager');
-        return () => getTraceManager().buildEvidenceBundle();
-      })());
-    }
-    profileCheckpoint('failure_bridging_wired');
+    // Failure-signature → memory bridging (harness-evolution T8) was removed
+    // in T13 with the AGP subsystem. See product-identity.md §3.2.
 
     // Perf-benchmark exit point: KC_BENCH_STARTUP=1 runs the full bootstrap,
     // dumps the phase profile to stderr, and exits before any UI/REPL starts.

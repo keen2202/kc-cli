@@ -23,7 +23,7 @@ KC-CLI is a modular CLI agent that orchestrates LLM providers, 21 built-in tools
 - [[Plugin-System]] -- Contribution-based plugins, hooks, permission rules
 - [[UI-System]] -- Terminal UI (ink/React), layout system, focus-stack dialogs, theme system
 - [[Configuration]] -- 5-layer config, env vars, Zod validation
-- AGP (Autogenesis Protocol) -- Self-evolving multi-agent system with SEPL pipeline
+- Offline Experiment Runtime (`src/experiments/` + `scripts/agp/`) -- default-off catalog overlay for prompt surfaces / runtime policy; not a product feature
 
 ### Development
 - [[Development-Guide]] -- Setup, commands, testing, conventions
@@ -121,5 +121,8 @@ npm test
 
 ## Reserved subsystems (no deep-dive page yet)
 
-- **AGP (`src/agp/`)** — evolution infrastructure (reserved): global registry, trace manager (evidence bundles feeding failure-bridging memory), prompt adapter. The SEPL self-evolution loop was removed in audit round3 T09; a dedicated wiki page will return only if the subsystem is revived.
 - **IM (`src/im/`)** — instant-message adapters (feishu etc.). No deep-dive page; treated as an integration periphery until it gains a stable surface worth documenting.
+
+## Removed subsystems
+
+- **AGP (`src/agp/`)** — removed in experiment-runtime T13. SEPL self-evolution loop was already dead code (audit round3 T09). Offline experiment path is `src/experiments/**` (runtime port) + `scripts/agp/**` (lab).

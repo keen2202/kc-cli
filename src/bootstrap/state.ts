@@ -2,7 +2,6 @@
 
 import type { PermissionMode } from '../permissions/protocol';
 import type { Config } from './config';
-import type { GlobalRegistry } from '../agp/registry';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AsyncLocalStorage } from 'async_hooks';
@@ -18,8 +17,6 @@ export interface GlobalState {
   maxTurns: number | null;
   maxBudgetUsd: number | null;
   config: Config | null;
-  /** AGP Global Registry (initialized lazily) */
-  agpRegistry?: GlobalRegistry;
   /**
    * T4 (H4): whether `cwd` is inside a Git work tree, probed once at bootstrap.
    * `undefined` = not yet probed (e.g. tests / legacy callers); `false` means

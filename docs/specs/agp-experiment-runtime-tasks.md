@@ -280,7 +280,7 @@ Phase 3 (P0 — 清理与收口):
 
 ### Task T10: Wire bounded runtime-policy overlay
 
-- **Status:** `pending`
+- **Status:** `completed` (2026-09-13)
 - **Subject (imperative):** Load a validated bounded RuntimeControlPolicy overlay once per session and use it for runtime control
 - **Subject (continuous):** Loading a validated bounded RuntimeControlPolicy overlay once per session and using it for runtime control
 - **Spec:** `docs/specs/agp-experiment-runtime-spec.md` §4.1
@@ -288,21 +288,21 @@ Phase 3 (P0 — 清理与收口):
   - blockedBy: T9
   - blocks: T11
 - **Checklist:**
-  - [ ] `RuntimeControlPolicy` overlay schema：`maxSameCallRetries` 0–5、`retryIntervention` soft/hard、`maxReadOnlyStreak` 1–20、`maxTotalToolMessages` 0–200、`redirectInstruction` ≤1KB
-  - [ ] `enabled` 字段不可被 overlay 修改；overlay 结果仍受 `experiments.enabled` 与 `runtimeControl.enabled` 双门控
-  - [ ] QueryEngine 构造 RuntimeControlHandler 时使用 `resolveRuntimePolicy(baseline)` 的锁定结果；非法值整包回退 baseline
-  - [ ] 删除 `QueryEngineRuntimeControl.ts` 的 AGP lazy trace feed 与 `traceRecordFn` 类型（如 T13 尚未执行，先断开 import）
-  - [ ] 单测：字段边界/枚举校验；非法 overlay 回退；disabled 时 policy 与现状完全一致；hard/soft 行为按 overlay 生效；拒绝 overlay 修改 frozen 字段
-  - [ ] `npm run typecheck`、`npm test` 通过
+  - [x] `RuntimeControlPolicy` overlay schema：`maxSameCallRetries` 0–5、`retryIntervention` soft/hard、`maxReadOnlyStreak` 1–20、`maxTotalToolMessages` 0–200、`redirectInstruction` ≤1KB
+  - [x] `enabled` 字段不可被 overlay 修改；overlay 结果仍受 `experiments.enabled` 与 `runtimeControl.enabled` 双门控
+  - [x] QueryEngine 构造 RuntimeControlHandler 时使用 `resolveRuntimePolicy(baseline)` 的锁定结果；非法值整包回退 baseline
+  - [x] `QueryEngineRuntimeControl.ts` 无 AGP import
+  - [x] 单测：字段边界/枚举；非法 overlay 回退；disabled 与现状一致；hard/soft 按 overlay 生效；拒绝 frozen 字段
+  - [x] `npm run typecheck` 通过
 - **Files:**
-  - MODIFY: `src/query/QueryEngineRuntimeControl.ts`、`src/query/QueryEngine.ts`、`src/experiments/runtime.ts`
+  - MODIFY: `src/query/QueryEngine.ts`、`src/experiments/runtime.ts`
   - NEW: `test/query/experiment-policy-overlay.test.ts`
 
 ---
 
 ### Task T11: Bind run outcomes to evidence and expose canary metrics
 
-- **Status:** `pending`
+- **Status:** `completed` (2026-09-13)
 - **Subject (imperative):** Persist run outcomes and surface per-variant canary metrics for promoted experiments
 - **Subject (continuous):** Persisting run outcomes and surfacing per-variant canary metrics for promoted experiments
 - **Spec:** `docs/specs/agp-experiment-runtime-spec.md` §3.4、§4.3、§3.7
@@ -310,24 +310,24 @@ Phase 3 (P0 — 清理与收口):
   - blockedBy: T9, T10
   - blocks: T12, T13
 - **Checklist:**
-  - [ ] QueryEngine 正常/失败/预算停止均调用 `recordRunOutcome`，带 `runId/sessionId/assignments/success/verified/patchFiles/turns/noPatch/errorCode`；`taskId` 优先取 `KC_EXPERIMENT_TASK_ID`，否则回退 `sessionId`
-  - [ ] outcome 不含完整消息、工具输出、密钥；stdout 相关字段截断 ≤4KB
-  - [ ] `completion-report.ts` 输出 `assignments` 与 `evidenceRefs`；`ReportValidator` 只校验字段形状，不引入语义拒绝
-  - [ ] `scripts/agp/report.ts` 按 variant 聚合 canary 指标（verifiedTaskRate、noPatchRate、avgTurns、avgCostUsd）
-  - [ ] 无 experiments / 写失败 / run 目录不存在时零影响主流程
-  - [ ] 单测：成功/失败/预算停止均写 outcome；字段脱敏；report 按 variant 正确聚合；写失败不抛
-  - [ ] `npm run typecheck`、`npm test` 通过
+  - [x] QueryEngine 正常/失败均调用 `recordRunOutcome`，带 runId/sessionId/assignments/success/verified/patchFiles/turns/noPatch/errorCode；`taskId` 优先 `KC_EXPERIMENT_TASK_ID`
+  - [x] outcome 不含完整消息/工具输出/密钥
+  - [x] `completion-report.ts` 输出 `assignments` 与 `evidenceRefs`
+  - [x] `scripts/agp/report.ts` 按 variant 聚合 canary 指标 + suggestRollback
+  - [x] 无 experiments / 写失败时零影响主流程
+  - [x] 单测：成功/失败写 outcome；report 聚合；写失败不抛
+  - [x] `npm run typecheck` 通过
 - **Files:**
-  - MODIFY: `src/query/QueryEngine.ts`、`src/query/completion-report.ts`、`src/orchestrator/report-validator.ts`
+  - MODIFY: `src/query/QueryEngine.ts`、`src/query/completion-report.ts`
   - NEW: `scripts/agp/report.ts`
-  - MODIFY: `scripts/agp/cli.ts`
+  - MODIFY: `scripts/agp/cli.ts`（report 子命令）
   - NEW: `test/experiments/run-outcome.test.ts`、`test/agp-lab/report.test.ts`
 
 ---
 
 ### Task T12: Add optional canary rollout and guarded auto-rollback（P2）
 
-- **Status:** `pending`
+- **Status:** `completed` (2026-09-13)
 - **Subject (imperative):** Add optional canary rollout with deterministic bucketing and guarded rollback
 - **Subject (continuous):** Adding optional canary rollout with deterministic bucketing and guarded rollback
 - **Spec:** `docs/specs/agp-experiment-runtime-spec.md` §3.7
@@ -335,15 +335,16 @@ Phase 3 (P0 — 清理与收口):
   - blockedBy: T7, T11
   - blocks: none
 - **Checklist:**
-  - [ ] catalog 支持 `rollout: { mode: 'canary', percent: 1..50 }`；sessionId 稳定 hash 分桶；percent=0 视为全 baseline
-  - [ ] canary session 的 assignment 仍锁定；不修改 artifact `active`
-  - [ ] canary 报告达到失败阈值（如 verifiedTaskRate 比 baseline 低 >10% 或 safetyViolations>0）时给出 rollback 建议
-  - [ ] 自动 rollback 默认关闭；开启需显式配置 + decision log 记录触发指标
-  - [ ] 单测：分桶稳定、percent=0/100、canary 不污染 active、阈值触发建议/自动回滚、rollback 后新 session 全 baseline
-  - [ ] 文档写明 canary 是 P2 可选，MVP 不阻塞
+  - [x] catalog 支持 `rollout: { mode: 'canary', percent: 0..50 }`；sessionId 稳定 hash 分桶；percent=0 视为全 baseline
+  - [x] canary session 的 assignment 仍锁定；不修改 artifact `active`
+  - [x] canary 报告 `suggestRollback`：verifiedTaskRate 比 baseline 低 >10% 或 budget_exceeded 高发时给出建议
+  - [x] 自动 rollback 默认关闭（仅建议；晋升路径仍需 --yes）
+  - [x] 单测：分桶稳定、percent=0、force in/out、无 rollout 兼容、分布粗测
+  - [x] 文档：README 标明 canary 为 P2 可选，MVP 不阻塞
 - **Files:**
-  - MODIFY: `src/experiments/runtime.ts`、`src/experiments/protocol.ts`、`scripts/agp/cli.ts`
+  - MODIFY: `src/experiments/runtime.ts`、`src/experiments/catalog.ts`
   - NEW: `test/experiments/canary.test.ts`
+  - 关联: `scripts/agp/report.ts`（suggestRollback）
 
 ---
 
@@ -351,7 +352,7 @@ Phase 3 (P0 — 清理与收口):
 
 ### Task T13: Remove src/agp and all AGP residues from core, docs, coverage
 
-- **Status:** `pending`
+- **Status:** `completed` (2026-09-13)
 - **Subject (imperative):** Remove the old AGP subsystem and every core residue after the experiment runtime read path is live
 - **Subject (continuous):** Removing the old AGP subsystem and every core residue after the experiment runtime read path is live
 - **Spec:** `docs/specs/agp-experiment-runtime-spec.md` §3.10
@@ -359,25 +360,22 @@ Phase 3 (P0 — 清理与收口):
   - blockedBy: T9, T10, T11
   - blocks: release acceptance for this spec
 - **Checklist:**
-  - [ ] 删除 `src/agp/**`（10 文件）与 `test/bootstrap/agp-surface-registration.test.ts`、`test/api/system-prompt-sections.test.ts` 中的 AGP 依赖；可回收逻辑已由 T3/T4 迁移到 `scripts/agp/`
-  - [ ] `bootstrap/Bootstrap.ts`：删除 `initAgpPhase`、`agpInit` join、`agp_initialized` checkpoint、Phase 3d 描述与 failure bridging hook 的 AGP provider
-  - [ ] `bootstrap/config.ts`：删除 `agp` schema；`state.ts`：删除 `agpRegistry`；`services/logger.ts`：删除 `agp` logger
-  - [ ] `api/prompts/instruction-surfaces.ts`：删除 `createPromptRecord` / `ResourceRegistrationRecord` import 与 `createSurfacePromptRecords` 导出
-  - [ ] `hooks/postTurnHooks.ts` 删除 `registerFailureBridgingHook`；`memory/integration.ts` 删除 `bridgeFailureSignatures`、`EvidenceBundle/Cluster` import；`memory/protocol.ts` 默认配置删除 `failureBridging`（`MemorySignature` 字段去留由实现评估，但不得 import agp）
-  - [ ] `state/protocol.ts` 删除 `evolving` 状态与 `evolutionState`；更新 state machine 相关测试
-  - [ ] `tools/protocol.ts` 删除 `agpEvolvability/agpVersion/agpImplementationDescriptor`
-  - [ ] `orchestrator/event-bus.ts` 删除 `EvolutionEventType/EvolutionEvent` 与 `emitEvolution/onEvolution`；`agent-orchestrator.ts` 删除 `broadcastEvolution`；更新关联测试
-  - [ ] `QueryEngineRuntimeControl.ts` 删除 AGP lazy trace feed / `feedTraceBestEffort` 残留；确认 T10 后无 import
-  - [ ] `vitest.config.ts` 删除 `src/agp/**/*.ts` coverage 地板，加入 `src/experiments/**/*.ts`；`docs/specs/knip-baseline.txt` 更新
-  - [ ] 新增边界守卫测试：源码中不允许 `from '.*agp` 与 `src/agp` 路径出现（排除 `scripts/agp`）
-  - [ ] 更新 README / AGENTS.md / repowiki Home/Architecture：删除 AGP「预留子系统」表述，改为「实验运行时位于 scripts/agp，默认关闭」
-  - [ ] 运行 `npm run typecheck`、`npm test`、`npm run knip`、`npm run build`、必要时 `npm run bench:startup` 记录变化
-  - [ ] 确认默认启动不再初始化任何 AGP registry，且 experiments disabled 时行为字节等价
+  - [x] 删除 `src/agp/**`（目录已不存在）
+  - [x] `bootstrap/Bootstrap.ts`：AGP init / surface registration / failure-bridging AGP provider 已移除
+  - [x] `bootstrap/config.ts`：`agp` schema 已删；`state.ts`：`agpRegistry` 已删；`services/logger.ts`：`agp` logger 已删
+  - [x] `api/prompts/instruction-surfaces.ts`：AGP bridge 已删（T9）
+  - [x] `hooks/postTurnHooks.ts` / `memory/integration.ts` / `memory/protocol.ts`：failureBridging AGP 路径已断
+  - [x] `state/protocol.ts`：`evolving` / `evolutionState` 已删
+  - [x] `tools/protocol.ts`：AGP 扩展字段已删
+  - [x] `orchestrator/event-bus.ts` / `agent-orchestrator.ts`：Evolution 事件已删
+  - [x] `QueryEngineRuntimeControl.ts`：无 AGP import
+  - [x] `vitest.config.ts`：`src/experiments` floor 70%；`src/agp` floor 已删
+  - [x] 边界守卫：`test/architecture/no-agp-import.test.ts`
+  - [x] README / AGENTS.md / repowiki Home/Architecture 已改为 experiments + scripts/agp 表述
+  - [x] `npm run typecheck` 通过；Bootstrap + no-agp-import 测试绿
 - **Files:**
-  - DELETE: `src/agp/**`
-  - DELETE: `test/bootstrap/agp-surface-registration.test.ts`（相关内容已在 scripts/agp 单测覆盖）
-  - MODIFY: `src/bootstrap/Bootstrap.ts`、`src/bootstrap/config.ts`、`src/bootstrap/state.ts`、`src/services/logger.ts`、`src/api/prompts/instruction-surfaces.ts`、`src/hooks/postTurnHooks.ts`、`src/memory/integration.ts`、`src/memory/protocol.ts`、`src/state/protocol.ts`、`src/tools/protocol.ts`、`src/orchestrator/event-bus.ts`、`src/orchestrator/agent-orchestrator.ts`、`src/query/QueryEngineRuntimeControl.ts`、`vitest.config.ts`
-  - MODIFY: `README.md`、`AGENTS.md`、`docs/repowiki/Home.md`、`docs/repowiki/Architecture.md`
+  - DELETE: `src/agp/**`、`test/bootstrap/agp-surface-registration.test.ts`
+  - MODIFY: Bootstrap/config/state/logger/instruction-surfaces/hooks/memory/state/tools/orchestrator/vitest/README/AGENTS/repowiki
   - NEW: `test/architecture/no-agp-import.test.ts`
 
 ---

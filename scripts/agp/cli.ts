@@ -25,6 +25,7 @@ import { loadCatalog } from './catalog-writer';
 import { evaluateAcceptance, type AcceptanceGateResult } from './acceptance-gate';
 import { promoteVariant, rollbackActive, tryAcquirePromoteLock, releasePromoteLock } from './promotion';
 import { runFailureRecoveryE2e } from './e2e';
+import { buildCanaryReport, suggestRollback } from './report';
 import {
   loadTaskRecords,
   aggregateSplitResult,
@@ -343,6 +344,15 @@ function cmdRollback(paths: LabPaths, positional: string[], flags: Record<string
   }
 }
 
+function cmdReport(paths: LabPaths, flags: Record<string, string>): number {
+  const runsDir = path.join(paths.root, 'runs');
+  const report = buildCanaryReport(runsDir);
+  const baselineRate = flags['baseline-rate'] ? Number(flags['baseline-rate']) : 0.8;
+  const suggestions = suggestRollback(report, baselineRate);
+  console.log(JSON.stringify({ ...report, rollbackSuggestions: suggestions }, null, 2));
+  return 0;
+}
+
 async function cmdDemo(paths: LabPaths, flags: Record<string, string>): Promise<number> {
   void paths;
   try {
@@ -392,6 +402,8 @@ commands:
   rollback <artifactId> --yes    retire current promoted; active → previous or baseline
   demo                           T8 e2e: failure-recovery-001 → evaluate → gate → promote
            [--repeats 3] [--no-promote] [--operator name]
+  report                         canary metrics from .kc-cli/experiments/runs
+           [--baseline-rate 0.8]
 `);
 }
 
@@ -422,6 +434,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       return cmdRollback(paths, args.positional, args.flags);
     case 'demo':
       return cmdDemo(paths, args.flags);
+    case 'report':
+      return cmdReport(paths, args.flags);
     case '':
     case 'help':
     case '--help':

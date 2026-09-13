@@ -24,10 +24,20 @@ const variantSchema = z.object({
     .optional(),
 });
 
+const rolloutSchema = z
+  .object({
+    mode: z.literal('canary'),
+    /** 0–50. 0 means full baseline for every session. */
+    percent: z.number().int().min(0).max(50),
+  })
+  .optional();
+
 const artifactSchema = z.object({
   kind: z.enum(['prompt-surface', 'runtime-policy']),
   baseHash: z.string().min(1),
   active: z.string().nullable().optional(),
+  /** P2 canary: serve `active` only to a sessionId-hash bucket. */
+  rollout: rolloutSchema,
   variants: z.array(variantSchema).default([]),
 });
 

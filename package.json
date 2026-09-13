@@ -38,7 +38,8 @@
     "agp:status": "npx tsx scripts/agp/cli.ts status",
     "agp:list": "npx tsx scripts/agp/cli.ts list",
     "agp:evaluate": "npx tsx scripts/agp/cli.ts evaluate",
-    "agp:demo": "npx tsx scripts/agp/cli.ts demo"
+    "agp:demo": "npx tsx scripts/agp/cli.ts demo",
+    "agp:report": "npx tsx scripts/agp/cli.ts report"
   },
   "keywords": [
     "cli",

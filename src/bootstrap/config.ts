@@ -81,7 +81,6 @@ export const ConfigSchema = z.object({
     llmTriggerOnFeedbackSignal: z.boolean().default(true),
     maxExtractionCostUsdPerSession: z.number().min(0).optional(),
     // ── Failure signature → memory bridging (harness-evolution T8) — off by default ──
-    failureBridging: z.boolean().default(false),
   }).default({}),
 
   // Sandbox Configuration
@@ -161,21 +160,6 @@ export const ConfigSchema = z.object({
     catalogPath: z.string().default('.kc-cli/experiments/catalog.json'),
     /** Run-outcome JSONL directory. */
     runsDir: z.string().default('.kc-cli/experiments/runs'),
-  }).default({}),
-
-  // ── AGP (Autogenesis Protocol) — previously hardcoded in Bootstrap Phase 3d ──
-  agp: z.object({
-    /** Master switch for AGP registry initialization (skipped in bare mode regardless). */
-    enabled: z.boolean().default(true),
-    /** Enable SEPL trace recording. */
-    tracingEnabled: z.boolean().default(true),
-    evolution: z.object({
-      enabled: z.boolean().default(false),
-      /** Max evolution proposals per session. */
-      budget: z.number().int().min(0).default(3),
-      autoRollback: z.boolean().default(true),
-      persistState: z.boolean().default(true),
-    }).default({}),
   }).default({}),
 
   // IM Platform Integration
@@ -587,11 +571,6 @@ export function loadEnvConfig(): Partial<Config> {
       logger.services.warn(`Invalid KC_MEMORY_MAX_EXTRACTION_COST_USD value: "${process.env.KC_MEMORY_MAX_EXTRACTION_COST_USD}" -- discarding`);
     }
   }
-  if (process.env.KC_MEMORY_FAILURE_BRIDGING) {
-    mem.failureBridging =
-      process.env.KC_MEMORY_FAILURE_BRIDGING === 'true' || process.env.KC_MEMORY_FAILURE_BRIDGING === '1';
-  }
-
   // Prompt instruction surfaces (harness-evolution T1)
   if (process.env.KC_PROMPT_SURFACES_CONDITIONAL_INJECTION) {
     if (!config.promptSurfaces) config.promptSurfaces = {} as Config['promptSurfaces'];

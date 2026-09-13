@@ -1,4 +1,5 @@
 import { logger } from '../services/logger';
+import * as path from 'node:path';
 // Query Engine - Refactored with state machine pattern
 // Inspired by OpenHarness's query loop architecture
 // Sub-modules (State, Compaction, Memory, Error, Planning, Importance,
@@ -270,10 +271,8 @@ export class QueryEngine {
     // Initialize planning phase handler
     this.planningHandler = d.planningHandler ?? new PlanningPhaseHandler(config.planningPhase || {});
 
-    // harness-evolution T2 (H2): runtime control policy (default disabled)
-    this.runtimeControl = d.runtimeControl ?? new RuntimeControlHandler(config.runtimeControl);
-
-    // T9: lock experiment overlay assignments once at construction.
+    // T9/T10: lock experiment overlay assignments once at construction.
+    // Must run BEFORE RuntimeControlHandler so the policy overlay is applied.
     this.experimentRuntime = d.experimentRuntime ?? null;
     if (this.experimentRuntime) {
       try {
@@ -285,6 +284,34 @@ export class QueryEngine {
         this.experimentRuntime = null;
       }
     }
+
+    // harness-evolution T2 (H2): runtime control policy (default disabled).
+    // T10: when experiment runtime is live, apply the locked bounded policy overlay.
+    // enabled stays frozen (never taken from overlay). Dual gate: experiments off
+    // or runtimeControl.enabled false → identical to baseline.
+    let runtimePolicy = config.runtimeControl;
+    if (this.experimentRuntime && runtimePolicy !== undefined) {
+      const resolved = this.experimentRuntime.resolveRuntimePolicy({
+        maxSameCallRetries: runtimePolicy.maxSameCallRetries ?? 2,
+        retryIntervention: runtimePolicy.retryIntervention ?? 'soft',
+        maxReadOnlyStreak: runtimePolicy.maxReadOnlyStreak ?? 5,
+        maxTotalToolMessages: runtimePolicy.maxTotalToolMessages ?? 0,
+        ...(runtimePolicy.redirectInstruction !== undefined
+          ? { redirectInstruction: runtimePolicy.redirectInstruction }
+          : {}),
+      });
+      if (resolved.source === 'experiment') {
+        runtimePolicy = {
+          ...runtimePolicy,
+          maxSameCallRetries: resolved.value.maxSameCallRetries,
+          retryIntervention: resolved.value.retryIntervention,
+          maxReadOnlyStreak: resolved.value.maxReadOnlyStreak,
+          maxTotalToolMessages: resolved.value.maxTotalToolMessages,
+          redirectInstruction: resolved.value.redirectInstruction,
+        };
+      }
+    }
+    this.runtimeControl = d.runtimeControl ?? new RuntimeControlHandler(runtimePolicy);
 
     // Link planning handler to tool executor for defense-in-depth filtering
     this.toolExecutor.setToolBlockCheck((toolName: string) => {
@@ -301,22 +328,41 @@ export class QueryEngine {
   }
 
   /**
-   * T9 placeholder for experiment run outcomes. T11 will fill verified /
-   * patchFiles / turns / cost from the real completion path. Never throws.
+   * T11: persist RunOutcome for experiment canary metrics. Never throws.
+   * Fields stay summary-only (no messages, tool dumps, or secrets).
    */
   private async recordExperimentOutcomePlaceholder(success: boolean): Promise<void> {
     if (!this.experimentRuntime) return;
     try {
+      const usage = this.budgetEnforcer.getSessionUsage();
+      const patchFiles = [...this.modifiedFiles].map(p => {
+        try {
+          return path.relative(getState().cwd, p);
+        } catch {
+          return p;
+        }
+      });
       await this.experimentRuntime.recordRunOutcome({
         runId: uuidv4(),
-        sessionId: getState().sessionId,
-        taskId: process.env.KC_EXPERIMENT_TASK_ID,
+        sessionId: this.getReportSessionId(),
+        taskId: process.env.KC_EXPERIMENT_TASK_ID || this.getReportSessionId(),
         artifactAssignments: [...this.experimentRuntime.getAssignments()],
         success,
-        verified: false,
-        patchFiles: [],
+        verified:
+          success &&
+          this.decision.lastTypeCheckGate?.result === 'pass' &&
+          this.decision.lastTestGate?.result !== 'fail',
+        patchFiles,
+        verificationCommand: this.decision.lastTypeCheckGate?.command ?? undefined,
+        verificationExitCode:
+          this.decision.lastTypeCheckGate?.result === 'pass'
+            ? 0
+            : this.decision.lastTypeCheckGate?.ran
+              ? 1
+              : undefined,
         turns: this.conversation.getMessages().filter(m => m.role === 'assistant').length,
-        noPatch: this.modifiedFiles.size === 0,
+        noPatch: patchFiles.length === 0,
+        costUsd: usage.costUsd,
         errorCode: success ? undefined : 'query_error',
         timestamp: Date.now(),
       });
@@ -1089,6 +1135,9 @@ export class QueryEngine {
         tests: this.decision.lastTestGate ?? skippedGate(),
         auditEntries: queryOperationAudit({ sessionId }),
         tokens: { inputTokens: 0, outputTokens: 0, totalTokens: usage.tokens },
+        assignments: this.experimentRuntime
+          ? [...this.experimentRuntime.getAssignments()]
+          : undefined,
       });
       // Optional persistence — never blocks or fails completion.
       void writeAcceptanceReport(report, getState().cwd);

@@ -14,7 +14,7 @@ KC-CLI follows a layered architecture with clear module boundaries enforced by p
 │                    Application                       │
 │   QueryEngine (state machine facade)                │
 │   Orchestrator (multi-agent coordination)           │
-│   AGP (Autogenesis Protocol, self-evolving agents)  │
+│   Experiments (offline overlay, default-off)        │
 │   Commands (/branch, /checkout, /history)           │
 ├─────────────────────────────────────────────────────┤
 │                      Domain                          │
@@ -50,7 +50,7 @@ KC-CLI follows a layered architecture with clear module boundaries enforced by p
 | Presentation | Theme System | `src/ui/theme.ts` |
 | Application | QueryEngine | `src/query/QueryEngine.ts` |
 | Application | Orchestrator | `src/orchestrator/agent-orchestrator.ts` |
-| Application | AGP | `src/agp/` |
+| Application | Experiments | `src/experiments/` (offline lab in `scripts/agp/`) |
 | Application | Commands | `src/commands/` |
 | Domain | Tools | `src/tools/` (23 registered) |
 | Domain | Permissions | `src/permissions/engine.ts` |
@@ -121,12 +121,10 @@ main.ts
  │    ├─► services/cachePrefix.ts      (CachePrefixService)
  │    ├─► services/behavioralAdapter.ts
  │    └─► services/userProfile.ts
- ├─► agp/                       (Autogenesis Protocol)
- │    ├─► registry.ts           (Agent/solution registry)
- │    ├─► sepl/                 (Self-Evolving Pipeline: reflect→select→improve→evaluate→commit)
- │    ├─► strategies/           (prompt-evolution, solution-evolution)
- │    ├─► adapters/             (agent, env, mem, prompt, tool adapters)
- │    └─► version-manager.ts   (Version tracking and rollback)
+ ├─► experiments/              (offline experiment runtime port)
+ │    ├─► protocol.ts           (ExperimentRuntime / VariantRef / RunOutcome)
+ │    ├─► catalog.ts            (kc.experiments.v1 reader)
+ │    └─► runtime.ts            (FileExperimentRuntime + canary)
  └─► ui/                        (renderInkUI / REPL / JSON mode)
       ├─► components/AppRoot.tsx
       ├─► layout.ts             (breakpoint policy)

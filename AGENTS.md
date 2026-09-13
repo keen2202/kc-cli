@@ -23,7 +23,7 @@ npm run kc             # Start interactive REPL
 - **API clients**: `src/api/` — 11 provider endpoints served by 3 client classes (`AnthropicClient`, `OpenAICompatibleClient`, `OllamaClient`); the other 8 providers (OpenAI, DeepSeek, Qwen, GLM, Mimo, Kimi, Step, Gemini) are OpenAI-compatible configuration endpoints; extend `BaseApiClient`; protocol types in `api/protocol.ts`
 - **Permissions**: `src/permissions/` — 6-step deny-first with bypass-immune protected paths + plugin-contributed rules (Step 3.5)
 - **Sandbox**: `src/services/sandbox*.ts` — platform `auto` backend (Linux bubblewrap → seccomp → docker; macOS/Windows docker → windows-sandbox) with fallback chain; default `failIfNoSandbox=true` (tests opt out via `test/setup.ts`)
-- **Experiments**: `src/experiments/` — offline experiment runtime port (default-off catalog overlay for prompt surfaces / runtime policy); offline lab lives in `scripts/agp/**` (see `docs/specs/agp-experiment-runtime-spec.md`); core never imports the lab
+- **Experiments**: `src/experiments/` — offline experiment runtime port (default-off catalog overlay for prompt surfaces / runtime policy); offline lab lives in `scripts/agp/**` (see `docs/specs/agp-experiment-runtime-spec.md`); core never imports the lab. Legacy `src/agp/**` was removed in T13.
 - **Orchestrator**: `src/orchestrator/` — Multi-agent with `AsyncLocalStorage` isolation; protocol types in `orchestrator/protocol.ts`. Zero-trust reporting layer: `report-validator.ts` (deterministic R1–R5 findings), optional `reportPolicy`/`checkpoints` gate with bounded resume follow-ups in `agent-orchestrator.ts`, and a bounded in-memory ExecutionEnv trace attached to `SubAgentResult.meta`.
 - **Memory**: `src/memory/` — File-based persistent memory with YAML frontmatter, 4 types (user/feedback/project/reference), relevance search, LLM auto-extraction (consolidation parked — see `docs/specs/memory-consolidation-pending.md`)
 - **UI**: `src/ui/` — ink/React terminal UI with theme system, focus-stack dialogs, multi-panel layout, steer mode (Ctrl+I)
@@ -41,7 +41,6 @@ npm run kc             # Start interactive REPL
 - **Hooks**: `src/hooks/` — Post-turn hook processing (`postTurnHooks.ts`)
 - **Utils**: `src/utils/` — Shared utilities (error handling, path security, semaphore, token estimation, format)
 - **ACP**: `src/acp/` — Agent Communication Protocol server and handlers
-- **AGP**: `src/agp/` — legacy evolution infrastructure being migrated out of core (product-identity v3.3: not a product feature). Offline lab + catalog overlay path is `scripts/agp/**` + `src/experiments/**`. SEPL self-evolution loop was removed in audit round3 T09. See `docs/specs/product-identity.md` and `docs/specs/agp-experiment-runtime-tasks.md`.
 
 ## Conventions
 

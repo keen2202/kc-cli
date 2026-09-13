@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { z } from 'zod';
 import { logger } from '../services/logger';
+import { createHash } from 'crypto';
 import {
   artifactIdForPromptSurface,
   computeBaseHash,
@@ -13,6 +14,7 @@ import {
   parseCatalog,
   POLICY_ARTIFACT_ID,
   type Catalog,
+  type CatalogArtifact,
 } from './catalog';
 import {
   createNoopExperimentRuntime,
@@ -41,6 +43,33 @@ export interface FileExperimentRuntimeOptions {
   promptSurfaceBaselines?: Record<string, string>;
   /** Baseline runtime policy (allowlist shape) for baseHash + merge. */
   runtimePolicyBaseline?: RuntimePolicyOverlay;
+  /** Force canary bucket (tests). When set, overrides sessionId hash. */
+  forceCanaryBucket?: 'in' | 'out';
+}
+
+/**
+ * Stable canary bucket: 0..99 from sha256(sessionId + artifactId).
+ * Same session always lands in the same bucket for a given artifact.
+ */
+export function canaryBucket(sessionId: string, artifactId: string): number {
+  const h = createHash('sha256').update(`${sessionId}::${artifactId}`, 'utf8').digest();
+  return h.readUInt32BE(0) % 100;
+}
+
+/** True when this session should receive the canary overlay for the artifact. */
+export function isInCanaryBucket(
+  sessionId: string,
+  artifactId: string,
+  artifact: Pick<CatalogArtifact, 'rollout'>,
+  force?: 'in' | 'out'
+): boolean {
+  if (force === 'in') return true;
+  if (force === 'out') return false;
+  const rollout = artifact.rollout;
+  if (!rollout || rollout.mode !== 'canary') return true; // full rollout
+  if (rollout.percent <= 0) return false;
+  if (rollout.percent >= 100) return true;
+  return canaryBucket(sessionId, artifactId) < rollout.percent;
 }
 
 const policyOverlaySchema = z
@@ -68,6 +97,7 @@ export class FileExperimentRuntime implements ExperimentRuntime {
   private readonly sessionId: string;
   private readonly promptSurfaceBaselines: Record<string, string>;
   private readonly runtimePolicyBaseline: RuntimePolicyOverlay;
+  private readonly forceCanaryBucket: 'in' | 'out' | undefined;
   private assignments = new Map<string, LockedAssignment>();
   private initialized = false;
 
@@ -77,6 +107,7 @@ export class FileExperimentRuntime implements ExperimentRuntime {
     this.catalogPath = path.resolve(cwd, options.catalogPath ?? path.join('.kc-cli', 'experiments', 'catalog.json'));
     this.runsDir = path.resolve(cwd, options.runsDir ?? path.join('.kc-cli', 'experiments', 'runs'));
     this.sessionId = options.sessionId;
+    this.forceCanaryBucket = options.forceCanaryBucket;
     this.promptSurfaceBaselines = options.promptSurfaceBaselines ?? {};
     this.runtimePolicyBaseline = options.runtimePolicyBaseline ?? {};
   }
@@ -208,6 +239,10 @@ export class FileExperimentRuntime implements ExperimentRuntime {
       }
       const variant = getActivePromotedVariant(catalog, artifactId);
       if (!variant || typeof variant.payload !== 'string') continue;
+      // P2 canary: serve overlay only to the bucket; never mutates catalog.active.
+      if (!isInCanaryBucket(this.sessionId, artifactId, artifact, this.forceCanaryBucket)) {
+        continue;
+      }
       this.assignments.set(artifactId, {
         artifactId,
         variantId: variant.variantId,
@@ -231,6 +266,9 @@ export class FileExperimentRuntime implements ExperimentRuntime {
     const variant = getActivePromotedVariant(catalog, POLICY_ARTIFACT_ID);
     if (!variant) return;
     if (typeof variant.payload === 'string') return;
+    if (!isInCanaryBucket(this.sessionId, POLICY_ARTIFACT_ID, artifact, this.forceCanaryBucket)) {
+      return;
+    }
     this.assignments.set(POLICY_ARTIFACT_ID, {
       artifactId: POLICY_ARTIFACT_ID,
       variantId: variant.variantId,

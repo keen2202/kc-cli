@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { Bootstrap, buildSystemPrompt, type BootstrapOptions } from './Bootstrap';
 import { resetState, initializeState } from './state';
 import { resetProfile } from './profiler';
-import { resetGlobalRegistry } from '../agp/registry';
 import { toolRegistry } from '../tools';
 import type { ToolDefinition } from '../tools/protocol';
 
@@ -14,7 +13,7 @@ function minimalOptions(overrides: Partial<BootstrapOptions> = {}): BootstrapOpt
     cwd: '/tmp',
     verbose: false,
     printMode: false,
-    bareMode: true, // keep bare to skip MCP/plugin/AGP side effects
+    bareMode: true, // keep bare to skip MCP/plugin side effects
     permissionMode: 'default',
     maxTurns: null,
     maxBudgetUsd: null,
@@ -27,13 +26,11 @@ describe('Bootstrap', () => {
     // Fresh state for each test
     resetState();
     resetProfile();
-    resetGlobalRegistry();
   });
 
   afterEach(() => {
     resetState();
     resetProfile();
-    resetGlobalRegistry();
   });
 
   describe('compose()', () => {

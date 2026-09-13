@@ -23,7 +23,6 @@ export type AgentStateName =
   | 'deciding'
   | 'executing'
   | 'completed'
-  | 'evolving'
   | 'error';
 
 /**
@@ -88,15 +87,6 @@ export interface AgentState {
   // Timestamps
   createdAt: number;
   lastActivityAt: number;
-
-  // AGP Evolution state (optional)
-  evolutionState?: {
-    active: boolean;
-    iteration: number;
-    lastEvolutionAt?: number;
-    committedChanges: number;
-    rolledBackChanges: number;
-  };
 }
 
 /**
@@ -110,8 +100,7 @@ export const VALID_TRANSITIONS: Record<AgentStateName, AgentStateName[]> = {
   streaming: ['deciding', 'compacting', 'error'],
   deciding: ['executing', 'completed', 'compacting', 'error'],
   executing: ['streaming', 'compacting', 'completed', 'error'],
-  completed: ['evolving'],
-  evolving: ['idle', 'completed', 'error'],
+  completed: ['idle'],
   error: ['idle'],
 };
 

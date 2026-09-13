@@ -4,7 +4,7 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 
 ## v3.2 Highlights
 
-- 🧬 **Evolution Infrastructure (AGP, reserved)**: global agent/solution registry, execution trace manager (evidence bundles for failure-bridging memory), and prompt adapter — the dormant SEPL self-evolution loop was removed in audit round3 T09
+- 🔬 **Offline Experiment Runtime**: default-off catalog overlay for prompt surfaces / runtime policy (`src/experiments/**` + `scripts/agp/**`); SEPL self-evolution loop was removed as dead code — not a product feature
 - 🔒 **Sandbox Security**: Shell commands run in isolated sandboxes (Docker/Bubblewrap/seccomp) with network isolation, resource limits, and escape detection. **Hard-fails by default** if no sandbox backend is available — set `KC_SANDBOX_FAIL_IF_NO_SANDBOX=false` to opt out (NOT recommended for production). macOS requires Docker Desktop; Linux needs only `apt install bubblewrap`.
 - 🎨 **Redesigned UI**: ink/React terminal UI with sidebar (Tools/Files/Tasks/Memory), diff preview, command palette, focus-stack dialogs, theme system, multi-panel layout
 - 🔌 **LSP Integration**: Code completions, diagnostics, go-to-definition, find references, rename, quick fixes for 7 languages
@@ -419,18 +419,10 @@ src/
 │   ├── events.ts                   # AgentEvent, MultiAgentEvent, TokenUsage types
 │   └── types.ts                    # Re-export barrel
 │
-├── agp/                            # Evolution infrastructure (reserved; SEPL loop removed in audit round3 T09)
-│   ├── protocol.ts                 # AGP public types
-│   ├── registry.ts                 # Agent/solution registry
-│   ├── context-manager.ts          # Context management for evolution
-│   ├── version-manager.ts          # Version tracking and rollback
-│   ├── dynamic-manager.ts          # Dynamic agent management
-│   ├── trace-manager.ts            # Execution tracing + evidence bundles
-│   ├── server-interface.ts         # Server interface
-│   ├── sepl/
-│   │   └── protocol.ts             # Evidence-bundle type contract (used by trace manager & memory bridging)
-│   └── adapters/
-│       └── prompt-adapter.ts       # Prompt adapter
+├── experiments/                 # Offline experiment runtime port (default-off)
+│   ├── protocol.ts              # ExperimentRuntime / VariantRef / RunOutcome
+│   ├── catalog.ts               # kc.experiments.v1 reader
+│   └── runtime.ts               # FileExperimentRuntime + canary bucketing
 │
 ├── tools/                          # 21 built-in tool implementations + registry
 │   ├── AgentTool/                  # Sub-agent spawning

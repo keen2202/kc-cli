@@ -57,6 +57,18 @@ export interface AcceptanceReport {
   operationErrors: number;
   /** Token usage for the session. */
   tokens: TokenUsage;
+  /**
+   * T11: experiment overlay assignments locked at session start.
+   * Absent when experiments are disabled (default).
+   */
+  assignments?: Array<{
+    artifactId: string;
+    variantId: string;
+    baseHash: string;
+    evidenceRef: string;
+  }>;
+  /** T11: evidence hashes referenced by the assignments (deduped). */
+  evidenceRefs?: string[];
 }
 
 /** Minimal shapes consumed by {@link buildAcceptanceReport} (kept decoupled). */
@@ -70,6 +82,8 @@ export interface AcceptanceReportInput {
   auditEntries: readonly { tool: string; isError: boolean }[];
   tokens: TokenUsage;
   ts?: number;
+  /** T11 optional experiment assignments. */
+  assignments?: AcceptanceReport['assignments'];
 }
 
 /** A gate that was never invoked. */
@@ -98,6 +112,10 @@ export function buildAcceptanceReport(input: AcceptanceReportInput): AcceptanceR
     if (a.isError) operationErrors++;
   }
 
+  const evidenceRefs = input.assignments?.length
+    ? [...new Set(input.assignments.map(a => a.evidenceRef).filter(Boolean))]
+    : undefined;
+
   return {
     sessionId: input.sessionId,
     ts: input.ts ?? Date.now(),
@@ -109,6 +127,8 @@ export function buildAcceptanceReport(input: AcceptanceReportInput): AcceptanceR
     operationCounts,
     operationErrors,
     tokens: input.tokens,
+    ...(input.assignments?.length ? { assignments: input.assignments } : {}),
+    ...(evidenceRefs?.length ? { evidenceRefs } : {}),
   };
 }
 

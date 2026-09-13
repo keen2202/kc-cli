@@ -13,7 +13,7 @@ import type { MultiAgentEvent } from '../state/events.js';
 import type { ToolUseContext, ToolDefinition, ToolName } from '../tools/protocol.js';
 import type { PermissionMode } from '../permissions/protocol.js';
 import { Semaphore } from '../utils/semaphore.js';
-import { EventBus, type EvolutionEvent } from './event-bus.js';
+import { EventBus } from './event-bus.js';
 import { InProcessBackend } from './backends/in-process.js';
 import { ResultAggregator } from './result-aggregator.js';
 import { deriveChildPermissions } from './permission-cascader.js';
@@ -703,20 +703,6 @@ export class AgentOrchestrator {
   get availablePermits(): number {
     return this.semaphore.available;
   }
-
-  // ─── AGP Evolution Coordination ─────────────────────────────────────────
-
-  /**
-   * Notify all sub-agents about an evolution event.
-   * Used to coordinate resource updates across the multi-agent system.
-   */
-  broadcastEvolution(event: Omit<EvolutionEvent, 'timestamp'>): void {
-    this.eventBus.emitEvolution({
-      ...event,
-      timestamp: Date.now(),
-    });
-  }
-
 }
 
 /**
