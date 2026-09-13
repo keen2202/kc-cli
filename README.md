@@ -48,11 +48,13 @@ An AI-powered intelligent CLI assistant for software development, inspired by Cl
 - Node.js 22 or higher (required by ink 7; Node 20 reached end-of-life)
 - npm or yarn
 - API key for your chosen LLM provider
-- **Sandbox backend** (default: hard-fail without one):
+- **Sandbox backend** (default `auto` — hard-fail if none available):
   - **Linux**: `sudo apt install bubblewrap`
   - **macOS**: Docker Desktop (`brew install --cask docker`)
-  - **Windows**: Docker Desktop (`winget install Docker.DockerDesktop`)
-  - Or opt out with `KC_SANDBOX_FAIL_IF_NO_SANDBOX=false` (NOT for production)
+  - **Windows**: Docker Desktop (`winget install Docker.DockerDesktop`) or enable the Windows Sandbox optional feature
+  - Default backend is `auto` (Linux → bubblewrap, macOS/Windows → docker; Windows falls back through `windows-sandbox`)
+  - Local unit tests set `KC_SANDBOX_FAIL_IF_NO_SANDBOX=false` via `test/setup.ts` so they run without a backend
+  - For a headless Windows dev box without Docker: `KC_SANDBOX_FAIL_IF_NO_SANDBOX=false` (NOT for production)
 
 ### Installation
 
@@ -117,7 +119,7 @@ export KC_PROVIDER=ollama
 export KC_API_BASE_URL=http://localhost:11434
 
 # Sandbox (required by default)
-export KC_SANDBOX_BACKEND=bubblewrap   # Linux: bubblewrap | macOS: docker
+export KC_SANDBOX_BACKEND=auto   # auto | bubblewrap | docker | seccomp | windows-sandbox | noop
 export KC_SANDBOX_FAIL_IF_NO_SANDBOX=true  # Set false to skip sandbox (dev only)
 ```
 

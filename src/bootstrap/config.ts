@@ -87,7 +87,9 @@ export const ConfigSchema = z.object({
   // Sandbox Configuration
   sandbox: z.object({
     enabled: z.boolean().default(true),
-    backend: z.enum(['bubblewrap', 'seccomp', 'docker', 'noop']).default('bubblewrap'),
+    backend: z
+      .enum(['auto', 'bubblewrap', 'seccomp', 'docker', 'windows-sandbox', 'noop'])
+      .default('auto'),
     allowNetwork: z.boolean().default(false),
     maxMemoryMb: z.number().default(512),
     cpuTimeLimitSec: z.number().default(60),
@@ -149,6 +151,16 @@ export const ConfigSchema = z.object({
     maxTotalToolMessages: z.number().int().min(0).default(0),
     /** Custom redirect instruction injected when the tool-message cap is hit. */
     redirectInstruction: z.string().optional(),
+  }).default({}),
+
+  // ── Offline experiment runtime (agp-experiment-runtime) — default OFF ──
+  experiments: z.object({
+    /** Master switch. false → ExperimentRuntime is a pure no-op (zero disk IO). */
+    enabled: z.boolean().default(false),
+    /** Catalog path relative to cwd (or absolute). */
+    catalogPath: z.string().default('.kc-cli/experiments/catalog.json'),
+    /** Run-outcome JSONL directory. */
+    runsDir: z.string().default('.kc-cli/experiments/runs'),
   }).default({}),
 
   // ── AGP (Autogenesis Protocol) — previously hardcoded in Bootstrap Phase 3d ──
@@ -601,6 +613,17 @@ export function loadEnvConfig(): Partial<Config> {
     } else {
       logger.services.warn(`Invalid KC_RUNTIME_CONTROL_RETRY_INTERVENTION value: "${raw}" -- discarding`);
     }
+  }
+
+  // Offline experiment runtime (agp-experiment-runtime T2)
+  if (process.env.KC_EXPERIMENTS_ENABLED) {
+    if (!config.experiments) config.experiments = {} as Config['experiments'];
+    config.experiments.enabled =
+      process.env.KC_EXPERIMENTS_ENABLED === 'true' || process.env.KC_EXPERIMENTS_ENABLED === '1';
+  }
+  if (process.env.KC_EXPERIMENTS_CATALOG_PATH) {
+    if (!config.experiments) config.experiments = {} as Config['experiments'];
+    config.experiments.catalogPath = process.env.KC_EXPERIMENTS_CATALOG_PATH;
   }
 
   // IM environment variables

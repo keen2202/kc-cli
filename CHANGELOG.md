@@ -14,14 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.2.0] - 2026-06-05
 
-### 🧬 Autogenesis Protocol (AGP)
+### 🧬 Autogenesis Protocol (AGP) — infrastructure only, evolution loop not shipped
 
-- **Self-evolving multi-agent system**: Full AGP implementation with SEPL pipeline (reflect → select → improve → evaluate → commit)
-- **Adapters**: Agent, environment, memory, prompt, and tool adapters for evolution integration
-- **Strategies**: Prompt evolution and solution evolution strategies
-- **Version management**: Version tracking with rollback capability
-- **Audit logging**: Complete execution trace and audit trail
-- **Context management**: Dynamic context handling for evolution cycles
+> **Correction (2026-09-13)**: The original 3.2.0 notes described a full self-evolving SEPL pipeline as if it were a live product feature. That overstated what shipped. See `docs/specs/product-identity.md` and `docs/specs/agp-experiment-runtime-spec.md`.
+
+- **What actually shipped**: AGP infrastructure scaffolding — registry, trace manager, prompt adapter, version manager. Wired for initialization and optional prompt-surface registration, **not** an online self-evolution loop.
+- **What did not ship**: The SEPL pipeline (reflect → select → improve → evaluate → commit). `onEvolve` was never assigned; strategies had zero production callers. The loop was removed as dead code in audit round3 T09.
+- **Default posture**: `agp.evolution.enabled=false`. No evolution runs unless explicitly enabled; even then, without the SEPL loop there is no autonomous prompt/solution evolution.
+- **Current direction (v3.3)**: AGP is not a product feature. `src/agp/**` is being moved out of core into an offline experiment runtime under `scripts/agp/**` (default-off, evidence-gated promotions). See `docs/specs/agp-experiment-runtime-tasks.md`.
 
 ### 🔧 Engineering — Types Migration
 

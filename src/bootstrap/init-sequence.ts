@@ -74,6 +74,9 @@ export async function runAgent(options: RunAgentOptions): Promise<void> {
     autoExtendTurns: opts.autoExtendTurns,
     im: opts.im,
     dangerouslySkipPermissions: opts.dangerouslySkipPermissions || false,
+    // Commander inverts --no-experiments → opts.experiments === false when passed.
+    noExperiments: opts.experiments === false,
+    experimentPin: opts.experiment,
   });
 
   const result = await bootstrap.compose();

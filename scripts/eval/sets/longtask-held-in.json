@@ -1,0 +1,67 @@
+{
+  "format": "kc.experiment_eval.v1",
+  "split": "held-in",
+  "description": "Fixed held-in long-task eval split (local fixtures, mock-backend compatible). Frozen before any candidate runs.",
+  "tasks": [
+    {
+      "taskId": "hi-write-greeting",
+      "repo": "local:scripts/eval/fixtures/write-greeting",
+      "commit": "fixture-write-greeting-v1",
+      "prompt": "Create greeting.txt whose exact content is: Hello from held-in",
+      "testCommand": "node verify.mjs",
+      "verificationCommand": "node verify.mjs",
+      "maxTurns": 6,
+      "maxBudgetUsd": 0.1,
+      "timeoutSec": 60,
+      "mock": {
+        "mode": "apply-patch",
+        "turns": 2,
+        "costUsd": 0.01,
+        "patchFiles": [
+          {
+            "path": "greeting.txt",
+            "content": "Hello from held-in\n"
+          }
+        ]
+      }
+    },
+    {
+      "taskId": "hi-fix-typo",
+      "repo": "local:scripts/eval/fixtures/fix-typo",
+      "commit": "fixture-fix-typo-v1",
+      "prompt": "Fix every occurrence of the typo 'teh ' in notes.txt to 'the '.",
+      "testCommand": "node verify.mjs",
+      "verificationCommand": "node verify.mjs",
+      "maxTurns": 6,
+      "maxBudgetUsd": 0.1,
+      "timeoutSec": 60,
+      "mock": {
+        "mode": "apply-patch",
+        "turns": 3,
+        "costUsd": 0.02,
+        "patchFiles": [
+          {
+            "path": "notes.txt",
+            "content": "the quick brown fox jumps over the lazy dog.\n"
+          }
+        ]
+      }
+    },
+    {
+      "taskId": "hi-no-patch-observe",
+      "repo": "local:scripts/eval/fixtures/no-patch-observe",
+      "commit": "fixture-no-patch-observe-v1",
+      "prompt": "Observe the repository and report findings. Do not modify any files.",
+      "testCommand": "node verify.mjs",
+      "verificationCommand": "node verify.mjs",
+      "maxTurns": 4,
+      "maxBudgetUsd": 0.05,
+      "timeoutSec": 30,
+      "mock": {
+        "mode": "no-patch",
+        "turns": 1,
+        "costUsd": 0.005
+      }
+    }
+  ]
+}

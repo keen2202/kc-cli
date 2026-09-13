@@ -1,0 +1,51 @@
+{
+  "format": "kc.experiment_eval.v1",
+  "split": "held-out",
+  "description": "Fixed held-out long-task eval split (local fixtures). Frozen before any candidate runs; candidates/generators must not read this content.",
+  "tasks": [
+    {
+      "taskId": "ho-write-farewell",
+      "repo": "local:scripts/eval/fixtures/write-farewell",
+      "commit": "fixture-write-farewell-v1",
+      "prompt": "Create farewell.txt whose exact content is: Farewell from held-out",
+      "testCommand": "node verify.mjs",
+      "verificationCommand": "node verify.mjs",
+      "maxTurns": 6,
+      "maxBudgetUsd": 0.1,
+      "timeoutSec": 60,
+      "mock": {
+        "mode": "apply-patch",
+        "turns": 2,
+        "costUsd": 0.01,
+        "patchFiles": [
+          {
+            "path": "farewell.txt",
+            "content": "Farewell from held-out\n"
+          }
+        ]
+      }
+    },
+    {
+      "taskId": "ho-fix-spelling",
+      "repo": "local:scripts/eval/fixtures/fix-spelling",
+      "commit": "fixture-fix-spelling-v1",
+      "prompt": "Replace every misspelling 'recieve' with 'receive' in draft.txt.",
+      "testCommand": "node verify.mjs",
+      "verificationCommand": "node verify.mjs",
+      "maxTurns": 6,
+      "maxBudgetUsd": 0.1,
+      "timeoutSec": 60,
+      "mock": {
+        "mode": "apply-patch",
+        "turns": 3,
+        "costUsd": 0.02,
+        "patchFiles": [
+          {
+            "path": "draft.txt",
+            "content": "Please receive the package tomorrow. We will receive confirmation soon.\n"
+          }
+        ]
+      }
+    }
+  ]
+}

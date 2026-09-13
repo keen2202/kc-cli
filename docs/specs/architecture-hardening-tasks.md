@@ -162,7 +162,7 @@ Phase 3 (P2 — 清理与依赖收尾):
 
 ### Task T6: Re-audit residual Medium/Low findings
 
-- **Status:** `pending`
+- **Status:** `completed`
 - **Subject (imperative):** Re-audit residual Medium/Low findings and archive their current status
 - **Subject (continuous):** Re-auditing residual Medium/Low findings and archiving their current status
 - **Spec:** `docs/specs/architecture-hardening-spec.md` Section 3.3.3（对应 L1 / 基线 S5、Q3–Q5、P3、P5–P7）
@@ -170,16 +170,17 @@ Phase 3 (P2 — 清理与依赖收尾):
   - blockedBy: none
   - blocks: none
 - **Checklist:**
-  - [ ] 逐项复核 S5（`commandNormalizer` 是否覆盖变量展开/base64/引号变体）
-  - [ ] 逐项复核 Q3（静默吞错点）、Q4（FileEditTool 错误处理）、Q5（Zod `as any`，与 T5 协同）
-  - [ ] 逐项复核 P3（`ToolExecutor` 是否复用全局并发信号量）、P5（全量对话常驻内存）、P6（压缩额外 LLM 调用）、P7（每请求重序列化）
-  - [ ] 每项标注 ✅已修复 / ⚠️部分 / ❌未修复，附证据行号
-  - [ ] 已修复项补录至 Spec 1.1 表；未修复项登记为结构化 backlog（编号 + 位置 + 建议 + 优先级）
-  - [ ] 产出复核结论清单（Spec 第 6 节或 `.workbuddy/memory/`）
+  - [x] 逐项复核 S5（`commandNormalizer` 是否覆盖变量展开/base64/引号变体）— ⚠️部分
+  - [x] 逐项复核 Q3（静默吞错点）、Q4（FileEditTool 错误处理）、Q5（Zod `as any`，与 T5 协同）— Q3 ⚠️部分 / Q4 ✅ / Q5 ✅
+  - [x] 逐项复核 P3（`ToolExecutor` 是否复用全局并发信号量）、P5（全量对话常驻内存）、P6（压缩额外 LLM 调用）、P7（每请求重序列化）— P3 ✅ / P5 ⚠️部分 / P6 ✅ / P7 ✅
+  - [x] 每项标注 ✅已修复 / ⚠️部分 / ❌未修复，附证据行号
+  - [x] 已修复项补录至 Spec 1.1 表；未修复项登记为结构化 backlog（编号 + 位置 + 建议 + 优先级）— backlog 见 t6-residual-re-audit.md T6-B1–B7
+  - [x] 产出复核结论清单（Spec 第 6 节或 `.workbuddy/memory/`）— 见 `docs/specs/architecture-hardening-t6-residual-re-audit.md`
 - **Files:**
   - 只读复核（无源码修改）
-  - MODIFY: `docs/specs/architecture-hardening-spec.md`（回填复核结论）
-  - NEW（可选）: `.workbuddy/memory/2026-07-20.md`（复核归档）
+  - MODIFY: `docs/specs/architecture-hardening-spec.md`（回填复核结论 — 建议由后续任务完成）
+  - NEW: `docs/specs/architecture-hardening-t6-residual-re-audit.md`（2026-07-28 复核归档）
+- **见** `docs/specs/architecture-hardening-t6-residual-re-audit.md`
 
 ---
 
@@ -192,11 +193,13 @@ Phase 3 (P2 — 清理与依赖收尾):
 | T3 BudgetEnforcer 接入 | P1 | `completed`（偏差：token 维度；未接 StatusBar） | T1 | — |
 | T4 删除 @deprecated 渲染器 | P2 | `completed`（由 ui-structural T6/T7 一并完成） | — | — |
 | T5 依赖升级 uuid/zod | P2 | `in_progress`（uuid 已升 11；zod 仍 3.x 且未记录锁定理由） | — | — |
-| T6 Medium/Low 残项复核 | P2 | `pending`（未找到复核归档证据） | — | — |
+| T6 Medium/Low 残项复核 | P2 | `completed`（2026-07-28 复核归档：t6-residual-re-audit.md） | — | — |
 
-> 进度维护约定：始终保持至少一个任务处于 `in_progress`。当前待办：T5 收尾（zod 评估/锁定理由 + `@types/uuid` 清理）与 T6 复核归档。
+> 进度维护约定：始终保持至少一个任务处于 `in_progress`。当前待办：T5 收尾（zod 评估/锁定理由 + `@types/uuid` 清理）。
 >
 > **2026-07-28 状态对账**：T1–T4 按代码现状回写为 `completed`（含偏差说明）；T5/T6 保持未完成状态。`npm run typecheck` 实测通过；Windows 本机 vitest 4355 通过/138 失败，失败集中在 sandbox（bubblewrap 不可用）与 `/tmp` 路径等环境差异，非功能回归（CI ubuntu 为准）。
+>
+> **2026-07-28 T6 复核完成**：八项残项全部核实并归档（`docs/specs/architecture-hardening-t6-residual-re-audit.md`）。结论：Q4/Q5/P3/P6/P7 ✅已修复；S5/Q3/P5 ⚠️部分（残留 7 条结构化 backlog：T6-B1–B7）。
 >
 > **2026-07-28 长任务稳定性补丁**（四类中断风险修复，独立于 T1–T6）：
 > 1. **turn 硬顶**：`autoExtendTurns` 默认改 `true`、`maxTurnsCeiling` 默认 100→400 且 `<= 0` 表示不封顶（`config.ts` schema + `QueryEngine.ts` ceiling 解析）；活跃进展（近 5 turns 有文件修改或工具调用）持续延长预算，停滞仍会停止。

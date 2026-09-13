@@ -31,6 +31,7 @@
 
 import { vi } from 'vitest';
 import { z } from 'zod';
+import { ToolExecutor } from '../../../src/executors/toolExecutor';
 
 // ── Shared preset state ──
 //
@@ -222,6 +223,23 @@ export function createTestEngine(
   overrides: TestEngineOverrides = {},
   extraTools: ToolDefinition[] = [],
 ): QueryEngine {
+  // Unit tests drive MockShell/MockFS; a real sandbox backend is not required.
+  // Sandbox policy stays real for decision-layer coverage when a backend exists;
+  // when it does not, `enabled: false` avoids Bash 'required' deny so MockShell
+  // can exercise the executor path (Windows / no-Docker hosts).
+  const rules = (overrides as { permissionRules?: { deny?: string[]; ask?: string[]; allow?: string[] } })
+    .permissionRules || {};
+  const toolExecutor = new ToolExecutor(
+    extraTools,
+    process.cwd(),
+    {
+      alwaysDenyRules: rules.deny || [],
+      alwaysAskRules: rules.ask || [],
+      alwaysAllowRules: rules.allow || [],
+    },
+    undefined,
+    { enabled: false, failIfNoSandbox: false }
+  );
   return new QueryEngine(
     {
       model: 'test-model',
@@ -235,7 +253,8 @@ export function createTestEngine(
       sandboxFailIfNoSandbox: false,
       ...overrides,
     },
-    extraTools
+    extraTools,
+    { toolExecutor }
   );
 }
 

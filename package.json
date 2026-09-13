@@ -32,7 +32,13 @@
     "bench:startup": "node scripts/bench/startup.mjs",
     "bench:turn": "npx tsx scripts/bench/turn-overhead.ts",
     "bench:long": "npx tsx scripts/bench/long-session.ts",
-    "perf:ratchet": "node scripts/perf-ratchet.mjs"
+    "perf:ratchet": "node scripts/perf-ratchet.mjs",
+    "eval:baseline": "node scripts/eval/agent-longtask-harness.mjs run-baseline --backend mock",
+    "eval:metrics": "npx tsx scripts/eval/metrics.ts",
+    "agp:status": "npx tsx scripts/agp/cli.ts status",
+    "agp:list": "npx tsx scripts/agp/cli.ts list",
+    "agp:evaluate": "npx tsx scripts/agp/cli.ts evaluate",
+    "agp:demo": "npx tsx scripts/agp/cli.ts demo"
   },
   "keywords": [
     "cli",

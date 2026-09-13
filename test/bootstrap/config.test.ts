@@ -88,7 +88,7 @@ describe('ConfigSchema', () => {
 
     // Sandbox defaults
     expect(config.sandbox.enabled).toBe(true);
-    expect(config.sandbox.backend).toBe('bubblewrap');
+    expect(config.sandbox.backend).toBe('auto');
     expect(config.sandbox.allowNetwork).toBe(false);
     expect(config.sandbox.maxMemoryMb).toBe(512);
     expect(config.sandbox.cpuTimeLimitSec).toBe(60);
@@ -569,7 +569,7 @@ describe('Config Layer Merging', () => {
     expect(config.sandbox.enabled).toBe(false);
     expect(config.sandbox.maxMemoryMb).toBe(256);
     // Unset fields should retain defaults from schema
-    expect(config.sandbox.backend).toBe('bubblewrap');
+    expect(config.sandbox.backend).toBe('auto');
     expect(config.sandbox.allowNetwork).toBe(false);
     expect(config.sandbox.cpuTimeLimitSec).toBe(60);
     expect(config.sandbox.defaultEnforcement).toBe('preferred');

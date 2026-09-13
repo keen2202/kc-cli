@@ -34,7 +34,7 @@ export interface ToolSandboxPolicy {
 export interface SandboxPolicy {
   /** Global sandbox settings */
   enabled: boolean;
-  backend: 'bubblewrap' | 'seccomp' | 'docker' | 'noop';
+  backend: 'auto' | 'bubblewrap' | 'seccomp' | 'docker' | 'windows-sandbox' | 'noop';
   /** Default enforcement level for tools not explicitly configured */
   defaultEnforcement: SandboxEnforcementLevel;
   /** Default allowNetwork setting */

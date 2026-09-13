@@ -53,7 +53,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { FileContentCache } from '../services/cache/FileContentCache';
 import { ImportanceTagger } from './QueryEngineImportance';
 import { RuntimeControlHandler } from './QueryEngineRuntimeControl';
-import { computeSurfaceRuntime, buildConditionalInjection } from '../api/prompts/instruction-surfaces';
+import { computeSurfaceRuntime, buildConditionalInjection, CONDITIONAL_SURFACES } from '../api/prompts/instruction-surfaces';
+import type { ExperimentRuntime } from '../experiments/protocol';
 
 // QueryEngineConfig moved to protocol.ts (4e); re-exported for API stability.
 export type { QueryEngineConfig } from './protocol';
@@ -88,6 +89,12 @@ export interface QueryEngineDeps {
   decision: DecisionGates;
   planningHandler: PlanningPhaseHandler;
   runtimeControl: RuntimeControlHandler;
+  /**
+   * T9: offline experiment runtime (catalog overlay). Optional — when omitted,
+   * conditional prompt surfaces use the code baseline (byte-identical to
+   * pre-T9 behavior).
+   */
+  experimentRuntime?: ExperimentRuntime;
 }
 
 /**
@@ -169,6 +176,9 @@ export class QueryEngine {
 
   // harness-evolution T2 (H2): cross-turn runtime control policy handler
   private runtimeControl: RuntimeControlHandler;
+
+  // T9: locked experiment assignments (session-scoped; never re-reads catalog)
+  private experimentRuntime: ExperimentRuntime | null;
 
   constructor(config: QueryEngineConfig, tools: ToolDefinition[], deps?: Partial<QueryEngineDeps>) {
     const d = deps ?? {};
@@ -263,6 +273,19 @@ export class QueryEngine {
     // harness-evolution T2 (H2): runtime control policy (default disabled)
     this.runtimeControl = d.runtimeControl ?? new RuntimeControlHandler(config.runtimeControl);
 
+    // T9: lock experiment overlay assignments once at construction.
+    this.experimentRuntime = d.experimentRuntime ?? null;
+    if (this.experimentRuntime) {
+      try {
+        this.experimentRuntime.initialize();
+      } catch (err) {
+        logger.query.warn('experiment runtime initialize failed; using baseline surfaces', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        this.experimentRuntime = null;
+      }
+    }
+
     // Link planning handler to tool executor for defense-in-depth filtering
     this.toolExecutor.setToolBlockCheck((toolName: string) => {
       if (this.planningHandler.isEnabled && !this.planningHandler.isToolAllowed(toolName)) {
@@ -275,6 +298,31 @@ export class QueryEngine {
   /** Get the current API key (for startup validation). */
   getApiKey(): string {
     return this.config.apiKey || '';
+  }
+
+  /**
+   * T9 placeholder for experiment run outcomes. T11 will fill verified /
+   * patchFiles / turns / cost from the real completion path. Never throws.
+   */
+  private async recordExperimentOutcomePlaceholder(success: boolean): Promise<void> {
+    if (!this.experimentRuntime) return;
+    try {
+      await this.experimentRuntime.recordRunOutcome({
+        runId: uuidv4(),
+        sessionId: getState().sessionId,
+        taskId: process.env.KC_EXPERIMENT_TASK_ID,
+        artifactAssignments: [...this.experimentRuntime.getAssignments()],
+        success,
+        verified: false,
+        patchFiles: [],
+        turns: this.conversation.getMessages().filter(m => m.role === 'assistant').length,
+        noPatch: this.modifiedFiles.size === 0,
+        errorCode: success ? undefined : 'query_error',
+        timestamp: Date.now(),
+      });
+    } catch {
+      /* best-effort; never block completion */
+    }
   }
 
   /**
@@ -618,6 +666,8 @@ export class QueryEngine {
 
           case 'completed':
           case 'error':
+            // T9 placeholder: T11 fills full RunOutcome fields. Best-effort only.
+            void this.recordExperimentOutcomePlaceholder(currentState === 'completed');
             return;
 
           default:
@@ -811,7 +861,15 @@ export class QueryEngine {
     let conditionalInjection = '';
     if (this.config.promptSurfaces?.conditionalInjection) {
       const runtime = computeSurfaceRuntime(this.conversation.getMessages());
-      conditionalInjection = buildConditionalInjection(runtime);
+      const resolveSurface = this.experimentRuntime
+        ? (name: string, base: string) =>
+            this.experimentRuntime!.resolvePromptSurface(name, base).value
+        : undefined;
+      conditionalInjection = buildConditionalInjection(
+        runtime,
+        CONDITIONAL_SURFACES,
+        resolveSurface
+      );
     }
     // harness-evolution T2 (H2): drain queued runtime-control interventions
     // (empty string when the policy switch is off).

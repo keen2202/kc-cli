@@ -10,6 +10,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    setupFiles: ['test/setup.ts'],
     include: ['src/**/*.test.ts', 'test/**/*.test.{ts,tsx}'],
     exclude: ['node_modules', 'dist'],
     coverage: {
@@ -33,6 +34,7 @@ export default defineConfig({
         'src/plugins/**/*.ts',
         'src/ui/**/*.{ts,tsx}',
         'src/agp/**/*.ts',
+        'src/experiments/**/*.ts',
         'src/im/**/*.ts',
         'src/commands/**/*.ts',
         'src/metrics/**/*.ts',
@@ -76,6 +78,12 @@ export default defineConfig({
           branches: 17,
           functions: 22,
           lines: 23,
+        },
+        'src/experiments/**/*.ts': {
+          statements: 70,
+          branches: 60,
+          functions: 70,
+          lines: 70,
         },
         'src/im/**/*.ts': {
           statements: 50,

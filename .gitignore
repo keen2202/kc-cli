@@ -70,7 +70,14 @@ evaluation/
 .kc-cli/audit/
 # T7 (M2): task-completion acceptance reports
 .kc-cli/reports/
+# AGP offline experiment catalog / eval-runs / evidence (runtime artifacts)
+.kc-cli/experiments/
 .history
+
+# Scratch files
+.tmp-*.txt
+.zcode/
+design-assets/
 
 # Generated reports (one-off review/audit documents)
 REVIEW-REPORT.md

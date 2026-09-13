@@ -292,7 +292,7 @@ export class ToolExecutor {
     pluginHooks?: PluginHooks,
     sandboxOptions?: {
       enabled?: boolean;
-      backend?: 'bubblewrap' | 'seccomp' | 'docker' | 'noop';
+      backend?: 'auto' | 'bubblewrap' | 'seccomp' | 'docker' | 'windows-sandbox' | 'noop';
       allowNetwork?: boolean;
       maxMemoryMb?: number;
       cpuTimeLimitSec?: number;
@@ -326,11 +326,11 @@ export class ToolExecutor {
     this.sandboxManager = new SandboxManager({
       workDir: cwd,
       enabled: sandboxOptions?.enabled ?? true,
-      backend: sandboxOptions?.backend ?? 'bubblewrap',
+      backend: sandboxOptions?.backend ?? 'auto',
       allowNetwork: sandboxOptions?.allowNetwork ?? false,
       maxMemoryMb: sandboxOptions?.maxMemoryMb ?? 512,
       cpuTimeLimitSec: sandboxOptions?.cpuTimeLimitSec ?? 60,
-      failIfNoSandbox: sandboxOptions?.failIfNoSandbox ?? true,
+      failIfNoSandbox: sandboxOptions?.failIfNoSandbox,
       policy,
     });
   }

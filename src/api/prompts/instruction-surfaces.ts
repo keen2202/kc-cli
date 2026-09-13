@@ -14,8 +14,6 @@ import type {
   InstructionSurfaceRuntime,
 } from './types';
 import type { ToolDefinition } from '../../tools/protocol';
-import { createPromptRecord } from '../../agp/adapters/prompt-adapter';
-import type { ResourceRegistrationRecord } from '../../agp/protocol';
 import type { ConversationContext } from './prompt-builder';
 
 // ─── Static surface manifest (byte-equivalent to legacy PromptBuilder) ──────
@@ -277,34 +275,25 @@ export function computeSurfaceRuntime(messages: readonly SurfaceRuntimeMessage[]
 /**
  * Build the conditional injection text for the current runtime state.
  * Returns '' when no surface predicate matches (nothing to inject).
+ *
+ * When `resolveSurface` is provided (T9 experiment runtime), each matching
+ * *evolvable* surface's baseline text is passed through the resolver so a
+ * promoted catalog overlay can replace it. Static / non-evolvable surfaces
+ * always use the code baseline.
  */
 export function buildConditionalInjection(
   runtime: InstructionSurfaceRuntime,
-  surfaces: readonly InstructionSurface[] = CONDITIONAL_SURFACES
+  surfaces: readonly InstructionSurface[] = CONDITIONAL_SURFACES,
+  resolveSurface?: (name: string, base: string) => string
 ): string {
   return surfaces
     .filter(s => s.predicate === undefined || s.predicate(runtime))
-    .map(s => s.build(runtime))
+    .map(s => {
+      const base = s.build(runtime);
+      if (!base) return '';
+      if (!resolveSurface || !s.evolvable) return base;
+      return resolveSurface(s.name, base);
+    })
     .filter(Boolean)
     .join('\n\n');
-}
-
-// ─── AGP registration bridge ─────────────────────────────────────────────────
-
-/**
- * Convert evolvable instruction surfaces into AGP Prompt registration records
- * (via `createPromptRecord`), connecting PromptBuilder to the AGP registry.
- */
-export function createSurfacePromptRecords(
-  surfaces: readonly InstructionSurface[] = CONDITIONAL_SURFACES
-): ResourceRegistrationRecord<'Prompt'>[] {
-  return surfaces
-    .filter(s => s.evolvable)
-    .map(s => createPromptRecord({
-      name: `instruction-surface-${s.name}`,
-      description: `Instruction surface '${s.name}' (category: ${s.category})`,
-      template: s.build({ isFirstTurn: true, lastToolResultHadError: true }),
-      evolvability: 1,
-      role: 'system',
-    }));
 }

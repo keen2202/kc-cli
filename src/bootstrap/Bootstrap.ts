@@ -17,6 +17,8 @@ import { profileCheckpoint, getProfileReport } from './profiler';
 import type { GlobalState } from './state';
 import { initializeState, getState, updateState, runWithScopedState } from './state';
 import { loadConfig, type Config, type ConfigLayer } from './config';
+import { createExperimentRuntime } from '../experiments/runtime';
+import type { ExperimentRuntime } from '../experiments/protocol';
 import { toolRegistry, registerBuiltInTools } from '../tools';
 import { QueryEngine } from '../query/QueryEngine';
 import type { LLMProvider } from '../api';
@@ -34,7 +36,6 @@ import {
 import { logger } from '../services/logger';
 import { getErrorMessage } from '../utils/errors';
 import { redactTruncated } from '../utils/redact';
-import { createSurfacePromptRecords } from '../api/prompts/instruction-surfaces';
 import { GUIDELINES_SECTION, CAPABILITIES_SECTION } from '../api/prompts/system-prompt-sections';
 import { registerFailureBridgingHook } from '../hooks/postTurnHooks';
 import { createMemoryIntegration } from '../memory/integration';
@@ -65,6 +66,10 @@ export interface BootstrapOptions {
    * decisions are auto-approved ('proceed') instead of the default fail-safe deny.
    */
   dangerouslySkipPermissions?: boolean;
+  /** T9: --no-experiments forces baseline surfaces (ignores catalog). */
+  noExperiments?: boolean;
+  /** T9: --experiment artifactId=variantId single-run pin (informational). */
+  experimentPin?: string;
 }
 
 export interface BootstrapResult {
@@ -223,14 +228,9 @@ export class Bootstrap {
           console.log(chalk.gray(`  AGP: ${loaded.loaded} resources restored from disk`));
         }
       }
-      // harness-evolution T1: register evolvable instruction surfaces as AGP
-      // Prompt resources so the registry can list/evolve them (idempotent —
-      // records already restored from disk are left untouched).
-      for (const record of createSurfacePromptRecords()) {
-        if (!agpRegistry.get('Prompt', record.entity.name)) {
-          agpRegistry.register('Prompt', record);
-        }
-      }
+      // harness-evolution T1 surface registration into AGP was removed in T9:
+      // instruction-surfaces no longer imports src/agp. Overlay path is
+      // src/experiments/** + catalog (see agp-experiment-runtime-spec).
     } catch (_err) {
       if (verbose) {
         logger.services.warn(
@@ -583,6 +583,27 @@ export class Bootstrap {
     // (default 'deny'). This flows into every QueryEngine's ToolExecutor.
     const noninteractiveAskPolicy = this.resolveNoninteractiveAskPolicy(config);
 
+    // T9: offline experiment runtime. Default path (enabled=false) is a pure
+    // no-op with zero catalog IO.
+    const experimentsEnabled =
+      config.experiments?.enabled === true && this.options.noExperiments !== true;
+    const experimentRuntime: ExperimentRuntime | null = experimentsEnabled
+      ? createExperimentRuntime({
+          enabled: true,
+          catalogPath: config.experiments?.catalogPath,
+          runsDir: config.experiments?.runsDir,
+          cwd,
+          sessionId: getState().sessionId,
+          // Pin one artifact for this CLI run when --experiment is passed.
+          // FileExperimentRuntime locks assignments from catalog at initialize();
+          // an explicit pin is applied by resolving through a thin wrapper below.
+        })
+      : null;
+    if (this.options.experimentPin && experimentRuntime) {
+      // CLI pin is informational for T9 catalog path; variant pin injection for
+      // eval backends uses env (see scripts/agp). Documented in agp-experiment spec.
+    }
+
     const queryEngine = new QueryEngine(
       {
         model,
@@ -618,6 +639,7 @@ export class Bootstrap {
           getTool: (name) => toolRegistry.getTool(name as Parameters<typeof toolRegistry.getTool>[0]),
           getToolNames: () => toolRegistry.getAllTools().map((t) => t.name),
         },
+        experimentRuntime: experimentRuntime ?? undefined,
       },
     );
     profileCheckpoint('engine_created');

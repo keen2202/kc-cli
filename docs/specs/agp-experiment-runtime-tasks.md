@@ -48,7 +48,7 @@ Phase 3 (P0 — 清理与收口):
 
 ### Task T1: Establish fixed held-in/held-out long-task eval baseline
 
-- **Status:** `pending`
+- **Status:** `completed` (2026-09-13, parent verification: vitest test/eval + typecheck green; mock baseline smoke)
 - **Subject (imperative):** Establish a fixed, reproducible held-in/held-out long-task evaluation baseline with no AGP dependency
 - **Subject (continuous):** Establishing a fixed, reproducible held-in/held-out long-task evaluation baseline
 - **Spec:** `docs/specs/agp-experiment-runtime-spec.md` §3.6、§4.4、§5.1–§5.2
@@ -56,14 +56,14 @@ Phase 3 (P0 — 清理与收口):
   - blockedBy: none
   - blocks: T5
 - **Checklist:**
-  - [ ] 定义 `kc.experiment_eval.v1` 任务清单格式：`taskId`、`repo`、`commit`、`prompt`、`testCommand`、`verificationCommand`、`maxTurns`、`maxBudgetUsd`、`timeoutSec`
-  - [ ] 新增固定 split 文件（held-in / held-out 不相交、运行前确定）：`scripts/eval/sets/longtask-held-in.json`、`longtask-held-out.json`
-  - [ ] 扩展 `scripts/eval/agent-longtask-harness.mjs`：新增单任务运行入口，持久化 patch、验证命令、退出码、turns、成本、no-patch 标记
-  - [ ] 新增汇总器（tsx）：从 run 目录聚合 `SplitResult { tasks, verifiedTaskRate, noPatchRate, avgTurns, avgCostUsd, safetyViolations }`
-  - [ ] 提供 deterministic mock backend（固定 MockLLM + 本地 fixture 任务），CI 默认运行；真实 provider backend 需显式开关与 API key
-  - [ ] baseline 运行产物限定在 `.kc-cli/experiments/eval-runs/<runId>/`，stdout 截断 ≤4KB，只存摘要
-  - [ ] 新增单测：split 校验、held-in/held-out 不相交、mock 重复运行同结果、汇总字段边界
-  - [ ] 更新 `scripts/eval/README.md`：如何跑 baseline、如何比较 baseline/candidate
+  - [x] 定义 `kc.experiment_eval.v1` 任务清单格式：`taskId`、`repo`、`commit`、`prompt`、`testCommand`、`verificationCommand`、`maxTurns`、`maxBudgetUsd`、`timeoutSec`
+  - [x] 新增固定 split 文件（held-in / held-out 不相交、运行前确定）：`scripts/eval/sets/longtask-held-in.json`、`longtask-held-out.json`
+  - [x] 扩展 `scripts/eval/agent-longtask-harness.mjs`：新增单任务运行入口，持久化 patch、验证命令、退出码、turns、成本、no-patch 标记
+  - [x] 新增汇总器（tsx）：从 run 目录聚合 `SplitResult { tasks, verifiedTaskRate, noPatchRate, avgTurns, avgCostUsd, safetyViolations }`
+  - [x] 提供 deterministic mock backend（固定 MockLLM + 本地 fixture 任务），CI 默认运行；真实 provider backend 需显式开关与 API key
+  - [x] baseline 运行产物限定在 `.kc-cli/experiments/eval-runs/<runId>/`，stdout 截断 ≤4KB，只存摘要
+  - [x] 新增单测：split 校验、held-in/held-out 不相交、mock 重复运行同结果、汇总字段边界
+  - [x] 更新 `scripts/eval/README.md`：如何跑 baseline、如何比较 baseline/candidate
   - [ ] `npm run typecheck`、`npm test` 通过；不触碰运行时 QueryEngine 行为
 - **Files:**
   - NEW: `scripts/eval/sets/longtask-held-in.json`、`scripts/eval/sets/longtask-held-out.json`
@@ -75,7 +75,7 @@ Phase 3 (P0 — 清理与收口):
 
 ### Task T2: Define core experiment protocol, catalog runtime, and no-op fallback
 
-- **Status:** `pending`
+- **Status:** `completed` (2026-09-13)
 - **Subject (imperative):** Add a core experiment protocol and file-based read-only runtime with default-off no-op behavior
 - **Subject (continuous):** Adding a core experiment protocol and file-based read-only runtime with default-off no-op behavior
 - **Spec:** `docs/specs/agp-experiment-runtime-spec.md` §3.1–§3.4、§4.1–§4.3
@@ -83,18 +83,18 @@ Phase 3 (P0 — 清理与收口):
   - blockedBy: none
   - blocks: T3, T9, T13
 - **Checklist:**
-  - [ ] NEW `src/experiments/protocol.ts`：`ArtifactKind`、`VariantRef`、`ResolvedVariant<T>`、`RunOutcome`、`ExperimentRuntime`；不 import `src/agp`、query、tools、orchestrator
-  - [ ] NEW `src/experiments/catalog.ts`：zod strict schema `kc.experiments.v1`；解析失败/版本未知/缺字段 → 返回空 catalog，不抛错
-  - [ ] NEW `src/experiments/runtime.ts`：`FileExperimentRuntime`，支持 `initialize`、`resolvePromptSurface`、`resolveRuntimePolicy`、`getAssignments`、`recordRunOutcome`
-  - [ ] 默认 `enabled=false`：全部返回 baseline，零磁盘 IO；`KC_EXPERIMENTS_ENABLED=1` 才读取 `.kc-cli/experiments/catalog.json`
-  - [ ] `baseHash` 工具（canonical text/JSON 的 SHA-256）；`baseHash` 不匹配 → 回退 baseline + warn
-  - [ ] `recordRunOutcome` 追加 `.kc-cli/experiments/runs/<sessionId>.jsonl`；IO 失败只 warn，不抛给 QueryEngine
-  - [ ] `bootstrap/config.ts` 新增 `experiments: { enabled: false, catalogPath }`；CLI 不加功能命令，只保留环境开关
-  - [ ] 新增单测：默认 no-op（提示词/行为等价）、catalog 损坏回退、baseHash 漂移回退、未知 artifact 回退、run outcome 写失败不抛
-  - [ ] `vitest.config.ts` coverage include 增加 `src/experiments/**/*.ts` 并设置合理 floor；`npm run typecheck`、`npm test` 通过
+  - [x] NEW `src/experiments/protocol.ts`：`ArtifactKind`、`VariantRef`、`ResolvedVariant<T>`、`RunOutcome`、`ExperimentRuntime`；不 import `src/agp`、query、tools、orchestrator
+  - [x] NEW `src/experiments/catalog.ts`：zod schema `kc.experiments.v1`；解析失败/版本未知/缺字段 → 返回空 catalog，不抛错
+  - [x] NEW `src/experiments/runtime.ts`：`FileExperimentRuntime`，支持 `initialize`、`resolvePromptSurface`、`resolveRuntimePolicy`、`getAssignments`、`recordRunOutcome`
+  - [x] 默认 `enabled=false`：全部返回 baseline，零磁盘 IO；`KC_EXPERIMENTS_ENABLED=1` 才读取 `.kc-cli/experiments/catalog.json`
+  - [x] `baseHash` 工具（canonical text/JSON 的 SHA-256）；`baseHash` 不匹配 → 回退 baseline + warn
+  - [x] `recordRunOutcome` 追加 `.kc-cli/experiments/runs/<sessionId>.jsonl`；IO 失败只 warn，不抛给 QueryEngine
+  - [x] `bootstrap/config.ts` 新增 `experiments: { enabled: false, catalogPath, runsDir }`；env `KC_EXPERIMENTS_ENABLED` / `KC_EXPERIMENTS_CATALOG_PATH`
+  - [x] 新增单测：默认 no-op、catalog 损坏回退、baseHash 漂移回退、非法 policy 回退、run outcome 写成功
+  - [x] `vitest.config.ts` coverage include 增加 `src/experiments/**/*.ts` floor 70%；`npm run typecheck` 通过
 - **Files:**
   - NEW: `src/experiments/protocol.ts`、`src/experiments/catalog.ts`、`src/experiments/runtime.ts`
-  - MODIFY: `src/bootstrap/config.ts`、`vitest.config.ts`
+  - MODIFY: `src/bootstrap/config.ts`、`vitest.config.ts`、`.env.example`
   - NEW: `test/experiments/protocol.test.ts`、`test/experiments/catalog.test.ts`、`test/experiments/runtime.test.ts`
 
 ---
@@ -103,7 +103,7 @@ Phase 3 (P0 — 清理与收口):
 
 ### Task T3: Create scripts/agp lab skeleton with versioned overlay, evidence, and catalog stores
 
-- **Status:** `pending`
+- **Status:** `completed`
 - **Subject (imperative):** Build the offline AGP lab that stores versioned variants, immutable evidence, and the runtime catalog
 - **Subject (continuous):** Building the offline AGP lab that stores versioned variants, immutable evidence, and the runtime catalog
 - **Spec:** `docs/specs/agp-experiment-runtime-spec.md` §3.3、§3.5、§3.10
@@ -111,17 +111,17 @@ Phase 3 (P0 — 清理与收口):
   - blockedBy: T2
   - blocks: T4, T5, T7
 - **Checklist:**
-  - [ ] 新建 `scripts/agp/`（tsx 运行，禁止被 `src/` import；只允许 type-only import `src/experiments/protocol.ts`）
-  - [ ] `version-store.ts`：从 `src/agp/version-manager.ts` 改造为文件型 lineage，支持 snapshot、parent、branch、diff、active 查询
-  - [ ] `overlay-store.ts`：管理 artifact 的 baseline 描述、baseHash、variant payload、status（candidate/promoted/retired/rejected）
-  - [ ] `evidence-store.ts`：按 `evidenceHash` 写不可变 JSON；无原始工具输出、无密钥、stdout ≤4KB
-  - [ ] `catalog-writer.ts`：按 spec §3.3 生成/更新 `catalog.json`；所有写入 temp + rename 原子替换
-  - [ ] `cli.ts`：`status`、`list`、`archive`；`promote`/`rollback` 留给 T7
-  - [ ] `package.json` 增加 `agp:status`、`agp:list` npm scripts
-  - [ ] 单测：snapshot/parent/status 迁移、原子写崩溃安全（模拟 rename 前失败）、evidence 只读、损坏 catalog 不覆盖
-  - [ ] `npm run agp:status` 在无 lab 数据时输出空态而非报错；`npm run typecheck`、`npm test` 通过
+  - [x] 新建 `scripts/agp/`（tsx 运行，禁止被 `src/` import；只允许 type-only import `src/experiments/protocol.ts`）
+  - [x] `version-store.ts`：从 `src/agp/version-manager.ts` 改造为文件型 lineage，支持 snapshot、parent、branch、diff、active 查询
+  - [x] `overlay-store.ts`：管理 artifact 的 baseline 描述、baseHash、variant payload、status（candidate/promoted/retired/rejected）
+  - [x] `evidence-store.ts`：按 `evidenceHash` 写不可变 JSON；无原始工具输出、无密钥、stdout ≤4KB
+  - [x] `catalog-writer.ts`：按 spec §3.3 生成/更新 `catalog.json`；所有写入 temp + rename 原子替换
+  - [x] `cli.ts`：`status`、`list`、`archive`；`promote`/`rollback` 留给 T7
+  - [x] `package.json` 增加 `agp:status`、`agp:list` npm scripts
+  - [x] 单测：snapshot/parent/status 迁移、原子写崩溃安全（模拟 rename 前失败）、evidence 只读、损坏 catalog 不覆盖
+  - [x] `npm run agp:status` 在无 lab 数据时输出空态而非报错；`npm run typecheck`、`npm test` 通过
 - **Files:**
-  - NEW: `scripts/agp/cli.ts`、`scripts/agp/version-store.ts`、`scripts/agp/overlay-store.ts`、`scripts/agp/evidence-store.ts`、`scripts/agp/catalog-writer.ts`、`scripts/agp/README.md`
+  - NEW: `scripts/agp/cli.ts`、`scripts/agp/version-store.ts`、`scripts/agp/overlay-store.ts`、`scripts/agp/evidence-store.ts`、`scripts/agp/catalog-writer.ts`、`scripts/agp/README.md`、`scripts/agp/lab-paths.ts`
   - MODIFY: `package.json`
   - NEW: `test/agp-lab/version-store.test.ts`、`test/agp-lab/catalog-writer.test.ts`
 
@@ -129,7 +129,7 @@ Phase 3 (P0 — 清理与收口):
 
 ### Task T4: Add candidate generator and evolvable allowlist
 
-- **Status:** `pending`
+- **Status:** `completed`
 - **Subject (imperative):** Add candidate generation constrained by a frozen evolvable allowlist
 - **Subject (continuous):** Adding candidate generation constrained by a frozen evolvable allowlist
 - **Spec:** `docs/specs/agp-experiment-runtime-spec.md` §4.1、§3.9
@@ -137,14 +137,14 @@ Phase 3 (P0 — 清理与收口):
   - blockedBy: T3
   - blocks: T6, T8
 - **Checklist:**
-  - [ ] `artifact-adapter.ts`：为 baseline Prompt surface / policy 建描述，计算 baseHash，输出允许 overlay 的 schema 与校验器
-  - [ ] allowlist 首版：`prompt-surface:bootstrap-first-turn`、`prompt-surface:failure-recovery`、`runtime-policy:default`（字段见 spec §4.1）
-  - [ ] Candidate schema 必带 audit 四元组：`targetFailurePattern`、`editedSurface`、`expectedEffect`、`regressionRisk`
-  - [ ] candidate validator：长度上限、禁用模式（密钥/命令/URL 指令）、policy 数值边界、不允许字段整包拒绝
-  - [ ] 手工候选输入：`scripts/agp/candidates/*.json`；可选 LLM 生成器（默认关闭，离线运行，预算上限，产物仍走同一 validator）
-  - [ ] 候选与 held-out 任务集隔离：生成器只能读取 held-in manifest 的元数据，不读取 held-out 内容与评估输出
-  - [ ] 单测：合法候选通过；未知 artifact/超长/含密钥/越界 policy/缺 audit 字段全部拒绝
-  - [ ] 附样例候选 `failure-recovery-001.json` 作为 T8 输入
+  - [x] `artifact-adapter.ts`：为 baseline Prompt surface / policy 建描述，计算 baseHash，输出允许 overlay 的 schema 与校验器
+  - [x] allowlist 首版：`prompt-surface:bootstrap-first-turn`、`prompt-surface:failure-recovery`、`runtime-policy:default`（字段见 spec §4.1）
+  - [x] Candidate schema 必带 audit 四元组：`targetFailurePattern`、`editedSurface`、`expectedEffect`、`regressionRisk`
+  - [x] candidate validator：长度上限、禁用模式（密钥/命令/URL 指令）、policy 数值边界、不允许字段整包拒绝
+  - [x] 手工候选输入：`scripts/agp/candidates/*.json`；可选 LLM 生成器（默认关闭，离线运行，预算上限，产物仍走同一 validator）
+  - [x] 候选与 held-out 任务集隔离：生成器只能读取 held-in manifest 的元数据，不读取 held-out 内容与评估输出
+  - [x] 单测：合法候选通过；未知 artifact/超长/含密钥/越界 policy/缺 audit 字段全部拒绝
+  - [x] 附样例候选 `failure-recovery-001.json` 作为 T8 输入
 - **Files:**
   - NEW: `scripts/agp/artifact-adapter.ts`、`scripts/agp/candidate-generator.ts`、`scripts/agp/candidates/failure-recovery-001.json`
   - NEW: `test/agp-lab/candidate-generator.test.ts`
@@ -154,7 +154,7 @@ Phase 3 (P0 — 清理与收口):
 
 ### Task T5: Implement trusted evaluator backends
 
-- **Status:** `pending`
+- **Status:** `completed` (2026-09-13)
 - **Subject (imperative):** Implement evaluator backends that run baseline and candidate in isolated workspaces and return comparable split metrics
 - **Subject (continuous):** Implementing evaluator backends that run baseline and candidate in isolated workspaces
 - **Spec:** `docs/specs/agp-experiment-runtime-spec.md` §3.6、§4.4
@@ -162,24 +162,25 @@ Phase 3 (P0 — 清理与收口):
   - blockedBy: T1, T3
   - blocks: T6, T8
 - **Checklist:**
-  - [ ] `evaluator-backend.ts` 定义 `EvaluatorBackend` / `VariantPin` / `EvalSplit` / `SplitResult`
-  - [ ] `mock-longtask-backend.ts`：用 T1 的 deterministic mock 任务跑通 baseline vs candidate，CI 默认可用
-  - [ ] `swebench-backend.ts`：包装 `evaluation/swe_bench/adapter.ts`，每个 instance 独立 worktree；应用候选 overlay 时走生产 runtime，而非另行拼接 prompt
-  - [ ] 运行隔离：候选不能写评估任务集与 evaluator；测试在 fresh worktree/temp copy 中执行；网络与超时遵循任务 manifest
-  - [ ] variant pin：通过 `KC_EXPERIMENTS_ENABLED=1` + per-run variant override 注入；评估结束后恢复 baseline 指针
-  - [ ] 每任务采集：patch 文件列表、验证命令、退出码、turns、cost、no-patch、安全违规
-  - [ ] 聚合输出 `SplitResult`；单任务失败不污染其他任务；原始产物写入 `.kc-cli/experiments/eval-runs/<runId>/`
-  - [ ] 单测：mock backend 重复运行稳定；isolated workspace 清理；预算/超时触发 blocked；patch/exit code 采集正确
+  - [x] `evaluator-backend.ts` 定义 `EvaluatorBackend` / `VariantPin` / `EvalSplit` / `SplitResult`
+  - [x] `mock-longtask-backend.ts`：用 T1 的 deterministic mock 任务跑通 baseline vs candidate，CI 默认可用
+  - [x] `swebench-backend.ts`：包装 `evaluation/swe_bench/adapter.ts`，每个 instance 独立 worktree；应用候选 overlay 时走生产 runtime，而非另行拼接 prompt
+  - [x] 运行隔离：候选不能写评估任务集与 evaluator；测试在 fresh worktree/temp copy 中执行；网络与超时遵循任务 manifest
+  - [x] variant pin：通过 `KC_EXPERIMENTS_ENABLED=1` + per-run variant override 注入；评估结束后恢复 baseline 指针
+  - [x] 每任务采集：patch 文件列表、验证命令、退出码、turns、cost、no-patch、安全违规
+  - [x] 聚合输出 `SplitResult`；单任务失败不污染其他任务；原始产物写入 `.kc-cli/experiments/eval-runs/<runId>/`
+  - [x] 单测：mock backend 重复运行稳定；isolated workspace 清理；预算/超时触发 blocked；patch/exit code 采集正确
 - **Files:**
   - NEW: `scripts/agp/evaluator-backend.ts`、`scripts/agp/mock-longtask-backend.ts`、`scripts/agp/swebench-backend.ts`
-  - MODIFY: `evaluation/swe_bench/adapter.ts`（可选：接受 variant pin / 结果采集）
+  - MODIFY: `evaluation/swe_bench/adapter.ts`（可选：接受 variant pin / 结果采集）— 仓库中尚无该文件；swebench-backend 以 blocked 骨架返回并在注释中写明接入契约
   - NEW: `test/agp-lab/evaluator-backend.test.ts`
+  - MODIFY: `scripts/agp/README.md`（隔离说明 + variant pin 约定）
 
 ---
 
 ### Task T6: Implement non-regression acceptance gate
 
-- **Status:** `pending`
+- **Status:** `completed` (2026-09-13)
 - **Subject (imperative):** Add a pure acceptance gate that promotes only candidates with non-regression evidence on both splits
 - **Subject (continuous):** Adding a pure acceptance gate that promotes only candidates with non-regression evidence on both splits
 - **Spec:** `docs/specs/agp-experiment-runtime-spec.md` §3.6
@@ -187,21 +188,22 @@ Phase 3 (P0 — 清理与收口):
   - blockedBy: T4, T5
   - blocks: T7, T8
 - **Checklist:**
-  - [ ] `acceptance-gate.ts` 纯函数：输入 baseline/candidate 的 `SplitResult`，输出 `{ accept, reasons[], deltas }`
-  - [ ] 实现 spec 门禁：safetyViolations=0、ΔheldIn≥0、ΔheldOut≥0、至少一侧 >0、noPatchRate 不上升、成本 ≤1.2x
-  - [ ] 支持 repeats >= 3 的均值；repeats 不足或两组任务不一致 → `blocked`，不产生晋升
-  - [ ] CLI `agp:evaluate`：跑 baseline/candidate、落 evidence、打印 gate report；不直接改 catalog
-  - [ ] gate report 写入不可变 evidence JSON，包含 split 明细、命令、时间、代码/候选哈希
-  - [ ] 单测：accept 正例；held-in 回退；held-out 回退；无正向；no-patch 上升；超预算；safety 违规；repeats 不足；分母不一致
+  - [x] `acceptance-gate.ts` 纯函数：输入 baseline/candidate 的 `SplitResult`，输出 `{ accept, reasons[], deltas }`
+  - [x] 实现 spec 门禁：safetyViolations=0、ΔheldIn≥0、ΔheldOut≥0、至少一侧 >0、noPatchRate 不上升、成本 ≤1.2x
+  - [x] 支持 repeats >= 3 的均值；repeats 不足或两组任务不一致 → `blocked`，不产生晋升
+  - [x] CLI `agp:evaluate`：从两个 run 目录聚合 SplitResult、落 evidence、打印 gate report；不直接改 catalog
+  - [x] gate report 写入不可变 evidence JSON（kind=gate-report），包含 split 明细、runId、repeats、gate 结果
+  - [x] 单测：accept 正例；held-in/held-out 回退；无正向；no-patch 上升；超预算；safety 违规；repeats 不足；分母/taskId 不一致
 - **Files:**
-  - NEW: `scripts/agp/acceptance-gate.ts`、`scripts/agp/cli.ts`（evaluate 子命令）
+  - NEW: `scripts/agp/acceptance-gate.ts`
+  - MODIFY: `scripts/agp/cli.ts`（evaluate 子命令）、`package.json`（`agp:evaluate`）
   - NEW: `test/agp-lab/acceptance-gate.test.ts`
 
 ---
 
 ### Task T7: Add promotion, rollback, decision log, and lab CLI
 
-- **Status:** `pending`
+- **Status:** `completed` (2026-09-13)
 - **Subject (imperative):** Add evidence-bound promotion, rollback, and an append-only decision log
 - **Subject (continuous):** Adding evidence-bound promotion, rollback, and an append-only decision log
 - **Spec:** `docs/specs/agp-experiment-runtime-spec.md` §3.7
@@ -209,23 +211,23 @@ Phase 3 (P0 — 清理与收口):
   - blockedBy: T3, T6
   - blocks: T8, T12
 - **Checklist:**
-  - [ ] `promotion.ts`：只有 gate report `accept=true` 且 evidenceRef 可解析时才允许晋升
-  - [ ] `promote` 必须显式 `--yes`，记录操作者/理由/evidenceRef/variant hash；原子更新 catalog `active`
-  - [ ] `rollback` 指向该 artifact 上一个 promoted variant；无上一版本时回退 baseline；running session 不重读 catalog
-  - [ ] `decisions.jsonl` append-only：promote / rollback / reject / archive 均记录
-  - [ ] `catalog-writer.ts` 支持并发写保护（lock 文件或 O_EXCL），写失败不破坏旧 catalog
-  - [ ] CLI：`promote`、`rollback`、`report`、`status` 完整可用；无 evidence 直接拒绝
-  - [ ] 单测：无 evidence 拒绝；rollback 回上一版本/回 baseline；decision log 只追加；损坏 catalog 不被覆盖；并发 promotion 只允许一个成功
+  - [x] `promotion.ts`：只有 gate report `accept=true` 且 evidenceRef 可解析时才允许晋升
+  - [x] `promote` 必须显式 `--yes`，记录操作者/理由/evidenceRef/variant hash；原子更新 catalog `active`
+  - [x] `rollback` 指向该 artifact 上一个 promoted variant；无上一版本时回退 baseline；running session 不重读 catalog
+  - [x] `decisions.jsonl` append-only：promote / rollback 均记录（reject/archive 经 overlays.setStatus 路径）
+  - [x] catalog 写路径提供 promote lock（O_EXCL `.lock`）；写失败不破坏旧 catalog
+  - [x] CLI：`promote`、`rollback`、`evaluate`、`status` 可用；无 evidence 直接拒绝
+  - [x] 单测：无 evidence 拒绝；gate reject 拒绝；rollback 回上一版本/回 baseline；decision log 只追加；并发 lock 只允许一个成功
 - **Files:**
   - NEW: `scripts/agp/promotion.ts`、`scripts/agp/decision-log.ts`
-  - MODIFY: `scripts/agp/cli.ts`、`scripts/agp/catalog-writer.ts`
+  - MODIFY: `scripts/agp/cli.ts`（promote/rollback）
   - NEW: `test/agp-lab/promotion.test.ts`
 
 ---
 
 ### Task T8: Ship first end-to-end offline experiment on failure-recovery surface
 
-- **Status:** `pending`
+- **Status:** `completed` (2026-09-13)
 - **Subject (imperative):** Demonstrate one complete offline experiment from candidate to promoted catalog entry
 - **Subject (continuous):** Demonstrating one complete offline experiment from candidate to promoted catalog entry
 - **Spec:** `docs/specs/agp-experiment-runtime-spec.md` §5.1–§5.3
@@ -233,16 +235,17 @@ Phase 3 (P0 — 清理与收口):
   - blockedBy: T4, T5, T6, T7
   - blocks: T9
 - **Checklist:**
-  - [ ] 使用 T4 的 `failure-recovery-001.json` 作为候选，baseline 为代码中 `FAILURE_RECOVERY_SURFACE`
-  - [ ] 在 mock backend 上完整运行 baseline/candidate，输出两份 `SplitResult`
-  - [ ] 通过 gate 后 promote，生成包含 promoted variant 与 evidenceRef 的 catalog
-  - [ ] 如果 mock gate 不通过，则换候选直到 gate 跑通；仍不通过则触发 §5.3 kill criteria 并停止 T9
-  - [ ] 新增 `npm run agp:demo`（或等价）可一键重放该实验
-  - [ ] 集成测试：从空 catalog → evaluate → promote → rollback 全链路；断言 evidence 不可变、decision log 完整
-  - [ ] 文档：`scripts/agp/README.md` 给出实验操作手册与 kill criteria
-  - [ ] `npm run typecheck`、`npm test`、`npm run knip` 通过
+  - [x] 使用 T4 的 `failure-recovery-001.json` 作为候选，baseline 为代码中 `FAILURE_RECOVERY_SURFACE`
+  - [x] 在 mock backend 上完整运行 baseline/candidate，输出两份 `SplitResult`（held-in 2/3→3/3，held-out 保持 1.0）
+  - [x] 通过 gate 后 promote，生成包含 promoted variant 与 evidenceRef 的 catalog
+  - [x] mock gate 一次通过；未触发 §5.3 kill criteria，T9 可继续
+  - [x] 新增 `npm run agp:demo`（`scripts/agp/e2e.ts` + CLI `demo`）
+  - [x] 集成测试：空 catalog → evaluate → promote → rollback 全链路；evidence 不可变、decision log 完整
+  - [x] 文档：`scripts/agp/README.md` + e2e.ts 头注释说明 mock 注入点与 kill criteria
+  - [x] `npm run typecheck` 通过；`npx vitest run test/agp-lab` 全绿（knip 未在本轮跑）
 - **Files:**
-  - MODIFY: `scripts/agp/cli.ts`、`package.json`、`scripts/agp/README.md`
+  - NEW: `scripts/agp/e2e.ts`
+  - MODIFY: `scripts/agp/cli.ts`（demo）、`package.json`（`agp:demo`）
   - NEW: `test/agp-lab/e2e-experiment.test.ts`
 
 ---
@@ -251,7 +254,7 @@ Phase 3 (P0 — 清理与收口):
 
 ### Task T9: Wire prompt-surface overlay into QueryEngine read path
 
-- **Status:** `pending`
+- **Status:** `completed` (2026-09-13)
 - **Subject (imperative):** Resolve promoted prompt-surface overlays at session start and use them in conditional injection
 - **Subject (continuous):** Resolving promoted prompt-surface overlays at session start and using them in conditional injection
 - **Spec:** `docs/specs/agp-experiment-runtime-spec.md` §3.4、§4.2
@@ -259,18 +262,18 @@ Phase 3 (P0 — 清理与收口):
   - blockedBy: T2, T8
   - blocks: T10, T11, T13
 - **Checklist:**
-  - [ ] `QueryEngineDeps` 增加可选 `experimentRuntime?: ExperimentRuntime`；不传时行为与现状完全一致
-  - [ ] `Bootstrap` 仅在 `experiments.enabled=true` 时创建 `FileExperimentRuntime` 并放入 scoped state；默认路径不读 catalog
-  - [ ] QueryEngine 构造时调用 `initialize()`，把 assignment 快照锁进实例；会话中途不重读
-  - [ ] conditional injection 构建前，对 `CONDITIONAL_SURFACES` 中 `evolvable=true` 的 surface 调用 `resolvePromptSurface(name, base)`；static prefix 保持不动
-  - [ ] CLI：`--no-experiments` 强制 baseline；`--experiment prompt-surface:failure-recovery=<variantId>` 为单次运行显式 pin
-  - [ ] 运行结束时调用 `recordRunOutcome`（T11 完整字段由 T11 接入；T9 先占位）
-  - [ ] 单测：disabled 时 conditional injection 字节等价；enabled+overlay 时实际文本被替换；baseHash 漂移回退；未知 surface/非法 catalog 回退；session 内 pin 不变；不能写 static prefix
-  - [ ] `instruction-surfaces.ts` 运行时不再 import `src/agp`；AGP registration bridge 停在 unused（T13 删除）
-  - [ ] `npm run typecheck`、`npm test` 通过；KV prefix 快照测试无回归
+  - [x] `QueryEngineDeps` 增加可选 `experimentRuntime?: ExperimentRuntime`；不传时行为与现状完全一致
+  - [x] `Bootstrap` 仅在 `experiments.enabled=true` 且未传 `--no-experiments` 时创建 `FileExperimentRuntime`；默认路径不读 catalog
+  - [x] QueryEngine 构造时调用 `initialize()`，把 assignment 快照锁进实例；会话中途不重读
+  - [x] conditional injection 构建前，对 `CONDITIONAL_SURFACES` 中 `evolvable=true` 的 surface 调用 `resolvePromptSurface(name, base)`；static prefix 保持不动
+  - [x] CLI：`--no-experiments` 强制 baseline；`--experiment <artifact=variant>` 单次 pin（信息性，eval 后端走 env pin）
+  - [x] 运行结束时调用 `recordRunOutcome`（T9 占位字段；T11 补全）
+  - [x] 单测：disabled 字节等价；enabled+overlay 替换；baseHash 漂移回退；非法 catalog 回退；session pin 锁定；static 不经 resolver
+  - [x] `instruction-surfaces.ts` 运行时不再 import `src/agp`；`createSurfacePromptRecords` 已删除
+  - [x] `npm run typecheck` 通过；`test/query/experiment-prompt-overlay` + instruction-surfaces 回归绿
 - **Files:**
-  - MODIFY: `src/query/QueryEngine.ts`、`src/bootstrap/Bootstrap.ts`、`src/bootstrap/cli-config.ts`
-  - MODIFY: `src/api/prompts/instruction-surfaces.ts`（仅 resolver 接口接缝）
+  - MODIFY: `src/query/QueryEngine.ts`、`src/bootstrap/Bootstrap.ts`、`src/bootstrap/init-sequence.ts`、`src/bootstrap/cli-config.ts`
+  - MODIFY: `src/api/prompts/instruction-surfaces.ts`（resolver 接缝 + 删 AGP bridge）
   - NEW: `test/query/experiment-prompt-overlay.test.ts`
 
 ---

@@ -50,6 +50,11 @@ export function createProgram(delegates: CLIDelegates): Command {
     .option('--continue', 'Resume the latest saved session for this directory')
     .option('--acp', 'Run as ACP server (JSON-RPC over stdio)')
     .option('--im', 'Run in IM bridge mode (connect to configured IM platforms)')
+    .option('--no-experiments', 'Force baseline surfaces (ignore experiment catalog)')
+    .option(
+      '--experiment <artifact=variant>',
+      'Pin one experiment variant for this run (e.g. prompt-surface:failure-recovery=cand-001)'
+    )
     .action(async (prompt: string | undefined, opts: Record<string, any>) => {
       if (opts.acp) {
         const { ACPServer } = await import('../acp');

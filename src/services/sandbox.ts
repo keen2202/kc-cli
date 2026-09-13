@@ -10,11 +10,19 @@ import { SandboxMonitor, type SandboxMetrics, type ResourceLimits } from './sand
 import { ImageManager } from './sandbox-images';
 import { logger } from './logger';
 
+export type SandboxBackendName =
+  | 'auto'
+  | 'bubblewrap'
+  | 'seccomp'
+  | 'docker'
+  | 'windows-sandbox'
+  | 'noop';
+
 export interface SandboxOptions {
   /** Whether sandboxing is enabled. When false, commands pass through unchanged. */
   enabled: boolean;
   /** Which backend to use for isolation. */
-  backend: 'bubblewrap' | 'seccomp' | 'docker' | 'noop';
+  backend: SandboxBackendName;
   /** The workspace directory to bind as writable. */
   workDir: string;
   /** Whether to allow network access. Default: false (isolated). */
@@ -39,13 +47,34 @@ export interface SandboxBackend {
   wrapCommand(command: string, options: SandboxOptions): string;
 }
 
-const DEFAULT_OPTIONS: Omit<SandboxOptions, 'workDir' | 'policy'> = {
+/** Platform-preferred real backend (Windows never requests bubblewrap). */
+export function platformDefaultSandboxBackend(): Exclude<SandboxBackendName, 'auto' | 'noop'> {
+  if (process.platform === 'win32') return 'docker';
+  if (process.platform === 'darwin') return 'docker';
+  return 'bubblewrap';
+}
+
+/**
+ * Resolve failIfNoSandbox when the caller did not set it.
+ * Env `KC_SANDBOX_FAIL_IF_NO_SANDBOX` overrides the production default (true)
+ * so local/test hosts without a real backend can opt into degraded mode.
+ */
+export function resolveFailIfNoSandbox(explicit?: boolean): boolean {
+  if (explicit !== undefined) return explicit;
+  const raw = process.env.KC_SANDBOX_FAIL_IF_NO_SANDBOX;
+  if (raw === undefined || raw === '') return true;
+  return raw === 'true' || raw === '1';
+}
+
+const DEFAULT_OPTIONS: Omit<SandboxOptions, 'workDir' | 'policy' | 'backend' | 'failIfNoSandbox'> & {
+  backend: SandboxBackendName;
+  failIfNoSandbox?: boolean;
+} = {
   enabled: true,
-  backend: 'bubblewrap',
+  backend: platformDefaultSandboxBackend(),
   allowNetwork: false,
   maxMemoryMb: 512,
   cpuTimeLimitSec: 60,
-  failIfNoSandbox: true,
 };
 
 const BACKEND_REGISTRY: Record<string, () => SandboxBackend> = {
@@ -86,7 +115,16 @@ export class SandboxManager {
   private probeResult: ProbeResult | null = null;
 
   constructor(options: Partial<SandboxOptions> & { workDir: string }) {
-    this.options = { ...DEFAULT_OPTIONS, probeOnStart: true, enableMonitor: true, ...options };
+    this.options = {
+      ...DEFAULT_OPTIONS,
+      probeOnStart: true,
+      enableMonitor: true,
+      ...options,
+      failIfNoSandbox: resolveFailIfNoSandbox(options.failIfNoSandbox),
+    };
+    if (this.options.backend === 'auto') {
+      this.options.backend = platformDefaultSandboxBackend();
+    }
     this.probe = new SandboxProbe();
     this.monitor = new SandboxMonitor();
     this.imageManager = new ImageManager();
@@ -124,10 +162,13 @@ export class SandboxManager {
         // already a NoopSandbox; nothing further to do
       } else if (this.options.failIfNoSandbox) {
         // Hard fail instead of silently running commands on the host (S2: AC-S2.2)
+        const winHint =
+          process.platform === 'win32'
+            ? ' On Windows: enable Docker Desktop or the Windows Sandbox feature, or set KC_SANDBOX_FAIL_IF_NO_SANDBOX=false (dev only).'
+            : ' Install bubblewrap (bwrap), seccomp, or docker, or disable failIfNoSandbox.';
         throw new Error(
           `Sandbox is required but no sandbox backend is available. ` +
-            `Requested backend: "${this.options.backend}". ` +
-            'Install bubblewrap (bwrap), seccomp, or docker, or disable failIfNoSandbox.'
+            `Requested backend: "${this.options.backend}".${winHint}`
         );
       } else {
         // Default-deny posture: warn loudly about missing isolation before degrading (S2: AC-S2.1)
@@ -294,7 +335,11 @@ export class SandboxManager {
    */
   private resolveBackend(requested: string): SandboxBackend {
     const fallbackOrder = ['bubblewrap', 'seccomp', 'docker', 'windows-sandbox', 'noop'];
-    const startIndex = fallbackOrder.indexOf(requested);
+    const effective =
+      requested === 'auto' || !fallbackOrder.includes(requested)
+        ? platformDefaultSandboxBackend()
+        : requested;
+    const startIndex = fallbackOrder.indexOf(effective);
 
     // Start from the requested backend and fall back
     for (let i = startIndex >= 0 ? startIndex : 0; i < fallbackOrder.length; i++) {
@@ -304,7 +349,7 @@ export class SandboxManager {
       if (backend.isAvailable()) {
         if (i !== startIndex && startIndex >= 0) {
           logger.services.warn(
-            `[sandbox] Requested backend "${requested}" is not available, ` +
+            `[sandbox] Requested backend "${effective}" is not available, ` +
               `falling back to "${backend.name}"`
           );
         }

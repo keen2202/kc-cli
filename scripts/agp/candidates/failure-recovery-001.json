@@ -1,0 +1,17 @@
+{
+  "format": "kc.agp.candidate.v1",
+  "variantId": "failure-recovery-001",
+  "artifactId": "prompt-surface:failure-recovery",
+  "parentVariantId": null,
+  "audit": {
+    "targetFailurePattern": "Repeated identical tool retries after a terminal error (missing file, bad path, missing dependency) without changing approach.",
+    "editedSurface": "prompt-surface:failure-recovery (conditional injection; last tool result had an error)",
+    "expectedEffect": "Raise verifiedTaskRate by forcing a diagnosis-before-retry step and naming the four common terminal causes; lower noPatchRate on tasks that previously looped on the same failing call.",
+    "regressionRisk": "Longer failure-recovery text may slightly increase first-recovery turn count on tasks that fail once for a non-diagnosable reason; risk of over-caution if the agent pauses on transient errors."
+  },
+  "payload": "## Failure Recovery\nThe previous tool call failed. Before retrying:\n1. Read the full error output and name the terminal cause in one sentence (missing file, wrong path/args, permission, missing dependency, or environment). If you cannot name it, inspect the filesystem or project config once — do not guess.\n2. Do NOT repeat the same command with the same arguments. Change the approach: fix the precondition, adjust arguments, or pick a different tool.\n3. If an expected file or artifact is missing, create or restore it directly instead of searching further.\n4. If a dependency or toolchain is missing, verify it exists (version, PATH, lockfile) before invoking it again.\n5. After a successful recovery, continue the original goal — do not restate this recovery plan.",
+  "provenance": {
+    "source": "manual",
+    "createdAt": 1757769600000
+  }
+}

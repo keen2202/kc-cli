@@ -1,6 +1,6 @@
 // Tests for instruction surfaces (harness-evolution T1 / H1)
 // Guards: (1) byte-equivalence of the static manifest vs the legacy inline
-// composition, (2) conditional surface predicates, (3) AGP registration.
+// composition, (2) conditional surface predicates, (3) optional experiment resolver.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -9,7 +9,6 @@ import {
   formatToolList,
   computeSurfaceRuntime,
   buildConditionalInjection,
-  createSurfacePromptRecords,
   BOOTSTRAP_FIRST_TURN_SURFACE,
   FAILURE_RECOVERY_SURFACE,
   CONDITIONAL_SURFACES,
@@ -225,25 +224,14 @@ describe('instruction surfaces (T1)', () => {
       const text = buildConditionalInjection({ isFirstTurn: false, lastToolResultHadError: false });
       expect(text).toBe('');
     });
-  });
 
-  describe('AGP registration bridge', () => {
-    it('creates Prompt records for evolvable conditional surfaces', () => {
-      const records = createSurfacePromptRecords();
-      const evolvableCount = CONDITIONAL_SURFACES.filter(s => s.evolvable).length;
-      expect(records).toHaveLength(evolvableCount);
-      for (const record of records) {
-        expect(record.entity.name).toMatch(/^instruction-surface-/);
-        expect(record.entity.evolvability).toBe(1);
-        expect(record.version).toBeTruthy();
-      }
-    });
-
-    it('skips non-evolvable surfaces', () => {
-      const records = createSurfacePromptRecords([
-        { ...BOOTSTRAP_FIRST_TURN_SURFACE, evolvable: false },
-      ]);
-      expect(records).toHaveLength(0);
+    it('applies optional resolveSurface to evolvable surfaces only', () => {
+      const text = buildConditionalInjection(
+        { isFirstTurn: false, lastToolResultHadError: true },
+        CONDITIONAL_SURFACES,
+        (name, base) => (name === 'failure-recovery' ? 'RESOLVED' : base)
+      );
+      expect(text).toBe('RESOLVED');
     });
   });
 });
